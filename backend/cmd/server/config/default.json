@@ -146,12 +146,7 @@
     }
   },
   "user": {
-    "indexed_attributes": [
-      "username",
-      "email",
-      "mobileNumber",
-      "sub"
-    ],
+    "indexed_attributes": ["username", "email", "mobileNumber", "sub"],
     "store": "composite"
   },
   "group": {
@@ -166,9 +161,7 @@
       "console": {
         "enabled": false,
         "format": "json",
-        "categories": [
-          "observability.all"
-        ]
+        "categories": ["observability.all"]
       }
     }
   },
@@ -281,5 +274,17 @@
         ]
       }
     ]
+  },
+
+  "scim": {
+    "patch_supported": false,
+    "bulk_supported": false,
+    "bulk_max_operations": 0,
+    "bulk_max_payload_size": 0,
+    "filter_supported": false,
+    "filter_max_results": 0,
+    "change_password_supported": false,
+    "sort_supported": false,
+    "etag_supported": false
   }
 }

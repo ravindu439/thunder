@@ -701,6 +701,22 @@ type TrustedIssuerConfig struct {
 	RequiredClaims []RequiredClaim `yaml:"required_claims" json:"required_claims"`
 }
 
+// SCIMConfig holds configuration for the SCIM 2.0 service provider.
+// Each flag controls what the server advertises in the ServiceProviderConfig
+// response. Set a flag to true only when the corresponding endpoint is
+// implemented — SCIM clients use these values to decide what operations to attempt.
+type SCIMConfig struct {
+	PatchSupported          bool `yaml:"patch_supported" json:"patch_supported"`
+	BulkSupported           bool `yaml:"bulk_supported" json:"bulk_supported"`
+	BulkMaxOperations       int  `yaml:"bulk_max_operations" json:"bulk_max_operations"`
+	BulkMaxPayloadSize      int  `yaml:"bulk_max_payload_size" json:"bulk_max_payload_size"`
+	FilterSupported         bool `yaml:"filter_supported" json:"filter_supported"`
+	FilterMaxResults        int  `yaml:"filter_max_results" json:"filter_max_results"`
+	ChangePasswordSupported bool `yaml:"change_password_supported" json:"change_password_supported"`
+	SortSupported           bool `yaml:"sort_supported" json:"sort_supported"`
+	ETagSupported           bool `yaml:"etag_supported" json:"etag_supported"`
+}
+
 // IsConfigured reports whether the trusted issuer feature is configured and active.
 // Setting issuer is the activation signal; jwks_url and audience are then required.
 func (c *TrustedIssuerConfig) IsConfigured() bool {
@@ -816,6 +832,7 @@ type Config struct {
 	Email                EmailConfig            `yaml:"email" json:"email"`
 	Notification         NotificationConfig     `yaml:"notification" json:"notification"`
 	Consent              ConsentConfig          `yaml:"consent" json:"consent"`
+	SCIM                 SCIMConfig             `yaml:"scim" json:"scim"`
 }
 
 // LoadConfig loads the configurations from the specified YAML file and applies defaults.
