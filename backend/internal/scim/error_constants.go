@@ -19,6 +19,9 @@
 package scim
 
 import (
+	"fmt"
+	"strings"
+
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
 
@@ -410,4 +413,35 @@ var (
 			DefaultValue: "The If-Match header does not match the current version of the resource",
 		},
 	}
+
+	// ErrorMissingCoreGroupSchema is returned when the schemas array does not
+	// include the SCIM Core Group schema URN.
+	ErrorMissingCoreGroupSchema = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1028",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.missing_core_group_schema",
+			DefaultValue: "Missing SCIM core Group schema",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.missing_core_group_schema_description",
+			DefaultValue: "The schemas array must include the SCIM Core Group schema URN",
+		},
+	}
 )
+
+// newMissingRequiredAttributesError builds a SCIM-1018 (schema validation failed)
+// error whose detail names the specific attribute(s) that the target user type
+// requires but the request did not supply, whether via core fields or the custom
+// extension object. Gives clients an actionable 400 instead of a generic failure.
+func newMissingRequiredAttributesError(userTypeName string, missing []string) *tidcommon.ServiceError {
+	svcErr := ErrorSchemaValidationFailed
+	svcErr.ErrorDescription = tidcommon.I18nMessage{
+		Key: ErrorSchemaValidationFailed.ErrorDescription.Key,
+		DefaultValue: fmt.Sprintf(
+			"User type %q requires the following attribute(s), which were not provided: %s",
+			userTypeName, strings.Join(missing, ", "),
+		),
+	}
+	return &svcErr
+}

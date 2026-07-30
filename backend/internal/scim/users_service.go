@@ -125,6 +125,11 @@ func (s *scimUsersService) CreateUser(
 			}
 		}
 	}
+	if missing := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, false); len(missing) > 0 {
+		logger.Debug(ctx, "SCIM CreateUser: missing required attributes for user type",
+			log.String("userType", canonicalName), log.Any("missing", missing))
+		return nil, newMissingRequiredAttributesError(canonicalName, missing)
+	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {
 		logger.Error(ctx, "SCIM CreateUser: failed to marshal extension attrs", log.Error(err))
@@ -194,6 +199,11 @@ func (s *scimUsersService) ReplaceUser(
 				payload.ExtensionAttrs[k] = v
 			}
 		}
+	}
+	if missing := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, true); len(missing) > 0 {
+		logger.Debug(ctx, "SCIM ReplaceUser: missing required attributes for user type",
+			log.String("userType", canonicalName), log.Any("missing", missing))
+		return nil, newMissingRequiredAttributesError(canonicalName, missing)
 	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {

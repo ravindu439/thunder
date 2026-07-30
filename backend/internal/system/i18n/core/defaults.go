@@ -1032,6 +1032,8 @@ var defaultMessages = map[string]string{
 	"error.scim.invalid_patch_value_description": "The PATCH operation value is missing or malformed for the given op/path",
 	"error.scim.invalid_request_body": "Invalid request body",
 	"error.scim.invalid_request_body_description": "The request body is not valid JSON or does not conform to the SCIM schema.",
+	"error.scim.missing_core_group_schema": "Missing SCIM core Group schema",
+	"error.scim.missing_core_group_schema_description": "The schemas array must include the SCIM Core Group schema URN",
 	"error.scim.missing_core_user_schema": "Missing SCIM core User schema",
 	"error.scim.missing_core_user_schema_description": "The schemas array must include the SCIM Core User schema URN",
 	"error.scim.missing_custom_schema": "Missing custom schema",
