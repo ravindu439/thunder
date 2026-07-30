@@ -21,6 +21,7 @@ package scim
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
@@ -57,7 +58,6 @@ func mapEntityTypeToSCIMSchema(et entitytype.EntityType, baseURL string) (SCIMSc
 		Meta: SCIMMeta{
 			ResourceType: "Schema",
 			Location:     location,
-			Version:      computeSchemaVersion(et),
 		},
 	}, nil
 }
@@ -132,6 +132,10 @@ func mapRawPropertyToSCIMAttribute(name string, def rawPropertyDef) SCIMSchemaAt
 			if len(itemAttr.CanonicalValues) > 0 {
 				attr.CanonicalValues = itemAttr.CanonicalValues
 			}
+			if itemAttr.Returned == scimReturnedNever {
+				attr.Returned = scimReturnedNever
+				attr.Mutability = scimMutabilityWriteOnly
+			}
 		} else {
 			// Array without an items definition — default to string per RFC 7643 §2.3.
 			attr.Type = scimAttrTypeString
@@ -181,7 +185,7 @@ func coreUserAttributes() []SCIMSchemaAttribute {
 			Type: scimAttrTypeString,
 			Description: "Unique identifier for the User, typically used by the user to directly " +
 				"authenticate to the service provider.",
-			Required:   false,
+			Required:   true,
 			CaseExact:  false,
 			Mutability: scimMutabilityReadWrite,
 			Returned:   scimReturnedDefault,
@@ -572,7 +576,7 @@ func coreGroupAttributes() []SCIMSchemaAttribute {
 			Name:        "displayName",
 			Type:        scimAttrTypeString,
 			Description: "A human-readable name for the Group.",
-			Required:    false,
+			Required:    true,
 			Mutability:  scimMutabilityReadWrite,
 			Returned:    scimReturnedDefault,
 			Uniqueness:  scimUniquenessNone,
@@ -641,6 +645,35 @@ type rawPropertyDef struct {
 	Items       *rawPropertyDef           `json:"items"`      // for type=array
 }
 
+// missingRequiredAttrs returns the names of entity-type schema properties marked
+// "required" that are absent from attrs, after core-attribute reverse-mapping has
+// already been merged in. This lets CreateUser/ReplaceUser reject a request with a
+// clear, per-user-type message instead of a generic schema-validation failure.
+// When skipCredential is true, required credential properties are not reported
+// missing (mirrors entitytype.Schema.Validate's skipCredentialRequired behavior
+// used on update, where credentials are not expected to be resent).
+func missingRequiredAttrs(attrs map[string]json.RawMessage, schema json.RawMessage, skipCredential bool) []string {
+	var rawProps map[string]rawPropertyDef
+	if err := json.Unmarshal(schema, &rawProps); err != nil {
+		return nil
+	}
+
+	var missing []string
+	for name, def := range rawProps {
+		if !def.Required {
+			continue
+		}
+		if skipCredential && def.Credential {
+			continue
+		}
+		if _, ok := attrs[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
 // buildSchemaURN returns the canonical lowercase SCIM extension URN for a ThunderID user type.
 // Format: urn:thunderid:params:scim:schemas:<userTypeName>:2.0:User
 func buildSchemaURN(userTypeName string) string {
@@ -693,19 +726,4 @@ func rawEnumToStrings(raw []json.RawMessage) []string {
 		out = append(out, strings.TrimSpace(string(item)))
 	}
 	return out
-}
-
-// computeSchemaVersion produces a stable weak ETag for a dynamic SCIM extension
-// schema derived from a ThunderID EntityType. The hash covers the schema content
-// and the entity type name (which determines the URN), so any attribute change or
-// rename produces a new ETag. Format follows RFC 7232 weak validator convention.
-func computeSchemaVersion(et entitytype.EntityType) string {
-	state := struct {
-		Name   string
-		Schema json.RawMessage
-	}{
-		Name:   et.Name,
-		Schema: et.Schema,
-	}
-	return generateVersion(state)
 }

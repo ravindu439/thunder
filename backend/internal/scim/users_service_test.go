@@ -285,6 +285,35 @@ func TestCreateUser_Success(t *testing.T) {
 	require.Contains(t, scimUser.Schemas, "urn:thunderid:params:scim:schemas:employee:2.0:User")
 }
 
+func TestCreateUser_MissingRequiredAttribute_ReturnsSchemaValidationError(t *testing.T) {
+	mockUserService := usermock.NewUserServiceInterfaceMock(t)
+	mockEntityService := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
+	service := newSCIMUsersService(mockUserService, mockEntityService)
+
+	payload := &SCIMUserPayload{
+		UserTypeName:   "employee",
+		ExtensionURN:   "urn:thunderid:params:scim:schemas:employee:2.0:User",
+		ExtensionAttrs: map[string]json.RawMessage{"given_name": json.RawMessage(`"Alice"`)},
+	}
+
+	mockEntityService.On(
+		"GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, 100, 0, false,
+	).Return(makeEntityTypeListPage(), (*tidcommon.ServiceError)(nil))
+	mockEntityService.On(
+		"GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "employee",
+	).Return(&entitytype.EntityType{
+		Name: "employee", OUID: "ou-abc",
+		Schema: json.RawMessage(`{"department":{"required":true}}`),
+	}, (*tidcommon.ServiceError)(nil))
+
+	scimUser, err := service.CreateUser(context.Background(), payload, testBaseURL)
+
+	require.NotNil(t, err)
+	require.Equal(t, ErrorSchemaValidationFailed.Code, err.Code)
+	require.Contains(t, err.ErrorDescription.DefaultValue, "department")
+	require.Nil(t, scimUser)
+}
+
 func TestCreateUser_EntityTypeNotFound_ReturnsUnknownUserType(t *testing.T) {
 	mockUserService := usermock.NewUserServiceInterfaceMock(t)
 	mockEntityService := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
@@ -442,6 +471,37 @@ func TestReplaceUser_Success(t *testing.T) {
 	require.NotNil(t, scimUser)
 	require.Equal(t, "user-123", scimUser.ID)
 	require.Contains(t, scimUser.Schemas, "urn:thunderid:params:scim:schemas:employee:2.0:User")
+}
+
+func TestReplaceUser_MissingRequiredAttribute_ReturnsSchemaValidationError(t *testing.T) {
+	mockUserService := usermock.NewUserServiceInterfaceMock(t)
+	mockEntityService := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
+	service := newSCIMUsersService(mockUserService, mockEntityService)
+
+	payload := &SCIMUserPayload{
+		UserTypeName:   "employee",
+		ExtensionURN:   "urn:thunderid:params:scim:schemas:employee:2.0:User",
+		ExtensionAttrs: map[string]json.RawMessage{"given_name": json.RawMessage(`"Charlie"`)},
+	}
+
+	mockEntityService.On(
+		"GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, 100, 0, false,
+	).Return(makeEntityTypeListPage(), (*tidcommon.ServiceError)(nil))
+	mockEntityService.On(
+		"GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "employee",
+	).Return(&entitytype.EntityType{
+		Name: "employee", OUID: "ou-abc",
+		Schema: json.RawMessage(`{"department":{"required":true}}`),
+	}, (*tidcommon.ServiceError)(nil))
+	mockUserService.On("GetUser", mock.Anything, "user-123", false).
+		Return(&user.User{ID: "user-123", Type: "employee"}, (*tidcommon.ServiceError)(nil))
+
+	scimUser, err := service.ReplaceUser(context.Background(), "user-123", payload, "", testBaseURL)
+
+	require.NotNil(t, err)
+	require.Equal(t, ErrorSchemaValidationFailed.Code, err.Code)
+	require.Contains(t, err.ErrorDescription.DefaultValue, "department")
+	require.Nil(t, scimUser)
 }
 
 func TestReplaceUser_EntityTypeNotFound_ReturnsUnknownUserType(t *testing.T) {
