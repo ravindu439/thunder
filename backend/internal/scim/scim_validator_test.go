@@ -65,9 +65,11 @@ func TestValidateSCIMUserRequest(t *testing.T) {
 			wantErrCode: ErrorInvalidCustomSchemaURN.Code,
 		},
 		{
-			name:        "MissingExtensionObject",
-			body:        []byte(`{"schemas":["` + validURN + `"]}`),
-			wantErrCode: ErrorMissingCustomSchemaObject.Code,
+			name:         "OmittedExtensionObject_DefaultsToEmpty",
+			body:         []byte(`{"schemas":["` + SCIMCoreUserSchemaURN + `","` + validURN + `"],"userName":"alice"}`),
+			wantErrCode:  "",
+			wantUserType: "employee",
+			wantExtURN:   validURN,
 		},
 		{
 			name:        "InvalidExtensionObjectJSON",
@@ -77,13 +79,25 @@ func TestValidateSCIMUserRequest(t *testing.T) {
 		{
 			name: "ValidPayload",
 			body: []byte(`{
-				"schemas":["` + validURN + `"],
+				"schemas":["` + SCIMCoreUserSchemaURN + `","` + validURN + `"],
 				"` + validURN + `":{"department":"engineering"},
 				"userName":"alice"
 			}`),
 			wantErrCode:  "",
 			wantUserType: "employee",
 			wantExtURN:   validURN,
+		},
+		{
+			name:         "ValidPayload_ExtensionOnly_NoCoreAttrs_CoreSchemaOmitted",
+			body:         []byte(`{"schemas":["` + validURN + `"],"` + validURN + `":{"given_name":"alice"}}`),
+			wantErrCode:  "",
+			wantUserType: "employee",
+			wantExtURN:   validURN,
+		},
+		{
+			name:        "CoreAttrsPresent_CoreUserSchemaMissing",
+			body:        []byte(`{"schemas":["` + validURN + `"],"` + validURN + `":{}, "userName":"alice"}`),
+			wantErrCode: ErrorMissingCoreUserSchema.Code,
 		},
 	}
 

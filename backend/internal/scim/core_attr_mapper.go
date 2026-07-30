@@ -41,7 +41,12 @@ const (
 	scimFieldProfileURL    scimCoreField = "profileUrl"
 )
 
-const scimValueKey = "value"
+const (
+	scimValueKey     = "value"
+	scimTypeKey      = "type"
+	scimPrimaryKey   = "primary"
+	scimFormattedKey = "formatted"
+)
 
 type attrKind string
 
@@ -58,7 +63,6 @@ type coreAttrRule struct {
 	kind        attrKind
 	parentField scimCoreField // only for kindSubAttr; top-level complex object this rolls into, e.g. "name"
 	subAttr     string        // only for kindSubAttr/kindAddrPart; key within the parent/addresses object
-	defaultType string        // only for kindMultiComplex; e.g. "work"
 	valueKey    string        // e.g. "value" (default)
 }
 
@@ -70,11 +74,10 @@ var coreAttrRules = []coreAttrRule{
 		kind:      kindSimpleString,
 	},
 	{
-		candidate:   "email",
-		scimField:   scimFieldEmails,
-		kind:        kindMultiComplex,
-		defaultType: "work",
-		valueKey:    scimValueKey,
+		candidate: "email",
+		scimField: scimFieldEmails,
+		kind:      kindMultiComplex,
+		valueKey:  scimValueKey,
 	},
 	{
 		candidate:   "given_name",
@@ -89,11 +92,10 @@ var coreAttrRules = []coreAttrRule{
 		subAttr:     "familyName",
 	},
 	{
-		candidate:   "phone_number",
-		scimField:   scimFieldPhoneNumbers,
-		kind:        kindMultiComplex,
-		defaultType: "work",
-		valueKey:    scimValueKey,
+		candidate: "phone_number",
+		scimField: scimFieldPhoneNumbers,
+		kind:      kindMultiComplex,
+		valueKey:  scimValueKey,
 	},
 	{
 		candidate: "display_name",
@@ -118,11 +120,10 @@ var coreAttrRules = []coreAttrRule{
 		kind:      kindSimpleString,
 	},
 	{
-		candidate:   "picture",
-		scimField:   scimFieldPhotos,
-		kind:        kindMultiComplex,
-		defaultType: "photo",
-		valueKey:    scimValueKey,
+		candidate: "picture",
+		scimField: scimFieldPhotos,
+		kind:      kindMultiComplex,
+		valueKey:  scimValueKey,
 	},
 	{
 		candidate: "locale",
@@ -148,6 +149,12 @@ var coreAttrRules = []coreAttrRule{
 		candidate: "title",
 		scimField: scimFieldTitle,
 		kind:      kindSimpleString,
+	},
+	{
+		candidate: "address",
+		scimField: scimFieldAddresses,
+		kind:      kindMultiComplex,
+		valueKey:  scimFormattedKey,
 	},
 	{
 		candidate: "street_address",
@@ -219,7 +226,7 @@ func translateSCIMFilterAttr(attr string) string {
 // scimUnsupportedMultiComplexSubAttrs: sub-attrs ThunderID never stores as a flat
 // field, regardless of scalar/array schema. "value" excluded — wrong only for
 // array schemas, undetectable at filter-parse time.
-var scimUnsupportedMultiComplexSubAttrs = []string{"type", "primary"}
+var scimUnsupportedMultiComplexSubAttrs = []string{scimTypeKey, scimPrimaryKey}
 
 // scimUnsupportedFilterAttrs: filter paths on multi-valued core attrs (emails,
 // phoneNumbers, photos) with no flat equivalent to compare against, e.g.
@@ -247,6 +254,86 @@ func isUnsupportedSCIMFilterAttr(attr string) bool {
 	return ok
 }
 
+// isCanonicalAddrSubAttr reports whether key is a canonical sub-attribute for
+// the SCIM addresses field, derived dynamically from coreAttrRules kindAddrPart rules.
+func isCanonicalAddrSubAttr(key string) bool {
+	lk := strings.ToLower(key)
+	if lk == scimTypeKey || lk == scimPrimaryKey || lk == scimFormattedKey {
+		return true
+	}
+	for _, rule := range coreAttrRules {
+		isAddrRuleMatch := rule.kind == kindAddrPart &&
+			(strings.EqualFold(rule.subAttr, key) || strings.EqualFold(rule.candidate, key))
+		if isAddrRuleMatch {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAndTranslateAddrOutbound(arr []map[string]interface{}) []map[string]interface{} {
+	if len(arr) == 0 {
+		return nil
+	}
+	var out []map[string]interface{}
+	for _, obj := range arr {
+		newObj := make(map[string]interface{})
+		for k, v := range obj {
+			if !isCanonicalAddrSubAttr(k) {
+				continue
+			}
+			newObj[k] = v
+		}
+		for _, rule := range coreAttrRules {
+			if rule.kind == kindAddrPart {
+				if v, ok := newObj[rule.candidate]; ok {
+					newObj[rule.subAttr] = v
+					if rule.candidate != rule.subAttr {
+						delete(newObj, rule.candidate)
+					}
+				}
+			}
+		}
+		nonMetaCount := 0
+		for k := range newObj {
+			if k != scimTypeKey && k != scimPrimaryKey {
+				nonMetaCount++
+			}
+		}
+		if nonMetaCount > 0 {
+			out = append(out, newObj)
+		}
+	}
+	return out
+}
+
+func translateAddrInboundForSchema(obj map[string]interface{}, propDef rawPropertyDef) map[string]interface{} {
+	targetProps := propDef.Properties
+	if targetProps == nil && propDef.Items != nil {
+		targetProps = propDef.Items.Properties
+	}
+	out := make(map[string]interface{})
+	for k, v := range obj {
+		out[k] = v
+	}
+	for _, rule := range coreAttrRules {
+		if rule.kind == kindAddrPart {
+			if scimVal, ok := out[rule.subAttr]; ok {
+				for targetProp := range targetProps {
+					if strings.EqualFold(targetProp, rule.candidate) {
+						out[targetProp] = scimVal
+						if targetProp != rule.subAttr {
+							delete(out, rule.subAttr)
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
 func mapToCoreAttrs(rawAttrs json.RawMessage) map[string]json.RawMessage {
 	if len(rawAttrs) == 0 {
 		return nil
@@ -270,7 +357,10 @@ func mapToCoreAttrs(rawAttrs json.RawMessage) map[string]json.RawMessage {
 				result[string(rule.scimField)] = b
 			}
 		case kindMultiComplex:
-			arr := normalizeToMultiComplex(val, rule.defaultType, rule.valueKey)
+			arr := normalizeToMultiComplex(val, rule.valueKey)
+			if rule.scimField == scimFieldAddresses {
+				arr = normalizeAndTranslateAddrOutbound(arr)
+			}
 			if len(arr) > 0 {
 				b, _ := json.Marshal(arr)
 				result[string(rule.scimField)] = b
@@ -295,7 +385,6 @@ func mapToCoreAttrs(rawAttrs json.RawMessage) map[string]json.RawMessage {
 		result[string(parent)] = b
 	}
 	if len(addrParts) > 0 {
-		addrParts["type"], _ = json.Marshal("work")
 		addrParts["primary"], _ = json.Marshal(true)
 		b, _ := json.Marshal([]map[string]json.RawMessage{addrParts})
 		result[string(scimFieldAddresses)] = b
@@ -390,9 +479,14 @@ func reverseMapSimpleString(coreVal json.RawMessage) (json.RawMessage, bool) {
 
 func reverseMapMultiComplex(rule coreAttrRule, coreVal json.RawMessage, propDef rawPropertyDef,
 ) (json.RawMessage, bool) {
-	normalized := normalizeToMultiComplex(coreVal, rule.defaultType, rule.valueKey)
+	normalized := normalizeToMultiComplex(coreVal, rule.valueKey)
 	if len(normalized) == 0 {
 		return nil, false
+	}
+	if rule.scimField == scimFieldAddresses {
+		for i, obj := range normalized {
+			normalized[i] = translateAddrInboundForSchema(obj, propDef)
+		}
 	}
 	propType := strings.ToLower(propDef.Type)
 	switch {
@@ -502,7 +596,7 @@ func extractStringValue(raw json.RawMessage, targetKey string) string {
 	return ""
 }
 
-func normalizeToMultiComplex(raw json.RawMessage, defaultType string, valueKey string) []map[string]interface{} {
+func normalizeToMultiComplex(raw json.RawMessage, valueKey string) []map[string]interface{} {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -513,7 +607,7 @@ func normalizeToMultiComplex(raw json.RawMessage, defaultType string, valueKey s
 	// Case 1: Plain string -> wrap in array
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return []map[string]interface{}{{valueKey: s, "type": defaultType, "primary": true}}
+		return []map[string]interface{}{{valueKey: s, "primary": true}}
 	}
 
 	// Case 2: Array of strings
@@ -521,7 +615,7 @@ func normalizeToMultiComplex(raw json.RawMessage, defaultType string, valueKey s
 	if err := json.Unmarshal(raw, &strArr); err == nil {
 		var out []map[string]interface{}
 		for i, val := range strArr {
-			out = append(out, map[string]interface{}{valueKey: val, "type": defaultType, "primary": i == 0})
+			out = append(out, map[string]interface{}{valueKey: val, "primary": i == 0})
 		}
 		return out
 	}
@@ -529,58 +623,79 @@ func normalizeToMultiComplex(raw json.RawMessage, defaultType string, valueKey s
 	// Case 3: Array of objects
 	var objArr []map[string]interface{}
 	if err := json.Unmarshal(raw, &objArr); err == nil {
-		var out []map[string]interface{}
-		for _, obj := range objArr {
-			valStr, _ := obj[valueKey].(string)
-			if valStr == "" && valueKey != scimValueKey {
-				valStr, _ = obj[scimValueKey].(string)
-			}
-			if valStr == "" {
-				continue
-			}
-
-			newObj := make(map[string]interface{})
-			for k, v := range obj {
-				newObj[k] = v
-			}
-			newObj[valueKey] = valStr
-
-			typStr, _ := obj["type"].(string)
-			if typStr == "" {
-				newObj["type"] = defaultType
-			}
-			out = append(out, newObj)
-		}
-		if len(out) > 0 && !hasPrimary(out) {
-			out[0]["primary"] = true
-		}
-		return out
+		return normalizeMultiComplexObjectArray(objArr, valueKey)
 	}
 
 	// Case 4: Single object -> wrap in array
 	var singleObj map[string]interface{}
 	if err := json.Unmarshal(raw, &singleObj); err == nil {
-		valStr, _ := singleObj[valueKey].(string)
-		if valStr == "" && valueKey != scimValueKey {
-			valStr, _ = singleObj[scimValueKey].(string)
-		}
-		if valStr == "" {
-			return nil
-		}
-		newObj := make(map[string]interface{})
-		for k, v := range singleObj {
-			newObj[k] = v
-		}
-		newObj[valueKey] = valStr
-
-		typStr, _ := singleObj["type"].(string)
-		if typStr == "" {
-			newObj["type"] = defaultType
-		}
-		newObj["primary"] = true
-		return []map[string]interface{}{newObj}
+		return normalizeMultiComplexSingleObject(singleObj, valueKey)
 	}
 	return nil
+}
+
+// multiComplexValue extracts the value (falling back to the default "value" key) and
+// non-meta-attribute count (keys other than type/primary) shared by a multi-valued
+// complex object's normalization, whether it came from an array entry or a lone object.
+func multiComplexValue(obj map[string]interface{}, valueKey string) (valStr string, nonMetaCount int) {
+	valStr, _ = obj[valueKey].(string)
+	if valStr == "" && valueKey != scimValueKey {
+		valStr, _ = obj[scimValueKey].(string)
+	}
+	for k := range obj {
+		if k != scimTypeKey && k != scimPrimaryKey {
+			nonMetaCount++
+		}
+	}
+	return valStr, nonMetaCount
+}
+
+// normalizeMultiComplexEntry copies obj, fills in valueKey when valStr is present, and
+// drops an empty "type" rather than fabricating one.
+func normalizeMultiComplexEntry(obj map[string]interface{}, valueKey, valStr string) map[string]interface{} {
+	newObj := make(map[string]interface{})
+	for k, v := range obj {
+		newObj[k] = v
+	}
+	if valStr != "" {
+		newObj[valueKey] = valStr
+	}
+	if typStr, _ := obj[scimTypeKey].(string); typStr == "" {
+		delete(newObj, scimTypeKey)
+	}
+	return newObj
+}
+
+func normalizeMultiComplexObjectArray(objArr []map[string]interface{}, valueKey string) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(objArr))
+	for _, obj := range objArr {
+		if len(obj) == 0 {
+			continue
+		}
+		valStr, nonMetaCount := multiComplexValue(obj, valueKey)
+		if valStr == "" && nonMetaCount == 0 {
+			// Object only has a "type" or "primary" field with no content keys — skip it.
+			continue
+		}
+		out = append(out, normalizeMultiComplexEntry(obj, valueKey, valStr))
+	}
+	if len(out) > 0 && !hasPrimary(out) {
+		out[0]["primary"] = true
+	}
+	return out
+}
+
+func normalizeMultiComplexSingleObject(singleObj map[string]interface{}, valueKey string) []map[string]interface{} {
+	if len(singleObj) == 0 {
+		return nil
+	}
+	valStr, nonMetaCount := multiComplexValue(singleObj, valueKey)
+	if valStr == "" && nonMetaCount == 0 {
+		return nil
+	}
+	newObj := normalizeMultiComplexEntry(singleObj, valueKey, valStr)
+	newObj["primary"] = true
+	return []map[string]interface{}{newObj}
 }
 
 func hasPrimary(arr []map[string]interface{}) bool {

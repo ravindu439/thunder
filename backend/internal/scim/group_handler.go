@@ -75,7 +75,7 @@ func (h *scimGroupsHandler) HandleGroupsCreateRequest(w http.ResponseWriter, r *
 		}
 	}
 	if !hasGroupSchema {
-		h.handleSCIMError(w, r, &ErrorMissingSchemas)
+		h.handleSCIMError(w, r, &ErrorMissingCoreGroupSchema)
 		return
 	}
 	created, svcErr := h.svc.CreateGroup(ctx, payload.DisplayName, payload.Members, h.baseURL)
@@ -121,11 +121,23 @@ func (h *scimGroupsHandler) HandleGroupsReplaceRequest(w http.ResponseWriter, r 
 		return
 	}
 	var payload struct {
+		Schemas     []string          `json:"schemas"`
 		DisplayName string            `json:"displayName"`
 		Members     []SCIMGroupMember `json:"members"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil || payload.DisplayName == "" {
 		h.handleSCIMError(w, r, &ErrorInvalidRequestBody)
+		return
+	}
+	hasGroupSchema := false
+	for _, s := range payload.Schemas {
+		if strings.EqualFold(s, SCIMCoreGroupSchemaURN) {
+			hasGroupSchema = true
+			break
+		}
+	}
+	if !hasGroupSchema {
+		h.handleSCIMError(w, r, &ErrorMissingCoreGroupSchema)
 		return
 	}
 	replaced, svcErr := h.svc.ReplaceGroup(ctx, groupID, payload.DisplayName, payload.Members,

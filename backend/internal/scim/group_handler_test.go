@@ -157,7 +157,7 @@ func TestHandleGroupsReplaceRequest_Success(t *testing.T) {
 
 	h := newSCIMGroupsHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Groups/group-1",
-		bytes.NewBufferString(`{"displayName":"Renamed","members":[]}`))
+		bytes.NewBufferString(`{"schemas":["`+SCIMCoreGroupSchemaURN+`"],"displayName":"Renamed","members":[]}`))
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	req.SetPathValue("id", "group-1")
 	rr := httptest.NewRecorder()
@@ -239,7 +239,7 @@ func TestHandleGroupsReplaceRequest_ForwardsIfMatchHeader(t *testing.T) {
 
 	h := newSCIMGroupsHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Groups/group-1",
-		bytes.NewBufferString(`{"displayName":"Renamed","members":[]}`))
+		bytes.NewBufferString(`{"schemas":["`+SCIMCoreGroupSchemaURN+`"],"displayName":"Renamed","members":[]}`))
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	req.Header.Set("If-Match", `W/"v1"`)
 	req.SetPathValue("id", "group-1")
@@ -257,7 +257,7 @@ func TestHandleGroupsReplaceRequest_PreconditionFailed(t *testing.T) {
 
 	h := newSCIMGroupsHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Groups/group-1",
-		bytes.NewBufferString(`{"displayName":"Renamed","members":[]}`))
+		bytes.NewBufferString(`{"schemas":["`+SCIMCoreGroupSchemaURN+`"],"displayName":"Renamed","members":[]}`))
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	req.Header.Set("If-Match", `W/"stale"`)
 	req.SetPathValue("id", "group-1")
@@ -410,6 +410,18 @@ func TestHandleGroupsReplaceRequest_ErrorScenarios(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rr.Code)
 	})
 
+	t.Run("MissingCoreSchema", func(t *testing.T) {
+		h := newSCIMGroupsHandler(nil, testBaseURL)
+		req := httptest.NewRequest(http.MethodPut, "/scim/v2/Groups/group-1",
+			bytes.NewBufferString(`{"displayName":"Renamed","members":[]}`))
+		req.Header.Set("Content-Type", constants.SCIMContentType)
+		req.SetPathValue("id", "group-1")
+		rr := httptest.NewRecorder()
+
+		h.HandleGroupsReplaceRequest(rr, req)
+		require.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
 	t.Run("ServiceError", func(t *testing.T) {
 		mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
 		mockSvc.On("ReplaceGroup", mock.Anything, "group-1", "Renamed", mock.Anything, "", testBaseURL).
@@ -417,7 +429,7 @@ func TestHandleGroupsReplaceRequest_ErrorScenarios(t *testing.T) {
 
 		h := newSCIMGroupsHandler(mockSvc, testBaseURL)
 		req := httptest.NewRequest(http.MethodPut, "/scim/v2/Groups/group-1",
-			bytes.NewBufferString(`{"displayName":"Renamed","members":[]}`))
+			bytes.NewBufferString(`{"schemas":["`+SCIMCoreGroupSchemaURN+`"],"displayName":"Renamed","members":[]}`))
 		req.Header.Set("Content-Type", constants.SCIMContentType)
 		req.SetPathValue("id", "group-1")
 		rr := httptest.NewRecorder()

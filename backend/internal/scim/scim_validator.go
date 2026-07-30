@@ -69,7 +69,9 @@ func ValidateSCIMUserRequest(body []byte) (*SCIMUserPayload, *tidcommon.ServiceE
 		return nil, &ErrorInvalidCustomSchemaURN
 	}
 
-	// Step 6: extension object must exist and be a JSON object
+	// Step 6: extension object is optional if no extension attributes are provided.
+	// If present, it must be a valid JSON object.
+	extAttrs := make(map[string]json.RawMessage)
 	var extRaw json.RawMessage
 	for k, v := range raw {
 		if strings.EqualFold(k, extensionURN) {
@@ -77,13 +79,10 @@ func ValidateSCIMUserRequest(body []byte) (*SCIMUserPayload, *tidcommon.ServiceE
 			break
 		}
 	}
-	if extRaw == nil {
-		return nil, &ErrorMissingCustomSchemaObject
-	}
-
-	var extAttrs map[string]json.RawMessage
-	if err := json.Unmarshal(extRaw, &extAttrs); err != nil || extAttrs == nil {
-		return nil, &ErrorMissingCustomSchemaObject
+	if extRaw != nil {
+		if err := json.Unmarshal(extRaw, &extAttrs); err != nil || extAttrs == nil {
+			return nil, &ErrorMissingCustomSchemaObject
+		}
 	}
 
 	// Collect core attributes (those that are not "schemas" or the extension URN)
@@ -97,6 +96,23 @@ func ValidateSCIMUserRequest(body []byte) (*SCIMUserPayload, *tidcommon.ServiceE
 		}
 		coreAttrs[k] = v
 	}
+
+	// Step 7: if the request carries core attributes, the SCIM Core User schema
+	// URN must be declared in "schemas". A custom-type-only payload (no core
+	// attributes at all) does not need to declare it.
+	if len(coreAttrs) > 0 {
+		hasCoreUserSchema := false
+		for _, urn := range schemas {
+			if strings.EqualFold(urn, SCIMCoreUserSchemaURN) {
+				hasCoreUserSchema = true
+				break
+			}
+		}
+		if !hasCoreUserSchema {
+			return nil, &ErrorMissingCoreUserSchema
+		}
+	}
+
 	return &SCIMUserPayload{
 		ExtensionURN:   extensionURN,
 		UserTypeName:   userTypeName,

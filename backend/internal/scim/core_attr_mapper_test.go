@@ -66,7 +66,8 @@ func TestMapToCoreAttrs_EmailPlainString(t *testing.T) {
 	require.NoError(t, json.Unmarshal(result["emails"], &emails))
 	require.Len(t, emails, 1)
 	require.Equal(t, "a@example.com", emails[0]["value"])
-	require.Equal(t, "work", emails[0]["type"])
+	_, hasType := emails[0]["type"]
+	require.False(t, hasType)
 	require.Equal(t, true, emails[0]["primary"])
 }
 
@@ -92,14 +93,16 @@ func TestMapToCoreAttrs_PhoneNumber(t *testing.T) {
 	var phones []map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["phoneNumbers"], &phones))
 	require.Equal(t, "123456", phones[0]["value"])
-	require.Equal(t, "work", phones[0]["type"])
+	_, hasType := phones[0]["type"]
+	require.False(t, hasType)
 }
 
 func TestMapToCoreAttrs_Picture(t *testing.T) {
 	result := mapToCoreAttrs(json.RawMessage(`{"picture":"http://x/y.png"}`))
 	var photos []map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["photos"], &photos))
-	require.Equal(t, "photo", photos[0]["type"])
+	_, hasType := photos[0]["type"]
+	require.False(t, hasType)
 }
 
 func TestMapToCoreAttrs_NameSubAttrsMerged(t *testing.T) {
@@ -134,7 +137,8 @@ func TestMapToCoreAttrs_AddressParts(t *testing.T) {
 	require.Equal(t, "NY", addrs[0]["region"])
 	require.Equal(t, "10001", addrs[0]["postalCode"])
 	require.Equal(t, "US", addrs[0]["country"])
-	require.Equal(t, "work", addrs[0]["type"])
+	_, hasType := addrs[0]["type"]
+	require.False(t, hasType)
 	require.Equal(t, true, addrs[0]["primary"])
 }
 
@@ -327,6 +331,32 @@ func TestReverseMapCoreAttrsForSchema_AddrPart(t *testing.T) {
 	require.JSONEq(t, `"US"`, string(result["country"]))
 }
 
+func TestMapToCoreAttrs_AddressObject(t *testing.T) {
+	result := mapToCoreAttrs(json.RawMessage(`{"address":{
+		"street_address":"456 Tech Park","locality":"Colombo","postal_code":"00100"
+	}}`))
+	require.NotNil(t, result)
+	var addrs []map[string]interface{}
+	require.NoError(t, json.Unmarshal(result["addresses"], &addrs))
+	require.Len(t, addrs, 1)
+	require.Equal(t, "456 Tech Park", addrs[0]["streetAddress"])
+	require.Equal(t, "Colombo", addrs[0]["locality"])
+	require.Equal(t, "00100", addrs[0]["postalCode"])
+	_, hasType := addrs[0]["type"]
+	require.False(t, hasType)
+	require.Equal(t, true, addrs[0]["primary"])
+}
+
+func TestMapToCoreAttrs_AddressObject_NonCanonicalSubAttrsDropped(t *testing.T) {
+	result := mapToCoreAttrs(json.RawMessage(`{"address":{"unknown_field":"456 Tech Park"}}`))
+	require.Nil(t, result["addresses"])
+}
+
+func TestMapToCoreAttrs_AddressArray_AllEntriesMetaOnly_NoAddresses(t *testing.T) {
+	result := mapToCoreAttrs(json.RawMessage(`{"address":[{"type":"work"}]}`))
+	require.Nil(t, result)
+}
+
 func TestReverseMapCoreAttrsForSchema_AddrPart_EmptyArray(t *testing.T) {
 	schema := json.RawMessage(`{"country":{"type":"string"}}`)
 	coreAttrs := map[string]json.RawMessage{
@@ -334,6 +364,41 @@ func TestReverseMapCoreAttrsForSchema_AddrPart_EmptyArray(t *testing.T) {
 	}
 	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
 	require.Nil(t, result)
+}
+
+func TestReverseMapCoreAttrsForSchema_AddressObject(t *testing.T) {
+	schema := json.RawMessage(`{
+		"address":{"type":"object","properties":{
+			"street_address":{"type":"string"},"locality":{"type":"string"},"postal_code":{"type":"string"}
+		}}
+	}`)
+	coreAttrs := map[string]json.RawMessage{
+		"addresses": json.RawMessage(`[{
+			"streetAddress":"456 Tech Park","locality":"Colombo","postalCode":"00100",
+			"type":"work","primary":true
+		}]`),
+	}
+	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	var got map[string]interface{}
+	require.NoError(t, json.Unmarshal(result["address"], &got))
+	require.Equal(t, "456 Tech Park", got["street_address"])
+	require.Equal(t, "Colombo", got["locality"])
+	require.Equal(t, "00100", got["postal_code"])
+}
+
+func TestReverseMapCoreAttrsForSchema_AddressArrayOfObjects(t *testing.T) {
+	schema := json.RawMessage(`{
+		"address":{"type":"array","items":{"type":"object"}}
+	}`)
+	coreAttrs := map[string]json.RawMessage{
+		"addresses": json.RawMessage(`[{"street":"456 Tech Park","city":"Colombo","type":"work","primary":true}]`),
+	}
+	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	var got []map[string]interface{}
+	require.NoError(t, json.Unmarshal(result["address"], &got))
+	require.Len(t, got, 1)
+	require.Equal(t, "456 Tech Park", got[0]["street"])
+	require.Equal(t, "Colombo", got[0]["city"])
 }
 
 // --- findCandidateValue ---
@@ -387,81 +452,94 @@ func TestExtractStringValue_EmptyArray(t *testing.T) {
 // --- normalizeToMultiComplex ---
 
 func TestNormalizeToMultiComplex_Empty(t *testing.T) {
-	require.Nil(t, normalizeToMultiComplex(nil, "work", "value"))
+	require.Nil(t, normalizeToMultiComplex(nil, "value"))
 }
 
 func TestNormalizeToMultiComplex_PlainString(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`"a@example.com"`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`"a@example.com"`), "value")
 	require.Len(t, out, 1)
 	require.Equal(t, "a@example.com", out[0]["value"])
-	require.Equal(t, "work", out[0]["type"])
+	_, hasType := out[0]["type"]
+	require.False(t, hasType)
 	require.Equal(t, true, out[0]["primary"])
 }
 
 func TestNormalizeToMultiComplex_EmptyValueKeyDefaultsToValue(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`"a@example.com"`), "work", "")
+	out := normalizeToMultiComplex(json.RawMessage(`"a@example.com"`), "")
 	require.Equal(t, "a@example.com", out[0]["value"])
 }
 
 func TestNormalizeToMultiComplex_ArrayOfStrings(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`["a","b"]`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`["a","b"]`), "value")
 	require.Len(t, out, 2)
 	require.Equal(t, true, out[0]["primary"])
 	require.Equal(t, false, out[1]["primary"])
 }
 
-func TestNormalizeToMultiComplex_ArrayOfObjects_DefaultType(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a"}]`), "work", "value")
-	require.Equal(t, "work", out[0]["type"])
+func TestNormalizeToMultiComplex_ArrayOfObjects_NoTypeWhenMissing(t *testing.T) {
+	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a"}]`), "value")
+	_, hasType := out[0]["type"]
+	require.False(t, hasType)
 	require.Equal(t, true, out[0]["primary"])
 }
 
 func TestNormalizeToMultiComplex_ArrayOfObjects_ExplicitType(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a","type":"home"}]`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a","type":"home"}]`), "value")
 	require.Equal(t, "home", out[0]["type"])
 }
 
 func TestNormalizeToMultiComplex_ArrayOfObjects_SkipsMissingValue(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`[{"type":"home"},{"value":"a"}]`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`[{"type":"home"},{"value":"a"}]`), "value")
 	require.Len(t, out, 1)
 	require.Equal(t, "a", out[0]["value"])
 }
 
 func TestNormalizeToMultiComplex_ArrayOfObjects_PreservesExistingPrimary(t *testing.T) {
 	out := normalizeToMultiComplex(
-		json.RawMessage(`[{"value":"a","primary":false},{"value":"b","primary":true}]`), "work", "value",
+		json.RawMessage(`[{"value":"a","primary":false},{"value":"b","primary":true}]`), "value",
 	)
 	require.Equal(t, false, out[0]["primary"])
 	require.Equal(t, true, out[1]["primary"])
 }
 
 func TestNormalizeToMultiComplex_SingleObject(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`{"value":"a"}`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`{"value":"a"}`), "value")
 	require.Len(t, out, 1)
 	require.Equal(t, true, out[0]["primary"])
-	require.Equal(t, "work", out[0]["type"])
+	_, hasType := out[0]["type"]
+	require.False(t, hasType)
 }
 
 func TestNormalizeToMultiComplex_SingleObject_MissingValue(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`{"type":"home"}`), "work", "value")
+	out := normalizeToMultiComplex(json.RawMessage(`{"type":"home"}`), "value")
 	require.Nil(t, out)
 }
 
+func TestNormalizeToMultiComplex_SingleObject_Empty(t *testing.T) {
+	require.Nil(t, normalizeToMultiComplex(json.RawMessage(`{}`), "value"))
+}
+
+func TestNormalizeToMultiComplex_ArrayOfObjects_SkipsEmptyObject(t *testing.T) {
+	out := normalizeToMultiComplex(json.RawMessage(`[{},{"value":"a"}]`), "value")
+	require.Len(t, out, 1)
+	require.Equal(t, "a", out[0]["value"])
+}
+
 func TestNormalizeToMultiComplex_ArrayOfObjects_CustomValueKeyFallback(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a"}]`), "work", "custom")
+	out := normalizeToMultiComplex(json.RawMessage(`[{"value":"a"}]`), "custom")
 	require.Len(t, out, 1)
 	require.Equal(t, "a", out[0]["custom"])
 }
 
 func TestNormalizeToMultiComplex_SingleObject_CustomValueKeyFallback(t *testing.T) {
-	out := normalizeToMultiComplex(json.RawMessage(`{"value":"a"}`), "work", "custom")
+	out := normalizeToMultiComplex(json.RawMessage(`{"value":"a"}`), "custom")
 	require.Len(t, out, 1)
 	require.Equal(t, "a", out[0]["custom"])
 }
 
 func TestNormalizeToMultiComplex_UnmatchedShape(t *testing.T) {
-	require.Nil(t, normalizeToMultiComplex(json.RawMessage(`42`), "work", "value"))
-	require.Nil(t, normalizeToMultiComplex(json.RawMessage(`true`), "work", "value"))
+	require.Nil(t, normalizeToMultiComplex(json.RawMessage(`42`), "value"))
+	require.Nil(t, normalizeToMultiComplex(json.RawMessage(`true`), "value"))
 }
 
 // --- hasPrimary ---

@@ -155,6 +155,7 @@ func mapSCIMError(svcErr *tidcommon.ServiceError) (httpStatus int, scimType stri
 	case ErrorMissingSchemas.Code,
 		ErrorDuplicateSchemas.Code,
 		ErrorMissingCoreUserSchema.Code,
+		ErrorMissingCoreGroupSchema.Code,
 		ErrorMissingCustomSchema.Code,
 		ErrorMultipleCustomSchemas.Code,
 		ErrorInvalidCustomSchemaURN.Code,
