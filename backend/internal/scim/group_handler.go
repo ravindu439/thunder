@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
+	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
@@ -27,7 +29,11 @@ func (h *scimGroupsHandler) HandleGroupsListRequest(w http.ResponseWriter, r *ht
 		h.handleSCIMError(w, r, &ErrorFilterNotSupported)
 		return
 	}
-	startIndex, count := 1, 20
+	if r.URL.Query().Get("sortBy") != "" || r.URL.Query().Get("sortOrder") != "" {
+		h.handleSCIMError(w, r, &ErrorSortNotSupported)
+		return
+	}
+	startIndex, count := 1, serverconst.DefaultPageSize
 	if v := r.URL.Query().Get("startIndex"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			startIndex = n
@@ -37,6 +43,9 @@ func (h *scimGroupsHandler) HandleGroupsListRequest(w http.ResponseWriter, r *ht
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			count = n
 		}
+	}
+	if count > scimconfig.FilterMaxResults {
+		count = scimconfig.FilterMaxResults
 	}
 	resp, svcErr := h.svc.ListGroups(ctx, startIndex, count, h.baseURL)
 	if svcErr != nil {

@@ -52,6 +52,9 @@ const (
 
 	// SCIMPatchOpSchemaURN is the SCIM PatchOp schema URN.
 	SCIMPatchOpSchemaURN = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+
+	// SCIMSearchSchemaURN is the SCIM .search schema URN
+	SCIMSearchSchemaURN = "urn:ietf:params:scim:api:messages:2.0:SearchRequest"
 )
 
 // SCIMAttrType represents SCIM attribute data types (RFC 7643 §2.3).

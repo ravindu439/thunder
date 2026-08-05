@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
+	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/user"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/tests/mocks/entitytypemock"
@@ -178,7 +179,8 @@ func TestListUsers_DefaultsInvalidPagination(t *testing.T) {
 
 	service := newSCIMUsersService(mockUserService, mockEntityService)
 
-	mockUserService.On("GetUserList", mock.Anything, 20, 0, (map[string]interface{})(nil), false).
+	mockUserService.On("GetUserList",
+		mock.Anything, serverconst.DefaultPageSize, 0, (map[string]interface{})(nil), false).
 		Return(&user.UserListResponse{TotalResults: 0, Users: []user.User{}}, (*tidcommon.ServiceError)(nil))
 
 	resp, err := service.ListUsers(context.Background(), 0, 0, nil, testBaseURL)

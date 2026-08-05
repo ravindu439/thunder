@@ -161,6 +161,19 @@ func registerRoutes(mux *http.ServeMux, h *scimHandler, uh *scimUsersHandler, gh
 		optsCRUD,
 	))
 
+	// users/.search endpoint
+	mux.HandleFunc(middleware.WithCORS(
+		"POST "+SCIMBasePath+"/Users/.search",
+		uh.HandleUsersSearchRequest,
+		optsCRUD,
+	))
+	mux.HandleFunc(middleware.WithCORS(
+		"OPTIONS "+SCIMBasePath+"/Users/.search",
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		optsCRUD,
+	))
+
+	// groups CRUD operations
 	mux.HandleFunc(middleware.WithCORS(
 		"GET "+SCIMBasePath+"/Groups",
 		gh.HandleGroupsListRequest,

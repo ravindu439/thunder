@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
 	"github.com/thunder-id/thunderid/internal/system/constants"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
@@ -17,9 +18,10 @@ import (
 func TestHandleGroupsListRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
 	expectedResp := SCIMGroupListResponse{
-		Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: 20, Resources: []SCIMGroup{},
+		Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: constants.DefaultPageSize,
+		Resources: []SCIMGroup{},
 	}
-	mockSvc.On("ListGroups", mock.Anything, 1, 20, testBaseURL).
+	mockSvc.On("ListGroups", mock.Anything, 1, constants.DefaultPageSize, testBaseURL).
 		Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMGroupsHandler(mockSvc, testBaseURL)
@@ -40,6 +42,33 @@ func TestHandleGroupsListRequest_FilterNotSupported(t *testing.T) {
 	h.HandleGroupsListRequest(rr, req)
 
 	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleGroupsListRequest_CapsMaxCount(t *testing.T) {
+	mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
+	mockSvc.On("ListGroups", mock.Anything, 1, scimconfig.FilterMaxResults, testBaseURL).
+		Return(SCIMGroupListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMGroupsHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?count=100000", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleGroupsListRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleGroupsListRequest_SortNotSupported(t *testing.T) {
+	h := newSCIMGroupsHandler(NewSCIMGroupsServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?sortBy=displayName", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleGroupsListRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	var errResp SCIMErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
+	require.Equal(t, scimErrorTypeInvalidValue, errResp.ScimType)
 }
 
 func TestHandleGroupsGetRequest_Success(t *testing.T) {
@@ -325,9 +354,10 @@ func TestHandleGroupsListRequest_CustomParamsAndError(t *testing.T) {
 	t.Run("InvalidParamsUseDefaults", func(t *testing.T) {
 		mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
 		expectedResp := SCIMGroupListResponse{
-			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: 20, Resources: []SCIMGroup{},
+			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: constants.DefaultPageSize,
+			Resources: []SCIMGroup{},
 		}
-		mockSvc.On("ListGroups", mock.Anything, 1, 20, testBaseURL).
+		mockSvc.On("ListGroups", mock.Anything, 1, constants.DefaultPageSize, testBaseURL).
 			Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
 		h := newSCIMGroupsHandler(mockSvc, testBaseURL)
@@ -340,7 +370,7 @@ func TestHandleGroupsListRequest_CustomParamsAndError(t *testing.T) {
 
 	t.Run("ServiceError", func(t *testing.T) {
 		mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
-		mockSvc.On("ListGroups", mock.Anything, 1, 20, testBaseURL).
+		mockSvc.On("ListGroups", mock.Anything, 1, constants.DefaultPageSize, testBaseURL).
 			Return(SCIMGroupListResponse{}, &ErrorInternalServer)
 
 		h := newSCIMGroupsHandler(mockSvc, testBaseURL)
