@@ -428,6 +428,37 @@ var (
 			DefaultValue: "The schemas array must include the SCIM Core Group schema URN",
 		},
 	}
+
+	// ErrorConflictingAttributesParams is returned when a request supplies both
+	// the "attributes" and "excludedAttributes" query/body parameters, which
+	// RFC 7644 §3.9 requires to be mutually exclusive.
+	ErrorConflictingAttributesParams = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1029",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.conflicting_attributes_params",
+			DefaultValue: "Conflicting attributes parameters",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.conflicting_attributes_params_description",
+			DefaultValue: `"attributes" and "excludedAttributes" are mutually exclusive; supply at most one`,
+		},
+	}
+
+	// ErrorSortNotSupported is returned when sorting is requested via sortBy or
+	// sortOrder but sorting is not supported per ServiceProviderConfig.
+	ErrorSortNotSupported = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1030",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.sort_not_supported",
+			DefaultValue: "Sorting not supported",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.sort_not_supported_description",
+			DefaultValue: "Sorting via sortBy or sortOrder is not supported in this implementation",
+		},
+	}
 )
 
 // newMissingRequiredAttributesError builds a SCIM-1018 (schema validation failed)

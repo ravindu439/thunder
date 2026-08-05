@@ -11,9 +11,17 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
 	"github.com/thunder-id/thunderid/internal/system/constants"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
+
+const scimTestPayloadBody = `{
+		"schemas": ["urn:thunderid:params:scim:schemas:person:2.0:User"],
+		"urn:thunderid:params:scim:schemas:person:2.0:User": {
+			"given_name": "Test"
+		}
+	}`
 
 func TestHandleUsersGetRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
@@ -74,12 +82,7 @@ func TestHandleUsersDeleteRequest_Success(t *testing.T) {
 
 func TestHandleUsersCreateRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-	payloadBody := `{
-		"schemas": ["urn:thunderid:params:scim:schemas:person:2.0:User"],
-		"urn:thunderid:params:scim:schemas:person:2.0:User": {
-			"given_name": "Test"
-		}
-	}`
+	payloadBody := scimTestPayloadBody
 
 	expectedUser := &SCIMUser{
 		Schemas: []string{SCIMCoreUserSchemaURN, "urn:thunderid:params:scim:schemas:person:2.0:User"},
@@ -112,10 +115,10 @@ func TestHandleUsersListRequest_Success(t *testing.T) {
 		Schemas:      []string{SCIMListResponseSchemaURN},
 		TotalResults: 0,
 		StartIndex:   1,
-		ItemsPerPage: 20,
+		ItemsPerPage: constants.DefaultPageSize,
 		Resources:    []SCIMUser{},
 	}
-	mockSvc.On("ListUsers", mock.Anything, 1, 20, mock.Anything,
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything,
 		testBaseURL).Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -129,12 +132,7 @@ func TestHandleUsersListRequest_Success(t *testing.T) {
 
 func TestHandleUsersReplaceRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-	payloadBody := `{
-		"schemas": ["urn:thunderid:params:scim:schemas:person:2.0:User"],
-		"urn:thunderid:params:scim:schemas:person:2.0:User": {
-			"given_name": "Test"
-		}
-	}`
+	payloadBody := scimTestPayloadBody
 
 	expectedUser := &SCIMUser{
 		Schemas: []string{SCIMCoreUserSchemaURN, "urn:thunderid:params:scim:schemas:person:2.0:User"},
@@ -530,7 +528,7 @@ func TestHandleUsersListRequest_FilterTranslatesCoreAttributes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-			mockSvc.On("ListUsers", mock.Anything, 1, 20, tt.expectedFilter, testBaseURL).
+			mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, tt.expectedFilter, testBaseURL).
 				Return(SCIMUserListResponse{}, (*tidcommon.ServiceError)(nil))
 
 			h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -547,7 +545,7 @@ func TestHandleUsersListRequest_FilterTranslatesCoreAttributes(t *testing.T) {
 
 func TestHandleUsersListRequest_ServiceError_Returns500(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-	mockSvc.On("ListUsers", mock.Anything, 1, 20, mock.Anything, testBaseURL).
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything, testBaseURL).
 		Return(SCIMUserListResponse{}, &ErrorInternalServer)
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -577,6 +575,203 @@ func TestHandleUsersListRequest_CustomPagination(t *testing.T) {
 	h.HandleUsersListRequest(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleUsersListRequest_CapsMaxCount(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 1, scimconfig.FilterMaxResults, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?count=100000", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersListRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleUsersListRequest_SortNotSupported_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?sortBy=userName", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersListRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	var errResp SCIMErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
+	require.Equal(t, scimErrorTypeInvalidValue, errResp.ScimType)
+}
+
+func TestHandleUsersSearchRequest_Success(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	expectedResp := SCIMUserListResponse{
+		Schemas:      []string{SCIMListResponseSchemaURN},
+		TotalResults: 1,
+		StartIndex:   1,
+		ItemsPerPage: constants.DefaultPageSize,
+		Resources:    []SCIMUser{{ID: "user-123"}},
+	}
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize,
+		map[string]interface{}{"username": "alice"}, testBaseURL).
+		Return(expectedResp, (*tidcommon.ServiceError)(nil))
+
+	body := `{
+		"schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"],
+		"filter": "userName eq \"alice\""
+	}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got SCIMUserListResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, 1, got.TotalResults)
+}
+
+func TestHandleUsersSearchRequest_NoFilter_DefaultsPagination(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	body := `{"schemas": ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_CustomPagination(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 5, 10, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{
+			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 5, ItemsPerPage: 10,
+			Resources: []SCIMUser{},
+		}, (*tidcommon.ServiceError)(nil))
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "startIndex": 5, "count": 10}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_CapsMaxCount(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 1, scimconfig.FilterMaxResults, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "count": 100000}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_SortNotSupported_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "sortBy": "userName"}`
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	var errResp SCIMErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
+	require.Equal(t, scimErrorTypeInvalidValue, errResp.ScimType)
+}
+
+func TestHandleUsersSearchRequest_InvalidFilter_Returns400(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "filter": "userName co \"ali\""}`
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+	var errResp SCIMErrorResponse
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
+	require.Equal(t, "invalidFilter", errResp.ScimType)
+}
+
+func TestHandleUsersSearchRequest_MalformedJSON_Returns400(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(`{not-json`))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_EmptyBody_Returns400(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(``))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_WrongContentType_Returns400(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+
+	body := `{"filter": "userName eq \"alice\""}`
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "text/plain")
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_ServiceError_Returns500(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{}, &ErrorInternalServer)
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"]}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusInternalServerError, rr.Code)
 }
 
 func TestHandleUsersReplaceRequest_PreconditionFailed(t *testing.T) {
@@ -684,4 +879,259 @@ func TestParseSCIMCompValue(t *testing.T) {
 			require.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestParseCSVQueryParam(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{"empty string returns nil", "", nil},
+		{"single value", "userName", []string{"userName"}},
+		{"multiple values", "userName,emails", []string{"userName", "emails"}},
+		{"trims whitespace", " userName , emails ", []string{"userName", "emails"}},
+		{"drops empty entries", "userName,,emails,", []string{"userName", "emails"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.expected, parseCSVQueryParam(tt.input))
+		})
+	}
+}
+
+func TestHandleUsersListRequest_AttributesProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	listResp := SCIMUserListResponse{
+		Schemas:      []string{SCIMListResponseSchemaURN},
+		TotalResults: 1,
+		StartIndex:   1,
+		ItemsPerPage: constants.DefaultPageSize,
+		Resources: []SCIMUser{
+			{
+				ID:      "user-123",
+				Schemas: []string{SCIMCoreUserSchemaURN},
+				Meta:    SCIMMeta{ResourceType: "User"},
+				CoreAttrs: map[string]json.RawMessage{
+					"userName": json.RawMessage(`"alice"`),
+					"active":   json.RawMessage(`true`),
+				},
+			},
+		},
+	}
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything, testBaseURL).
+		Return(listResp, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?attributes=userName", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersListRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	resources, ok := got["Resources"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, resources, 1)
+	resource, ok := resources[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "alice", resource["userName"])
+	require.NotContains(t, resource, "active")
+}
+
+func TestHandleUsersSearchRequest_ExcludedAttributesProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	listResp := SCIMUserListResponse{
+		Schemas:      []string{SCIMListResponseSchemaURN},
+		TotalResults: 1,
+		StartIndex:   1,
+		ItemsPerPage: constants.DefaultPageSize,
+		Resources: []SCIMUser{
+			{
+				ID:      "user-123",
+				Schemas: []string{SCIMCoreUserSchemaURN},
+				Meta:    SCIMMeta{ResourceType: "User"},
+				CoreAttrs: map[string]json.RawMessage{
+					"userName": json.RawMessage(`"alice"`),
+					"active":   json.RawMessage(`true`),
+				},
+			},
+		},
+	}
+	mockSvc.On("ListUsers", mock.Anything, 1, constants.DefaultPageSize, mock.Anything, testBaseURL).
+		Return(listResp, (*tidcommon.ServiceError)(nil))
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "excludedAttributes": ["active"]}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	resources := got["Resources"].([]interface{})
+	resource := resources[0].(map[string]interface{})
+	require.Equal(t, "alice", resource["userName"])
+	require.NotContains(t, resource, "active")
+}
+
+// --- RFC 7644 §3.9 attributes/excludedAttributes mutual exclusivity ---
+
+func TestHandleUsersListRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?attributes=userName&excludedAttributes=active", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersListRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersSearchRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "attributes": ["userName"], "excludedAttributes": ["active"]}`
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersGetRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(
+		http.MethodGet, "/scim/v2/Users/user-123?attributes=userName&excludedAttributes=active", nil)
+	req.SetPathValue("id", "user-123")
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersGetRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersCreateRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	payloadBody := scimTestPayloadBody
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(
+		http.MethodPost, "/scim/v2/Users?attributes=userName&excludedAttributes=active",
+		bytes.NewBufferString(payloadBody))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersCreateRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleUsersReplaceRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	payloadBody := scimTestPayloadBody
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(
+		http.MethodPut, "/scim/v2/Users/user-123?attributes=userName&excludedAttributes=active",
+		bytes.NewBufferString(payloadBody))
+	req.SetPathValue("id", "user-123")
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+// --- RFC 7644 §3.9 projection wired into single-resource responses ---
+
+func TestHandleUsersGetRequest_AppliesAttributeProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	expectedUser := &SCIMUser{
+		ID:      "user-123",
+		Schemas: []string{SCIMCoreUserSchemaURN},
+		Meta:    SCIMMeta{ResourceType: "User", Version: `W/"abc12345"`},
+		CoreAttrs: map[string]json.RawMessage{
+			"userName": json.RawMessage(`"alice"`),
+			"active":   json.RawMessage(`true`),
+		},
+	}
+	mockSvc.On("GetUser", mock.Anything, "user-123", testBaseURL).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users/user-123?attributes=userName", nil)
+	req.SetPathValue("id", "user-123")
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersGetRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, "alice", got["userName"])
+	require.NotContains(t, got, "active")
+}
+
+func TestHandleUsersCreateRequest_AppliesAttributeProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	payloadBody := scimTestPayloadBody
+	expectedUser := &SCIMUser{
+		ID:      "user-123",
+		Schemas: []string{SCIMCoreUserSchemaURN},
+		Meta:    SCIMMeta{ResourceType: "User", Version: `W/"abc12345"`},
+		CoreAttrs: map[string]json.RawMessage{
+			"userName": json.RawMessage(`"alice"`),
+			"active":   json.RawMessage(`true`),
+		},
+	}
+	mockSvc.On(
+		"CreateUser", mock.Anything, mock.AnythingOfType("*scim.SCIMUserPayload"), testBaseURL,
+	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(
+		http.MethodPost, "/scim/v2/Users?attributes=userName", bytes.NewBufferString(payloadBody))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersCreateRequest(rr, req)
+
+	require.Equal(t, http.StatusCreated, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, "alice", got["userName"])
+	require.NotContains(t, got, "active")
+}
+
+func TestHandleUsersReplaceRequest_AppliesAttributeProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	payloadBody := scimTestPayloadBody
+	expectedUser := &SCIMUser{
+		ID:      "user-123",
+		Schemas: []string{SCIMCoreUserSchemaURN},
+		Meta:    SCIMMeta{ResourceType: "User", Version: `W/"abc12345"`},
+		CoreAttrs: map[string]json.RawMessage{
+			"userName": json.RawMessage(`"alice"`),
+			"active":   json.RawMessage(`true`),
+		},
+	}
+	mockSvc.On(
+		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL,
+	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(
+		http.MethodPut, "/scim/v2/Users/user-123?excludedAttributes=active", bytes.NewBufferString(payloadBody))
+	req.SetPathValue("id", "user-123")
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, "alice", got["userName"])
+	require.NotContains(t, got, "active")
 }

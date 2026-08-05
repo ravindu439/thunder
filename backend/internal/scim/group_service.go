@@ -41,7 +41,7 @@ func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count in
 		startIndex = 1
 	}
 	if count < 1 {
-		count = 20
+		count = serverconst.DefaultPageSize
 	}
 
 	offset := startIndex - 1
