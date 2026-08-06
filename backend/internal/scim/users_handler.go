@@ -23,6 +23,7 @@ var (
 	scimFilterQuotedStringRe = regexp.MustCompile(`"([^"\\]|\\.)*"`)
 	scimFilterEqRe           = regexp.MustCompile(`(?i)^((?:[A-Za-z0-9][A-Za-z0-9.\-_]*:)*)` +
 		`([A-Za-z][A-Za-z0-9.\-_]*)\s+eq\s+(.+)$`)
+	scimFilterAndRe = regexp.MustCompile(`(?i)\s+and\s+`)
 )
 
 // scimUsersHandler handles all /scim/v2/Users HTTP requests.
@@ -41,12 +42,12 @@ func (h *scimUsersHandler) HandleUsersListRequest(w http.ResponseWriter, r *http
 	ctx := r.Context()
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
 
-	if r.URL.Query().Get("sortBy") != "" || r.URL.Query().Get("sortOrder") != "" {
+	if !scimconfig.SortSupported && (r.URL.Query().Get("sortBy") != "" || r.URL.Query().Get("sortOrder") != "") {
 		h.handleSCIMError(w, r, &ErrorSortNotSupported)
 		return
 	}
 
-	// Parse optional SCIM filter — only single "eq" expressions are supported.
+	// Parse optional SCIM filter — "eq" expressions joined by "and" are supported.
 	var parsedFilters map[string]interface{}
 	if filterStr := r.URL.Query().Get("filter"); filterStr != "" {
 		var err error
@@ -113,7 +114,7 @@ func (h *scimUsersHandler) HandleUsersSearchRequest(w http.ResponseWriter, r *ht
 		h.handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	if searchReq.SortBy != "" || searchReq.SortOrder != "" {
+	if !scimconfig.SortSupported && (searchReq.SortBy != "" || searchReq.SortOrder != "") {
 		h.handleSCIMError(w, r, &ErrorSortNotSupported)
 		return
 	}
@@ -375,10 +376,10 @@ func (h *scimUsersHandler) writeUserListResponse(
 	h.writeProjectedResponse(ctx, w, http.StatusOK, listResp, projected, err)
 }
 
-// parseSCIMFilterForEq parses a SCIM filter string that contains exactly one
-// "eq" comparison and no logical operators, grouping, or square brackets.
-// Returns a native filter map suitable for userService.GetUserList, or an
-// error if the expression uses any unsupported syntax.
+// parseSCIMFilterForEq parses a SCIM filter string containing one or more
+// "eq" comparisons joined by "and", with no "or", "not", grouping, or square
+// brackets. Returns a native filter map suitable for userService.GetUserList,
+// or an error if the expression uses any unsupported syntax.
 func parseSCIMFilterForEq(filterStr string) (map[string]interface{}, error) {
 	filterStr = strings.TrimSpace(filterStr)
 	if filterStr == "" {
@@ -386,13 +387,13 @@ func parseSCIMFilterForEq(filterStr string) (map[string]interface{}, error) {
 	}
 	sanitized := scimFilterQuotedStringRe.ReplaceAllString(filterStr, `""`)
 	lower := strings.ToLower(sanitized)
-	// Reject all compound/complex expressions up front (outside of quoted strings).
-	if strings.Contains(lower, " and ") ||
-		strings.Contains(lower, " or ") ||
+	// Reject all unsupported compound/complex expressions up front (outside of quoted strings).
+	if strings.Contains(lower, " or ") ||
 		strings.HasPrefix(lower, "not ") ||
 		strings.ContainsAny(sanitized, "()[]") {
 		return nil, fmt.Errorf(
-			"compound filter expressions are not supported; only a single 'eq' expression is supported",
+			"compound filter expressions are only supported using 'and'; " +
+				"'or', 'not', and grouping are not supported",
 		)
 	}
 	// Reject any operator that is not "eq".
@@ -406,12 +407,54 @@ func parseSCIMFilterForEq(filterStr string) (map[string]interface{}, error) {
 			)
 		}
 	}
+	filters := make(map[string]interface{})
+	for _, clause := range splitSCIMAndClauses(filterStr) {
+		attribute, value, err := parseSCIMEqClause(clause)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := filters[attribute]; exists {
+			return nil, fmt.Errorf("attribute %q is repeated in the filter expression", attribute)
+		}
+		filters[attribute] = value
+	}
+	return filters, nil
+}
+
+// splitSCIMAndClauses splits a SCIM filter string on "and" (case-insensitive),
+// ignoring any occurrence of "and" that falls inside a quoted string value.
+func splitSCIMAndClauses(filterStr string) []string {
+	quotedSpans := scimFilterQuotedStringRe.FindAllStringIndex(filterStr, -1)
+	insideQuotes := func(pos int) bool {
+		for _, span := range quotedSpans {
+			if pos >= span[0] && pos < span[1] {
+				return true
+			}
+		}
+		return false
+	}
+	clauses := make([]string, 0, 1)
+	last := 0
+	for _, m := range scimFilterAndRe.FindAllStringIndex(filterStr, -1) {
+		if insideQuotes(m[0]) {
+			continue
+		}
+		clauses = append(clauses, filterStr[last:m[0]])
+		last = m[1]
+	}
+	clauses = append(clauses, filterStr[last:])
+	return clauses
+}
+
+// parseSCIMEqClause parses a single "[optional-URN-prefix:]attrPath eq compValue"
+// clause into its native attribute name and typed comparison value.
+func parseSCIMEqClause(clause string) (string, interface{}, error) {
 	// Match: [optional-URN-prefix:]attrPath eq compValue
 	// attrPath allows alphanumeric, underscore, hyphen, and dot (for sub-attributes).
 	// compValue is a quoted string, a boolean literal, or a number.
-	matches := scimFilterEqRe.FindStringSubmatch(filterStr)
+	matches := scimFilterEqRe.FindStringSubmatch(strings.TrimSpace(clause))
 	if len(matches) == 0 {
-		return nil, fmt.Errorf(
+		return "", nil, fmt.Errorf(
 			"invalid filter expression; expected format: 'attrPath eq value'",
 		)
 	}
@@ -419,18 +462,18 @@ func parseSCIMFilterForEq(filterStr string) (map[string]interface{}, error) {
 	// matches[2] = attribute path (e.g. "profile.manager.id")
 	// matches[3] = raw comparison value
 	if isUnsupportedSCIMFilterAttr(matches[2]) {
-		return nil, fmt.Errorf("filtering on %q is not supported", matches[2])
+		return "", nil, fmt.Errorf("filtering on %q is not supported", matches[2])
 	}
 	attribute := translateSCIMFilterAttr(matches[2])
 	if err := utils.ValidateKey(attribute); err != nil {
-		return nil, fmt.Errorf("filtering on %q is not supported", matches[2])
+		return "", nil, fmt.Errorf("filtering on %q is not supported", matches[2])
 	}
 	rawValue := strings.TrimSpace(matches[3])
 	value, err := parseSCIMCompValue(rawValue)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
-	return map[string]interface{}{attribute: value}, nil
+	return attribute, value, nil
 }
 
 // parseSCIMCompValue converts a raw SCIM compValue token into a typed Go value.

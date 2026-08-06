@@ -26,14 +26,15 @@ import (
 )
 
 func TestMissingRequiredAttrs_InvalidSchemaJSON(t *testing.T) {
-	missing := missingRequiredAttrs(map[string]json.RawMessage{}, json.RawMessage(`not json`), false)
-	require.Nil(t, missing)
+	_, err := missingRequiredAttrs(map[string]json.RawMessage{}, json.RawMessage(`not json`), false)
+	require.Error(t, err)
 }
 
 func TestMissingRequiredAttrs_AllPresent(t *testing.T) {
 	schema := json.RawMessage(`{"given_name":{"required":true}}`)
 	attrs := map[string]json.RawMessage{"given_name": json.RawMessage(`"Alice"`)}
-	missing := missingRequiredAttrs(attrs, schema, false)
+	missing, err := missingRequiredAttrs(attrs, schema, false)
+	require.NoError(t, err)
 	require.Empty(t, missing)
 }
 
@@ -43,20 +44,63 @@ func TestMissingRequiredAttrs_ReportsMissingSorted(t *testing.T) {
 		"family_name":{"required":true},
 		"nickname":{"required":false}
 	}`)
-	missing := missingRequiredAttrs(map[string]json.RawMessage{}, schema, false)
+	missing, err := missingRequiredAttrs(map[string]json.RawMessage{}, schema, false)
+	require.NoError(t, err)
 	require.Equal(t, []string{"family_name", "given_name"}, missing)
 }
 
 func TestMissingRequiredAttrs_SkipCredentialTrue_OmitsCredential(t *testing.T) {
 	schema := json.RawMessage(`{"password":{"required":true,"credential":true}}`)
-	missing := missingRequiredAttrs(map[string]json.RawMessage{}, schema, true)
+	missing, err := missingRequiredAttrs(map[string]json.RawMessage{}, schema, true)
+	require.NoError(t, err)
 	require.Empty(t, missing)
 }
 
 func TestMissingRequiredAttrs_SkipCredentialFalse_IncludesCredential(t *testing.T) {
 	schema := json.RawMessage(`{"password":{"required":true,"credential":true}}`)
-	missing := missingRequiredAttrs(map[string]json.RawMessage{}, schema, false)
+	missing, err := missingRequiredAttrs(map[string]json.RawMessage{}, schema, false)
+	require.NoError(t, err)
 	require.Equal(t, []string{"password"}, missing)
+}
+
+func TestUndeclaredAttrs_ReportsUndeclaredSorted(t *testing.T) {
+	schema := json.RawMessage(`{
+		"given_name":{"required":true}
+	}`)
+	extAttrs := map[string]json.RawMessage{
+		"given_name": json.RawMessage(`"Alice"`),
+		"extra_one":  json.RawMessage(`"one"`),
+		"another":    json.RawMessage(`"two"`),
+	}
+	// Core attributes are not checked for now - real SCIM clients send standard
+	// envelope fields a business schema has no reason to declare.
+	coreAttrs := map[string]json.RawMessage{
+		"userName": json.RawMessage(`"alice"`),
+		"nickName": json.RawMessage(`"Ali"`),
+		"id":       json.RawMessage(`"123"`),
+	}
+	consumedCore := map[string]struct{}{"userName": {}}
+	undeclared, err := undeclaredAttrs(extAttrs, coreAttrs, consumedCore, schema)
+	require.NoError(t, err)
+	require.Equal(t, []string{"another", "extra_one"}, undeclared)
+}
+
+func TestMissingRequiredAttrs_CaseInsensitive(t *testing.T) {
+	schema := json.RawMessage(`{"given_name":{"required":true}}`)
+	attrs := map[string]json.RawMessage{"Given_Name": json.RawMessage(`"Alice"`)}
+	missing, err := missingRequiredAttrs(attrs, schema, false)
+	require.NoError(t, err)
+	require.Empty(t, missing)
+}
+
+func TestUndeclaredAttrs_CaseInsensitive(t *testing.T) {
+	schema := json.RawMessage(`{"given_name":{"required":true}}`)
+	extAttrs := map[string]json.RawMessage{
+		"Given_Name": json.RawMessage(`"Alice"`),
+	}
+	undeclared, err := undeclaredAttrs(extAttrs, nil, nil, schema)
+	require.NoError(t, err)
+	require.Empty(t, undeclared)
 }
 
 func TestMapRawPropertyToSCIMAttribute_CredentialArrayItems_PropagatesNeverReturned(t *testing.T) {
