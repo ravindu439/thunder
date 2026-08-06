@@ -82,8 +82,9 @@ var (
 			DefaultValue: "Missing SCIM core User schema",
 		},
 		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.scim.missing_core_user_schema_description",
-			DefaultValue: "The schemas array must include the SCIM Core User schema URN",
+			Key: "error.scim.missing_core_user_schema_description",
+			DefaultValue: "The schemas array must include the SCIM Core User schema URN " +
+				"when core user attributes are present in the request",
 		},
 	}
 	// ErrorMissingCustomSchema is returned when the request does not include
@@ -459,6 +460,22 @@ var (
 			DefaultValue: "Sorting via sortBy or sortOrder is not supported in this implementation",
 		},
 	}
+
+	// ErrorConflictingAttributeValue is returned when a core-mapped attribute is supplied
+	// with different values through both the top-level SCIM core fields and the ThunderID
+	// custom extension object.
+	ErrorConflictingAttributeValue = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1031",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.conflicting_attribute_value",
+			DefaultValue: "Conflicting attribute value",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.conflicting_attribute_value_description",
+			DefaultValue: "A core-mapped attribute was supplied with different values in the core and custom schema",
+		},
+	}
 )
 
 // newMissingRequiredAttributesError builds a SCIM-1018 (schema validation failed)
@@ -472,6 +489,36 @@ func newMissingRequiredAttributesError(userTypeName string, missing []string) *t
 		DefaultValue: fmt.Sprintf(
 			"User type %q requires the following attribute(s), which were not provided: %s",
 			userTypeName, strings.Join(missing, ", "),
+		),
+	}
+	return &svcErr
+}
+
+// newConflictingAttributeValueError builds a SCIM-1029 error whose detail names the
+// core-mapped attribute that was supplied with different values in the top-level SCIM
+// core fields and the ThunderID custom extension object.
+func newConflictingAttributeValueError(attrName string) *tidcommon.ServiceError {
+	svcErr := ErrorConflictingAttributeValue
+	svcErr.ErrorDescription = tidcommon.I18nMessage{
+		Key: ErrorConflictingAttributeValue.ErrorDescription.Key,
+		DefaultValue: fmt.Sprintf(
+			"Attribute %q was supplied with different values in the core SCIM fields and the custom schema object",
+			attrName,
+		),
+	}
+	return &svcErr
+}
+
+// newUndeclaredAttributesError builds a SCIM-1018 (schema validation failed)
+// error whose detail names the specific attribute(s) that the request supplied
+// but the target user type schema does not declare.
+func newUndeclaredAttributesError(userTypeName string, undeclared []string) *tidcommon.ServiceError {
+	svcErr := ErrorSchemaValidationFailed
+	svcErr.ErrorDescription = tidcommon.I18nMessage{
+		Key: ErrorSchemaValidationFailed.ErrorDescription.Key,
+		DefaultValue: fmt.Sprintf(
+			"User type %q does not declare the following attribute(s): %s",
+			userTypeName, strings.Join(undeclared, ", "),
 		),
 	}
 	return &svcErr

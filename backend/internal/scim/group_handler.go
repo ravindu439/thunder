@@ -29,7 +29,7 @@ func (h *scimGroupsHandler) HandleGroupsListRequest(w http.ResponseWriter, r *ht
 		h.handleSCIMError(w, r, &ErrorFilterNotSupported)
 		return
 	}
-	if r.URL.Query().Get("sortBy") != "" || r.URL.Query().Get("sortOrder") != "" {
+	if !scimconfig.SortSupported && (r.URL.Query().Get("sortBy") != "" || r.URL.Query().Get("sortOrder") != "") {
 		h.handleSCIMError(w, r, &ErrorSortNotSupported)
 		return
 	}

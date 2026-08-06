@@ -174,41 +174,53 @@ func TestMapToCoreAttrs_AllSimpleFields(t *testing.T) {
 // --- reverseMapCoreAttrsForSchema ---
 
 func TestReverseMapCoreAttrsForSchema_EmptyCoreAttrs(t *testing.T) {
-	result := reverseMapCoreAttrsForSchema(nil, json.RawMessage(`{}`))
+	result, consumed, err := reverseMapCoreAttrsForSchema(nil, json.RawMessage(`{}`))
+	require.NoError(t, err)
 	require.Nil(t, result)
+	require.Nil(t, consumed)
 }
 
 func TestReverseMapCoreAttrsForSchema_EmptySchema(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{"userName": json.RawMessage(`"jdoe"`)}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, nil)
+	result, consumed, err := reverseMapCoreAttrsForSchema(coreAttrs, nil)
+	require.NoError(t, err)
 	require.Nil(t, result)
+	require.Nil(t, consumed)
 }
 
 func TestReverseMapCoreAttrsForSchema_InvalidSchemaJSON(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{"userName": json.RawMessage(`"jdoe"`)}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, json.RawMessage(`not json`))
+	result, consumed, err := reverseMapCoreAttrsForSchema(coreAttrs, json.RawMessage(`not json`))
+	require.Error(t, err)
 	require.Nil(t, result)
+	require.Nil(t, consumed)
 }
 
 func TestReverseMapCoreAttrsForSchema_SimpleString(t *testing.T) {
 	schema := json.RawMessage(`{"username":{"type":"string"}}`)
 	coreAttrs := map[string]json.RawMessage{"userName": json.RawMessage(`"jdoe"`)}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, consumed, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.JSONEq(t, `"jdoe"`, string(result["username"]))
+	require.Contains(t, consumed, "userName")
 }
 
 func TestReverseMapCoreAttrsForSchema_CaseInsensitivePropName(t *testing.T) {
 	schema := json.RawMessage(`{"UserName":{"type":"string"}}`)
 	coreAttrs := map[string]json.RawMessage{"userName": json.RawMessage(`"jdoe"`)}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, consumed, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.JSONEq(t, `"jdoe"`, string(result["UserName"]))
+	require.Contains(t, consumed, "userName")
 }
 
 func TestReverseMapCoreAttrsForSchema_NoMatchingSchemaProp(t *testing.T) {
 	schema := json.RawMessage(`{"foo":{"type":"string"}}`)
 	coreAttrs := map[string]json.RawMessage{"userName": json.RawMessage(`"jdoe"`)}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, consumed, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.Nil(t, result)
+	require.Empty(t, consumed)
 }
 
 func TestReverseMapCoreAttrsForSchema_MultiComplex_ArrayType(t *testing.T) {
@@ -216,7 +228,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_ArrayType(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"emails": json.RawMessage(`[{"value":"a@example.com","type":"work","primary":true}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got []string
 	require.NoError(t, json.Unmarshal(result["email"], &got))
 	require.Equal(t, []string{"a@example.com"}, got)
@@ -227,7 +240,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_StringType(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"emails": json.RawMessage(`[{"value":"a@example.com","type":"work","primary":true}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.JSONEq(t, `"a@example.com"`, string(result["email"]))
 }
 
@@ -243,7 +257,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_ArrayOfObjects_AllEntriesPres
 			{"value":"a.home@example.com","type":"home","primary":false}
 		]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got []map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["email"], &got))
 	require.Len(t, got, 2)
@@ -264,7 +279,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_SingleObject(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"emails": json.RawMessage(`[{"value":"a.work@example.com","type":"work","primary":true}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["email"], &got))
 	require.Equal(t, "a.work@example.com", got["value"])
@@ -284,7 +300,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_SingleObject_TakesFirstEntry(
 			{"value":"a.home@example.com","type":"home","primary":false}
 		]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["email"], &got))
 	require.Equal(t, "a.work@example.com", got["value"])
@@ -298,7 +315,8 @@ func TestReverseMapCoreAttrsForSchema_MultiComplex_ArrayOfStrings_AllEntriesPres
 			{"value":"a.home@example.com","type":"home","primary":false}
 		]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got []string
 	require.NoError(t, json.Unmarshal(result["email"], &got))
 	require.Equal(t, []string{"a.work@example.com", "a.home@example.com"}, got)
@@ -309,7 +327,8 @@ func TestReverseMapCoreAttrsForSchema_SubAttr(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"name": json.RawMessage(`{"givenName":"John","familyName":"Doe"}`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.JSONEq(t, `"John"`, string(result["given_name"]))
 }
 
@@ -318,7 +337,8 @@ func TestReverseMapCoreAttrsForSchema_SubAttr_MissingKey(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"name": json.RawMessage(`{"familyName":"Doe"}`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.Nil(t, result)
 }
 
@@ -327,7 +347,8 @@ func TestReverseMapCoreAttrsForSchema_AddrPart(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"addresses": json.RawMessage(`[{"country":"US","type":"work","primary":true}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.JSONEq(t, `"US"`, string(result["country"]))
 }
 
@@ -362,7 +383,8 @@ func TestReverseMapCoreAttrsForSchema_AddrPart_EmptyArray(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"addresses": json.RawMessage(`[]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	require.Nil(t, result)
 }
 
@@ -378,7 +400,8 @@ func TestReverseMapCoreAttrsForSchema_AddressObject(t *testing.T) {
 			"type":"work","primary":true
 		}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["address"], &got))
 	require.Equal(t, "456 Tech Park", got["street_address"])
@@ -393,7 +416,8 @@ func TestReverseMapCoreAttrsForSchema_AddressArrayOfObjects(t *testing.T) {
 	coreAttrs := map[string]json.RawMessage{
 		"addresses": json.RawMessage(`[{"street":"456 Tech Park","city":"Colombo","type":"work","primary":true}]`),
 	}
-	result := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	result, _, err := reverseMapCoreAttrsForSchema(coreAttrs, schema)
+	require.NoError(t, err)
 	var got []map[string]interface{}
 	require.NoError(t, json.Unmarshal(result["address"], &got))
 	require.Len(t, got, 1)

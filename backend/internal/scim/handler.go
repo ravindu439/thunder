@@ -167,7 +167,8 @@ func mapSCIMError(svcErr *tidcommon.ServiceError) (httpStatus int, scimType stri
 		ErrorInvalidPatchOp.Code,
 		ErrorInvalidPatchValue.Code,
 		ErrorConflictingAttributesParams.Code,
-		ErrorSortNotSupported.Code:
+		ErrorSortNotSupported.Code,
+		ErrorConflictingAttributeValue.Code:
 		return http.StatusBadRequest, scimErrorTypeInvalidValue
 
 		// 400 invalidPath — PATCH "path" is missing, unsupported, or malformed.

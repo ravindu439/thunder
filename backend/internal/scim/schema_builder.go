@@ -645,6 +645,18 @@ type rawPropertyDef struct {
 	Items       *rawPropertyDef           `json:"items"`      // for type=array
 }
 
+// parseSchemaRawProps unmarshals an entity-type JSON schema into a map of rawPropertyDef.
+// Returns hasSchema=false if schema is empty. Returns an error if the schema contains malformed JSON.
+func parseSchemaRawProps(schema json.RawMessage) (rawProps map[string]rawPropertyDef, hasSchema bool, err error) {
+	if len(schema) == 0 {
+		return nil, false, nil
+	}
+	if err := json.Unmarshal(schema, &rawProps); err != nil {
+		return nil, true, fmt.Errorf("parseSchemaRawProps: failed to parse schema JSON: %w", err)
+	}
+	return rawProps, true, nil
+}
+
 // missingRequiredAttrs returns the names of entity-type schema properties marked
 // "required" that are absent from attrs, after core-attribute reverse-mapping has
 // already been merged in. This lets CreateUser/ReplaceUser reject a request with a
@@ -652,10 +664,12 @@ type rawPropertyDef struct {
 // When skipCredential is true, required credential properties are not reported
 // missing (mirrors entitytype.Schema.Validate's skipCredentialRequired behavior
 // used on update, where credentials are not expected to be resent).
-func missingRequiredAttrs(attrs map[string]json.RawMessage, schema json.RawMessage, skipCredential bool) []string {
-	var rawProps map[string]rawPropertyDef
-	if err := json.Unmarshal(schema, &rawProps); err != nil {
-		return nil
+func missingRequiredAttrs(
+	attrs map[string]json.RawMessage, schema json.RawMessage, skipCredential bool,
+) ([]string, error) {
+	rawProps, hasSchema, err := parseSchemaRawProps(schema)
+	if err != nil || !hasSchema {
+		return nil, err
 	}
 
 	var missing []string
@@ -666,12 +680,62 @@ func missingRequiredAttrs(attrs map[string]json.RawMessage, schema json.RawMessa
 		if skipCredential && def.Credential {
 			continue
 		}
-		if _, ok := attrs[name]; !ok {
+		if !hasAttrCaseInsensitive(attrs, name) {
 			missing = append(missing, name)
 		}
 	}
 	sort.Strings(missing)
-	return missing
+	return missing, nil
+}
+
+// undeclaredAttrs returns the names of attributes present in extensionAttrs or coreAttrs
+// that are not declared in the entity-type schema or reverse-mapped to a schema property.
+// Matching is case-insensitive per SCIM RFC 7643 §2.1.
+// This lets CreateUser/ReplaceUser reject a request with a clear, per-user-type message
+// instead of a generic failure.
+func undeclaredAttrs(
+	extensionAttrs map[string]json.RawMessage,
+	_ map[string]json.RawMessage,
+	_ map[string]struct{},
+	schema json.RawMessage,
+) ([]string, error) {
+	rawProps, hasSchema, err := parseSchemaRawProps(schema)
+	if err != nil || !hasSchema {
+		return nil, err
+	}
+
+	var undeclared []string
+	for name := range extensionAttrs {
+		if !hasPropCaseInsensitive(rawProps, name) {
+			undeclared = append(undeclared, name)
+		}
+	}
+
+	// Core attribute undeclared-checking is dropped for now: real SCIM clients send
+	// standard envelope fields (active, displayName, externalId, groups, locale,
+	// password, ...) that a business schema has no reason to declare. TODO: revisit
+	// with a proper per-attribute error mechanism.
+
+	sort.Strings(undeclared)
+	return undeclared, nil
+}
+
+func hasAttrCaseInsensitive(attrs map[string]json.RawMessage, target string) bool {
+	for k := range attrs {
+		if strings.EqualFold(k, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPropCaseInsensitive(rawProps map[string]rawPropertyDef, target string) bool {
+	for propName := range rawProps {
+		if strings.EqualFold(propName, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildSchemaURN returns the canonical lowercase SCIM extension URN for a ThunderID user type.
