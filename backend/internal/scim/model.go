@@ -140,3 +140,15 @@ type SCIMErrorResponse struct {
 	ScimType string   `json:"scimType,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 }
+
+// SCIMSearchRequest is the request payload shape of the .search request
+type SCIMSearchRequest struct {
+	Schemas            []string `json:"schemas"`
+	Filter             string   `json:"filter,omitempty"`
+	Attributes         []string `json:"attributes,omitempty"`
+	ExcludedAttributes []string `json:"excludedAttributes,omitempty"`
+	SortBy             string   `json:"sortBy,omitempty"`
+	SortOrder          string   `json:"sortOrder,omitempty"`
+	StartIndex         int      `json:"startIndex,omitempty"`
+	Count              int      `json:"count,omitempty"`
+}

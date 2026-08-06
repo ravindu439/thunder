@@ -85,6 +85,136 @@ func buildSCIMUserListResponse(users []SCIMUser, totalResults, startIndex, items
 	}
 }
 
+var alwaysReturnedUserAttrs = map[string]struct{}{"id": {}, "schemas": {}, "meta": {}}
+
+// resolveAttributePath splits an optionally URN-qualified attribute path
+// (RFC 7644 §3.9) into its bare name and which namespace it's pinned to, if
+// any. A bare name is unqualified and may match either namespace.
+func resolveAttributePath(attr, extensionURN string) (name string, coreOnly, extensionOnly bool) {
+	if extensionURN != "" && strings.HasPrefix(attr, extensionURN+":") {
+		return attr[len(extensionURN)+1:], false, true
+	}
+	if strings.HasPrefix(attr, SCIMCoreUserSchemaURN+":") {
+		return attr[len(SCIMCoreUserSchemaURN)+1:], true, false
+	}
+	return attr, false, false
+}
+
+// projectSCIMAttributes prunes a marshaled SCIM resource per RFC 7644 §3.9.
+// attributes takes precedence over excludedAttributes; id/schemas/meta are
+// always kept. Paths may be bare names, matched against top-level keys and
+// keys inside the extension-URN object, or URN-qualified to pin the match to
+// one namespace.
+func projectSCIMAttributes(
+	resource map[string]interface{}, extensionURN string, attributes, excludedAttributes []string,
+) map[string]interface{} {
+	keep := len(attributes) > 0
+	paths := attributes
+	if !keep {
+		paths = excludedAttributes
+	}
+
+	top := make(map[string]struct{}, len(paths))
+	ext := make(map[string]struct{}, len(paths))
+	for _, attr := range paths {
+		name, coreOnly, extOnly := resolveAttributePath(attr, extensionURN)
+		lname := strings.ToLower(name)
+		if !extOnly {
+			top[lname] = struct{}{}
+		}
+		if !coreOnly {
+			ext[lname] = struct{}{}
+		}
+	}
+
+	extObj, hasExt := resource[extensionURN].(map[string]interface{})
+	hasExt = hasExt && extensionURN != ""
+
+	projected := make(map[string]interface{}, len(resource))
+	for k, v := range resource {
+		if k == extensionURN {
+			continue
+		}
+		_, always := alwaysReturnedUserAttrs[k]
+		_, matched := top[strings.ToLower(k)]
+		if always || matched == keep {
+			projected[k] = v
+		}
+	}
+	if hasExt {
+		if kept := filterMap(extObj, ext, keep); len(kept) > 0 {
+			projected[extensionURN] = kept
+		}
+	}
+	return projected
+}
+
+// filterMap keeps keys present in set (keep true) or absent from it (keep
+// false), matching case-insensitively.
+func filterMap(m map[string]interface{}, set map[string]struct{}, keep bool) map[string]interface{} {
+	result := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		_, in := set[strings.ToLower(k)]
+		if in == keep {
+			result[k] = v
+		}
+	}
+	return result
+}
+
+// projectSCIMUserListResponse rebuilds a list response with each resource's
+// attributes pruned. Returns nil, nil if no projection was requested.
+func projectSCIMUserListResponse(
+	listResp SCIMUserListResponse, attributes, excludedAttributes []string,
+) (map[string]interface{}, error) {
+	if len(attributes) == 0 && len(excludedAttributes) == 0 {
+		return nil, nil
+	}
+	shallow := listResp
+	shallow.Resources = nil
+	raw, err := json.Marshal(shallow)
+	if err != nil {
+		return nil, fmt.Errorf("projectSCIMUserListResponse: failed to marshal list response: %w", err)
+	}
+	var envelope map[string]interface{}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("projectSCIMUserListResponse: failed to unmarshal list response: %w", err)
+	}
+	resources := make([]map[string]interface{}, 0, len(listResp.Resources))
+	for _, u := range listResp.Resources {
+		raw, err := json.Marshal(u)
+		if err != nil {
+			return nil, fmt.Errorf("projectSCIMUserListResponse: failed to marshal resource: %w", err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return nil, fmt.Errorf("projectSCIMUserListResponse: failed to unmarshal resource: %w", err)
+		}
+		resources = append(resources, projectSCIMAttributes(m, u.ExtensionURN, attributes, excludedAttributes))
+	}
+	envelope["Resources"] = resources
+	return envelope, nil
+}
+
+// projectSCIMUserResource prunes a single SCIM User resource per RFC 7644 §3.9.
+// Returns nil, nil if no projection was requested.
+func projectSCIMUserResource(
+	u SCIMUser, attributes, excludedAttributes []string,
+) (map[string]interface{}, error) {
+	if len(attributes) == 0 && len(excludedAttributes) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(u)
+	if err != nil {
+		return nil, fmt.Errorf("projectSCIMUserResource: failed to marshal resource: %w", err)
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("projectSCIMUserResource: failed to unmarshal resource: %w", err)
+	}
+	return projectSCIMAttributes(m, u.ExtensionURN, attributes, excludedAttributes), nil
+}
+
 func userVersionState(u user.User) any {
 	return struct {
 		Attributes json.RawMessage

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
+	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
 	"github.com/thunder-id/thunderid/internal/user"
@@ -53,8 +54,9 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 		startIndex = 1
 	}
 	if count < 1 {
-		count = 20
+		count = serverconst.DefaultPageSize
 	}
+
 	offset := startIndex - 1
 	listResp, svcErr := s.userService.GetUserList(ctx, count, offset, filters, false)
 	if svcErr != nil {

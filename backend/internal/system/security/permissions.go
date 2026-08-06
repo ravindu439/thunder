@@ -273,6 +273,7 @@ func InitSystemPermissions(handle string) {
 		{"GET /scim/v2/Schemas/**", ""},
 		{"GET /scim/v2/Users", p.UserView},
 		{"POST /scim/v2/Users", p.User},
+		{"POST /scim/v2/Users/.search", p.UserView},
 		{"GET /scim/v2/Users/**", p.UserView},
 		{"PUT /scim/v2/Users/**", p.User},
 		{"DELETE /scim/v2/Users/**", p.User},

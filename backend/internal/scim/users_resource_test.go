@@ -135,3 +135,209 @@ func TestSCIMUser_MarshalJSON(t *testing.T) {
 	ext := map2["urn:thunderid:params:scim:schemas:employee:2.0:User"].(map[string]interface{})
 	require.Equal(t, "Engineering", ext["department"])
 }
+
+func TestProjectSCIMAttributes(t *testing.T) {
+	const extURN = "urn:thunderid:params:scim:schemas:employee:2.0:User"
+	resource := map[string]interface{}{
+		"id":       "u1",
+		"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+		"meta":     map[string]interface{}{"resourceType": "User"},
+		"userName": "alice",
+		"emails":   []interface{}{"alice@example.com"},
+		"active":   true,
+		extURN: map[string]interface{}{
+			"given_name": "Alice",
+			"department": "Engineering",
+		},
+	}
+
+	t.Run("attributes keeps requested plus always-returned", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{"userName"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+		}, got)
+	})
+
+	t.Run("excludedAttributes drops requested but keeps always-returned", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, nil, []string{"emails", "active"})
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+			extURN: map[string]interface{}{
+				"given_name": "Alice",
+				"department": "Engineering",
+			},
+		}, got)
+	})
+
+	t.Run("attributes takes precedence when both supplied", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{"userName"}, []string{"userName"})
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+		}, got)
+	})
+
+	t.Run("neither supplied is a pass-through", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, nil, nil)
+		require.Equal(t, resource, got)
+	})
+
+	t.Run("bare name selects a single key inside the extension object", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{"given_name"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":      "u1",
+			"schemas": []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":    map[string]interface{}{"resourceType": "User"},
+			extURN: map[string]interface{}{
+				"given_name": "Alice",
+			},
+		}, got)
+	})
+
+	t.Run("requesting a core attribute does not drop the extension object", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{"userName", "given_name"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+			extURN: map[string]interface{}{
+				"given_name": "Alice",
+			},
+		}, got)
+	})
+
+	t.Run("URN-qualified extension path selects only that key", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{extURN + ":department"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":      "u1",
+			"schemas": []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":    map[string]interface{}{"resourceType": "User"},
+			extURN: map[string]interface{}{
+				"department": "Engineering",
+			},
+		}, got)
+	})
+
+	t.Run("URN-qualified core path selects only that top-level key", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{SCIMCoreUserSchemaURN + ":userName"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+		}, got)
+	})
+
+	t.Run("excludedAttributes bare name drops only that extension key", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, nil, []string{"given_name"})
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+			"emails":   []interface{}{"alice@example.com"},
+			"active":   true,
+			extURN: map[string]interface{}{
+				"department": "Engineering",
+			},
+		}, got)
+	})
+
+	t.Run("excludedAttributes covering every extension key drops the extension object entirely", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, nil, []string{"given_name", "department"})
+		require.Equal(t, map[string]interface{}{
+			"id":       "u1",
+			"schemas":  []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":     map[string]interface{}{"resourceType": "User"},
+			"userName": "alice",
+			"emails":   []interface{}{"alice@example.com"},
+			"active":   true,
+		}, got)
+	})
+
+	t.Run("unresolvable path is silently omitted, not an error", func(t *testing.T) {
+		got := projectSCIMAttributes(resource, extURN, []string{"no.such.path"}, nil)
+		require.Equal(t, map[string]interface{}{
+			"id":      "u1",
+			"schemas": []interface{}{SCIMCoreUserSchemaURN, extURN},
+			"meta":    map[string]interface{}{"resourceType": "User"},
+		}, got)
+	})
+}
+
+func TestProjectSCIMUserListResponse(t *testing.T) {
+	t.Run("no projection requested returns nil", func(t *testing.T) {
+		got, err := projectSCIMUserListResponse(SCIMUserListResponse{}, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+
+	t.Run("projects each resource", func(t *testing.T) {
+		listResp := SCIMUserListResponse{
+			Schemas:      []string{SCIMListResponseSchemaURN},
+			TotalResults: 1,
+			StartIndex:   1,
+			ItemsPerPage: 1,
+			Resources: []SCIMUser{
+				{
+					ID:      "u1",
+					Schemas: []string{SCIMCoreUserSchemaURN},
+					Meta:    SCIMMeta{ResourceType: "User"},
+					CoreAttrs: map[string]json.RawMessage{
+						"userName": json.RawMessage(`"alice"`),
+						"active":   json.RawMessage(`true`),
+					},
+				},
+			},
+		}
+
+		got, err := projectSCIMUserListResponse(listResp, []string{"userName"}, nil)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.EqualValues(t, 1, got["totalResults"])
+
+		resources, ok := got["Resources"].([]map[string]interface{})
+		require.True(t, ok)
+		require.Len(t, resources, 1)
+		require.Equal(t, "u1", resources[0]["id"])
+		require.Equal(t, "alice", resources[0]["userName"])
+		require.NotContains(t, resources[0], "active")
+	})
+}
+
+func TestProjectSCIMUserResource(t *testing.T) {
+	const extURN = "urn:thunderid:params:scim:schemas:employee:2.0:User"
+	u := SCIMUser{
+		ID:           "u1",
+		Schemas:      []string{SCIMCoreUserSchemaURN, extURN},
+		ExtensionURN: extURN,
+		Attributes:   json.RawMessage(`{"department":"Engineering"}`),
+		Meta:         SCIMMeta{ResourceType: "User"},
+	}
+
+	t.Run("no projection requested returns nil", func(t *testing.T) {
+		got, err := projectSCIMUserResource(u, nil, nil)
+		require.NoError(t, err)
+		require.Nil(t, got)
+	})
+
+	t.Run("projects the resource using its own extension URN", func(t *testing.T) {
+		got, err := projectSCIMUserResource(u, []string{"department"}, nil)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "u1", got["id"])
+
+		ext, ok := got[extURN].(map[string]interface{})
+		require.True(t, ok)
+		require.Equal(t, "Engineering", ext["department"])
+	})
+}
