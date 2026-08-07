@@ -476,6 +476,22 @@ var (
 			DefaultValue: "A core-mapped attribute was supplied with different values in the core and custom schema",
 		},
 	}
+
+	// ErrorUnauthenticated is returned when a request to /scim/v2/Me carries no
+	// authenticated subject (RFC 7644 §3.11 requires 401 for missing authentication,
+	// as distinct from 403 for an authenticated caller lacking authorization).
+	ErrorUnauthenticated = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1032",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.unauthenticated",
+			DefaultValue: "Unauthenticated",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.unauthenticated_description",
+			DefaultValue: "The request does not carry a valid authenticated subject",
+		},
+	}
 )
 
 // newMissingRequiredAttributesError builds a SCIM-1018 (schema validation failed)
