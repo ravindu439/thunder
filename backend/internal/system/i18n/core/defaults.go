@@ -1062,6 +1062,8 @@ var defaultMessages = map[string]string{
 	"error.scim.schema_validation_failed_description": "User attributes do not conform to the required schema",
 	"error.scim.sort_not_supported": "Sorting not supported",
 	"error.scim.sort_not_supported_description": "Sorting via sortBy or sortOrder is not supported in this implementation",
+	"error.scim.unauthenticated": "Unauthenticated",
+	"error.scim.unauthenticated_description": "The request does not carry a valid authenticated subject",
 	"error.scim.uniqueness_conflict": "Uniqueness conflict",
 	"error.scim.uniqueness_conflict_description": "A user with the same unique attribute value already exists",
 	"error.scim.unknown_user_type": "Unknown user type",

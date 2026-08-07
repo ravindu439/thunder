@@ -13,6 +13,7 @@ import (
 
 	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
 	"github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/security"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
 
@@ -82,7 +83,6 @@ func TestHandleUsersDeleteRequest_Success(t *testing.T) {
 
 func TestHandleUsersCreateRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-	payloadBody := scimTestPayloadBody
 
 	expectedUser := &SCIMUser{
 		Schemas: []string{SCIMCoreUserSchemaURN, "urn:thunderid:params:scim:schemas:person:2.0:User"},
@@ -98,7 +98,7 @@ func TestHandleUsersCreateRequest_Success(t *testing.T) {
 	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
-	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users", bytes.NewBufferString(payloadBody))
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users", bytes.NewBufferString(scimTestPayloadBody))
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	rr := httptest.NewRecorder()
 
@@ -132,7 +132,6 @@ func TestHandleUsersListRequest_Success(t *testing.T) {
 
 func TestHandleUsersReplaceRequest_Success(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
-	payloadBody := scimTestPayloadBody
 
 	expectedUser := &SCIMUser{
 		Schemas: []string{SCIMCoreUserSchemaURN, "urn:thunderid:params:scim:schemas:person:2.0:User"},
@@ -148,7 +147,7 @@ func TestHandleUsersReplaceRequest_Success(t *testing.T) {
 	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
-	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-123", bytes.NewBufferString(payloadBody))
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-123", bytes.NewBufferString(scimTestPayloadBody))
 	req.SetPathValue("id", "user-123")
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	rr := httptest.NewRecorder()
@@ -156,6 +155,165 @@ func TestHandleUsersReplaceRequest_Success(t *testing.T) {
 	h.HandleUsersReplaceRequest(rr, req)
 	require.Equal(t, expectedUser.Meta.Version, rr.Header().Get("ETag"))
 	require.Equal(t, http.StatusOK, rr.Code)
+}
+
+// --- GET /scim/v2/Me (RFC 7644 §3.11) ---
+
+func TestHandleMeGetRequest_Success(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	expectedUser := &SCIMUser{
+		Schemas: []string{SCIMCoreUserSchemaURN},
+		ID:      "user-123",
+		Meta: SCIMMeta{
+			ResourceType: "User",
+			Location:     testBaseURL + "/scim/v2/Users/user-123",
+			Version:      `W/"abc12345"`,
+		},
+	}
+	mockSvc.On("GetUser", mock.Anything, "user-123", testBaseURL).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Me", nil)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeGetRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Equal(t, expectedUser.Meta.Location, rr.Header().Get("Location"))
+	require.Equal(t, expectedUser.Meta.Version, rr.Header().Get("ETag"))
+
+	var got SCIMUser
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, expectedUser.ID, got.ID)
+}
+
+func TestHandleMeGetRequest_NoSubject_Returns401(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Me", nil)
+	rr := httptest.NewRecorder()
+
+	h.HandleMeGetRequest(rr, req)
+
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestHandleMeGetRequest_ServiceError_Returns404(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("GetUser", mock.Anything, "user-123", testBaseURL).
+		Return((*SCIMUser)(nil), &ErrorUserNotFound)
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Me", nil)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeGetRequest(rr, req)
+
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+// --- PUT /scim/v2/Me (RFC 7644 §3.11) ---
+
+func TestHandleMeReplaceRequest_Success(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	expectedUser := &SCIMUser{
+		Schemas: []string{SCIMCoreUserSchemaURN, "urn:thunderid:params:scim:schemas:person:2.0:User"},
+		ID:      "user-123",
+		Meta: SCIMMeta{
+			ResourceType: "User",
+			Location:     testBaseURL + "/scim/v2/Users/user-123",
+			Version:      `W/"abc12345"`,
+		},
+	}
+	mockSvc.On(
+		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL,
+	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", bytes.NewBufferString(scimTestPayloadBody))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Equal(t, expectedUser.Meta.Location, rr.Header().Get("Location"))
+	require.Equal(t, expectedUser.Meta.Version, rr.Header().Get("ETag"))
+}
+
+func TestHandleMeReplaceRequest_NoSubject_Returns401(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestHandleMeReplaceRequest_WrongContentType_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", bytes.NewBufferString(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleMeReplaceRequest_EmptyBody_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", http.NoBody)
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleMeReplaceRequest_InvalidJSON_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", bytes.NewBufferString(`not json`))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandleMeReplaceRequest_ServiceError_Returns404(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ReplaceUser", mock.Anything, "user-123",
+		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL).
+		Return((*SCIMUser)(nil), &ErrorUserNotFound)
+
+	body := `{"schemas":["urn:thunderid:params:scim:schemas:person:2.0:User"],` +
+		`"urn:thunderid:params:scim:schemas:person:2.0:User":{}}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Me", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeReplaceRequest(rr, req)
+
+	require.Equal(t, http.StatusNotFound, rr.Code)
 }
 
 // --- GET /scim/v2/Users/{id} error paths ---
@@ -802,12 +960,8 @@ func TestHandleUsersReplaceRequest_PreconditionFailed(t *testing.T) {
 		mock.AnythingOfType("*scim.SCIMUserPayload"), `W/"stale"`, testBaseURL).
 		Return((*SCIMUser)(nil), &ErrorPreconditionFailed)
 
-	payloadBody := `{
-        "schemas": ["urn:thunderid:params:scim:schemas:person:2.0:User"],
-        "urn:thunderid:params:scim:schemas:person:2.0:User": {"given_name": "Test"}
-    }`
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
-	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-123", bytes.NewBufferString(payloadBody))
+	req := httptest.NewRequest(http.MethodPut, "/scim/v2/Users/user-123", bytes.NewBufferString(scimTestPayloadBody))
 	req.SetPathValue("id", "user-123")
 	req.Header.Set("Content-Type", constants.SCIMContentType)
 	req.Header.Set("If-Match", `W/"stale"`)

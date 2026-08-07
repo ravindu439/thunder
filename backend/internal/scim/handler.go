@@ -194,6 +194,10 @@ func mapSCIMError(svcErr *tidcommon.ServiceError) (httpStatus int, scimType stri
 	case ErrorUnsupportedOperation.Code:
 		return http.StatusNotImplemented, "notImplemented"
 
+	// 401 — no authenticated subject present.
+	case ErrorUnauthenticated.Code:
+		return http.StatusUnauthorized, ""
+
 	// 403 — authorization failure.
 	case tidcommon.ErrorUnauthorized.Code:
 		return http.StatusForbidden, ""
