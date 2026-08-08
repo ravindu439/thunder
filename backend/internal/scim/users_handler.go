@@ -14,6 +14,7 @@ import (
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/database/utils"
 	"github.com/thunder-id/thunderid/internal/system/log"
+	"github.com/thunder-id/thunderid/internal/system/security"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
 
@@ -279,6 +280,64 @@ func (h *scimUsersHandler) HandleUsersReplaceRequest(w http.ResponseWriter, r *h
 	w.Header().Set("ETag", replaced.Meta.Version)
 	h.writeUserResponse(ctx, w, http.StatusOK, replaced, attributes, excludedAttributes)
 	logger.Debug(ctx, "SCIM User replaced", log.String("userID", userID))
+}
+
+// HandleMeGetRequest handles GET /scim/v2/Me (RFC 7644 §3.11).
+// Resolves the authenticated subject and processes the request directly
+// against the aliased User resource, per RFC 7644 §3.11 option 3.
+func (h *scimUsersHandler) HandleMeGetRequest(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+
+	userID := strings.TrimSpace(security.GetSubject(ctx))
+	if userID == "" {
+		h.handleSCIMError(w, r, &ErrorUnauthenticated)
+		return
+	}
+	scimUser, svcErr := h.svc.GetUser(ctx, userID, h.baseURL)
+	if svcErr != nil {
+		h.handleSCIMError(w, r, svcErr)
+		return
+	}
+	w.Header().Set("Location", scimUser.Meta.Location)
+	w.Header().Set("ETag", scimUser.Meta.Version)
+	writeSCIMSuccessResponse(ctx, w, http.StatusOK, scimUser)
+	logger.Debug(ctx, "SCIM Me GET sent", log.String("userID", userID))
+}
+
+// HandleMeReplaceRequest handles PUT /scim/v2/Me (RFC 7644 §3.11).
+func (h *scimUsersHandler) HandleMeReplaceRequest(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+
+	userID := strings.TrimSpace(security.GetSubject(ctx))
+	if userID == "" {
+		h.handleSCIMError(w, r, &ErrorUnauthenticated)
+		return
+	}
+	if svcErr := validateSCIMContentType(r); svcErr != nil {
+		h.handleSCIMError(w, r, svcErr)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) == 0 {
+		h.handleSCIMError(w, r, &ErrorInvalidRequestBody)
+		return
+	}
+	payload, svcErr := ValidateSCIMUserRequest(body)
+	if svcErr != nil {
+		h.handleSCIMError(w, r, svcErr)
+		return
+	}
+	replaced, svcErr := h.svc.ReplaceUser(ctx, userID, payload, r.Header.Get("If-Match"), h.baseURL)
+	if svcErr != nil {
+		h.handleSCIMError(w, r, svcErr)
+		return
+	}
+	w.Header().Set("Location", replaced.Meta.Location)
+	w.Header().Set("ETag", replaced.Meta.Version)
+	writeSCIMSuccessResponse(ctx, w, http.StatusOK, replaced)
+	logger.Debug(ctx, "SCIM Me replaced", log.String("userID", userID))
 }
 
 // HandleUsersDeleteRequest handles DELETE /scim/v2/Users/{id}

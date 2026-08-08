@@ -160,7 +160,22 @@ func registerRoutes(mux *http.ServeMux, h *scimHandler, uh *scimUsersHandler, gh
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
 		optsCRUD,
 	))
-
+	// Me — RFC 7644 §3.11 authenticated-subject alias, processed directly.
+	mux.HandleFunc(middleware.WithCORS(
+		"GET "+SCIMBasePath+"/Me",
+		uh.HandleMeGetRequest,
+		optsCRUD,
+	))
+	mux.HandleFunc(middleware.WithCORS(
+		"PUT "+SCIMBasePath+"/Me",
+		uh.HandleMeReplaceRequest,
+		optsCRUD,
+	))
+	mux.HandleFunc(middleware.WithCORS(
+		"OPTIONS "+SCIMBasePath+"/Me",
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		optsCRUD,
+	))
 	// users/.search endpoint
 	mux.HandleFunc(middleware.WithCORS(
 		"POST "+SCIMBasePath+"/Users/.search",
