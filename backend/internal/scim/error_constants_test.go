@@ -32,3 +32,12 @@ func TestNewMissingRequiredAttributesError(t *testing.T) {
 	require.Contains(t, svcErr.ErrorDescription.DefaultValue, `"employee"`)
 	require.Contains(t, svcErr.ErrorDescription.DefaultValue, "department, employee_id")
 }
+
+func TestNewUndeclaredAttributesError(t *testing.T) {
+	svcErr := newUndeclaredAttributesError("employee", []string{"extra1", "extra2"})
+
+	require.Equal(t, ErrorSchemaValidationFailed.Code, svcErr.Code)
+	require.Equal(t, ErrorSchemaValidationFailed.Type, svcErr.Type)
+	require.Contains(t, svcErr.ErrorDescription.DefaultValue, `"employee"`)
+	require.Contains(t, svcErr.ErrorDescription.DefaultValue, "extra1, extra2")
+}

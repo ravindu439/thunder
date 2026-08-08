@@ -432,9 +432,9 @@ func TestHandleUsersReplaceRequest_MutabilityViolation_Returns400(t *testing.T) 
 
 func TestHandleUsersListRequest_FilterNotSupported_Returns400(t *testing.T) {
 	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
-	// Compound "and" expressions are unsupported; only single "eq" is allowed.
+	// "or" expressions are unsupported; only "eq" clauses joined by "and" are allowed.
 	req := httptest.NewRequest(http.MethodGet,
-		`/scim/v2/Users?filter=userName+eq+"alice"+and+active+eq+true`, nil)
+		`/scim/v2/Users?filter=userName+eq+"alice"+or+active+eq+true`, nil)
 	rr := httptest.NewRecorder()
 
 	h.HandleUsersListRequest(rr, req)
@@ -522,6 +522,28 @@ func TestHandleUsersListRequest_FilterTranslatesCoreAttributes(t *testing.T) {
 			name:           "URN-prefixed attribute with numeric version segment",
 			filter:         `urn:thunderid:params:scim:schemas:employee_hier:2.0:User:active eq true`,
 			expectedFilter: map[string]interface{}{"active": true},
+		},
+		{
+			name:           "compound AND with two clauses",
+			filter:         `userName eq "alice" and active eq true`,
+			expectedFilter: map[string]interface{}{"username": "alice", "active": true},
+		},
+		{
+			name:           "compound AND with case-insensitive keyword",
+			filter:         `userName eq "alice" AND active eq true`,
+			expectedFilter: map[string]interface{}{"username": "alice", "active": true},
+		},
+		{
+			name:   "compound AND with three clauses",
+			filter: `userName eq "alice" and active eq true and name.givenName eq "Alice"`,
+			expectedFilter: map[string]interface{}{
+				"username": "alice", "active": true, "given_name": "Alice",
+			},
+		},
+		{
+			name:           "quoted value containing literal 'and' text is not split",
+			filter:         `active eq "call and response"`,
+			expectedFilter: map[string]interface{}{"active": "call and response"},
 		},
 	}
 
@@ -847,6 +869,31 @@ func TestParseSCIMFilterForEq_MalformedExpression_ReturnsError(t *testing.T) {
 
 func TestParseSCIMFilterForEq_InvalidCompValue_ReturnsError(t *testing.T) {
 	_, err := parseSCIMFilterForEq("userName eq null")
+	require.Error(t, err)
+}
+
+func TestParseSCIMFilterForEq_CompoundAnd_DuplicateAttribute_ReturnsError(t *testing.T) {
+	_, err := parseSCIMFilterForEq(`userName eq "alice" and userName eq "bob"`)
+	require.Error(t, err)
+}
+
+func TestParseSCIMFilterForEq_CompoundAnd_MalformedSecondClause_ReturnsError(t *testing.T) {
+	_, err := parseSCIMFilterForEq(`userName eq "alice" and active`)
+	require.Error(t, err)
+}
+
+func TestParseSCIMFilterForEq_Or_StillUnsupported(t *testing.T) {
+	_, err := parseSCIMFilterForEq(`userName eq "alice" or active eq true`)
+	require.Error(t, err)
+}
+
+func TestParseSCIMFilterForEq_Not_StillUnsupported(t *testing.T) {
+	_, err := parseSCIMFilterForEq(`not userName eq "alice"`)
+	require.Error(t, err)
+}
+
+func TestParseSCIMFilterForEq_Grouping_StillUnsupported(t *testing.T) {
+	_, err := parseSCIMFilterForEq(`(userName eq "alice")`)
 	require.Error(t, err)
 }
 

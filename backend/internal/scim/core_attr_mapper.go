@@ -396,19 +396,28 @@ func mapToCoreAttrs(rawAttrs json.RawMessage) map[string]json.RawMessage {
 }
 
 func reverseMapCoreAttrsForSchema(coreAttrs map[string]json.RawMessage,
-	schema json.RawMessage) map[string]json.RawMessage {
-	if len(coreAttrs) == 0 || len(schema) == 0 {
-		return nil
+	schema json.RawMessage) (map[string]json.RawMessage, map[string]struct{}, error) {
+	if len(coreAttrs) == 0 {
+		return nil, nil, nil
+	}
+	if len(schema) == 0 {
+		return nil, nil, nil
 	}
 	var rawProps map[string]rawPropertyDef
-	if err := json.Unmarshal(schema, &rawProps); err != nil || len(rawProps) == 0 {
-		return nil
+	if err := json.Unmarshal(schema, &rawProps); err != nil {
+		return nil, nil, err
+	}
+	if len(rawProps) == 0 {
+		return nil, nil, nil
 	}
 
 	result := make(map[string]json.RawMessage)
+	consumedCoreKeys := make(map[string]struct{})
+
 	for _, rule := range coreAttrRules {
-		coreVal, ok := coreAttrs[string(reverseLookupField(rule))]
-		if !ok || len(coreVal) == 0 {
+		lookupField := reverseLookupField(rule)
+		coreVal, actualKey := findCoreAttrValue(coreAttrs, lookupField)
+		if len(coreVal) == 0 {
 			continue
 		}
 
@@ -419,13 +428,24 @@ func reverseMapCoreAttrsForSchema(coreAttrs map[string]json.RawMessage,
 
 		if b, ok := reverseMapRuleValue(rule, coreVal, rawProps[targetAttrName]); ok {
 			result[targetAttrName] = b
+			consumedCoreKeys[actualKey] = struct{}{}
 		}
 	}
 
 	if len(result) == 0 {
-		return nil
+		return nil, consumedCoreKeys, nil
 	}
-	return result
+	return result, consumedCoreKeys, nil
+}
+
+func findCoreAttrValue(coreAttrs map[string]json.RawMessage, targetField scimCoreField) (json.RawMessage, string) {
+	target := string(targetField)
+	for k, v := range coreAttrs {
+		if strings.EqualFold(k, target) {
+			return v, k
+		}
+	}
+	return nil, ""
 }
 
 // reverseLookupField returns the coreAttrs key to read for rule, based on its kind.

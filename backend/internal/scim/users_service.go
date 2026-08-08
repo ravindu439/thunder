@@ -3,6 +3,7 @@ package scim
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
@@ -119,18 +120,39 @@ func (s *scimUsersService) CreateUser(
 		return nil, &ErrorUnknownUserType
 	}
 
+	var consumedCoreKeys map[string]struct{}
 	if len(payload.CoreAttrs) > 0 {
-		reverseMapped := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
-		for k, v := range reverseMapped {
-			if _, exists := payload.ExtensionAttrs[k]; !exists {
-				payload.ExtensionAttrs[k] = v
-			}
+		reverseMapped, consumed, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
+		if err != nil {
+			logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+			return nil, &ErrorInternalServer
+		}
+		consumedCoreKeys = consumed
+		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
+			logger.Debug(ctx, "SCIM CreateUser: conflicting value between core and custom schema",
+				log.Any("error", svcErr))
+			return nil, svcErr
 		}
 	}
-	if missing := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, false); len(missing) > 0 {
+	missing, err := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, false)
+	if err != nil {
+		logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+		return nil, &ErrorInternalServer
+	}
+	if len(missing) > 0 {
 		logger.Debug(ctx, "SCIM CreateUser: missing required attributes for user type",
 			log.String("userType", canonicalName), log.Any("missing", missing))
 		return nil, newMissingRequiredAttributesError(canonicalName, missing)
+	}
+	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, payload.CoreAttrs, consumedCoreKeys, et.Schema)
+	if err != nil {
+		logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+		return nil, &ErrorInternalServer
+	}
+	if len(undeclared) > 0 {
+		logger.Debug(ctx, "SCIM CreateUser: undeclared attributes for user type",
+			log.String("userType", canonicalName), log.Any("undeclared", undeclared))
+		return nil, newUndeclaredAttributesError(canonicalName, undeclared)
 	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {
@@ -194,18 +216,39 @@ func (s *scimUsersService) ReplaceUser(
 			log.String("userTypeName", canonicalName), log.Any("error", svcErr))
 		return nil, &ErrorUnknownUserType
 	}
+	var consumedCoreKeys map[string]struct{}
 	if len(payload.CoreAttrs) > 0 {
-		reverseMapped := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
-		for k, v := range reverseMapped {
-			if _, exists := payload.ExtensionAttrs[k]; !exists {
-				payload.ExtensionAttrs[k] = v
-			}
+		reverseMapped, consumed, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
+		if err != nil {
+			logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+			return nil, &ErrorInternalServer
+		}
+		consumedCoreKeys = consumed
+		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
+			logger.Debug(ctx, "SCIM ReplaceUser: conflicting value between core and custom schema",
+				log.Any("error", svcErr))
+			return nil, svcErr
 		}
 	}
-	if missing := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, true); len(missing) > 0 {
+	missing, err := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, true)
+	if err != nil {
+		logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+		return nil, &ErrorInternalServer
+	}
+	if len(missing) > 0 {
 		logger.Debug(ctx, "SCIM ReplaceUser: missing required attributes for user type",
 			log.String("userType", canonicalName), log.Any("missing", missing))
 		return nil, newMissingRequiredAttributesError(canonicalName, missing)
+	}
+	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, payload.CoreAttrs, consumedCoreKeys, et.Schema)
+	if err != nil {
+		logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+		return nil, &ErrorInternalServer
+	}
+	if len(undeclared) > 0 {
+		logger.Debug(ctx, "SCIM ReplaceUser: undeclared attributes for user type",
+			log.String("userType", canonicalName), log.Any("undeclared", undeclared))
+		return nil, newUndeclaredAttributesError(canonicalName, undeclared)
 	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {
@@ -267,6 +310,42 @@ func (s *scimUsersService) getCredentialKeys(ctx context.Context, canonicalName 
 		}
 	}
 	return credKeys
+}
+
+// mergeReverseMappedCoreAttrs merges core-mapped attribute values (reverse-mapped from the
+// top-level SCIM core fields) into the extension attrs map. If the same attribute is already
+// present in the extension object with a different value, this is a conflicting-value error
+// rather than a silent overwrite - the client supplied two different values for the same
+// underlying attribute through the core and custom channels, and one of them would otherwise
+// be silently discarded.
+func mergeReverseMappedCoreAttrs(
+	extensionAttrs map[string]json.RawMessage, reverseMapped map[string]json.RawMessage,
+) *tidcommon.ServiceError {
+	for k, v := range reverseMapped {
+		existing, exists := extensionAttrs[k]
+		if !exists {
+			extensionAttrs[k] = v
+			continue
+		}
+		if !jsonRawValuesEqual(existing, v) {
+			return newConflictingAttributeValueError(k)
+		}
+	}
+	return nil
+}
+
+// jsonRawValuesEqual reports whether two JSON-encoded values are semantically equal,
+// regardless of formatting differences (whitespace, key order for objects). Falls back
+// to a byte comparison if either value fails to unmarshal.
+func jsonRawValuesEqual(a, b json.RawMessage) bool {
+	var av, bv interface{}
+	if err := json.Unmarshal(a, &av); err != nil {
+		return string(a) == string(b)
+	}
+	if err := json.Unmarshal(b, &bv); err != nil {
+		return string(a) == string(b)
+	}
+	return reflect.DeepEqual(av, bv)
 }
 
 // mapUserServiceErrorToSCIM translates a user service error into a SCIM package error.
