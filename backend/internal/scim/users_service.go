@@ -192,6 +192,11 @@ func (s *scimUsersService) ReplaceUser(
 ) (*SCIMUser, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
 
+	if payload.UserTypeName == "" {
+		logger.Error(ctx, "SCIM ReplaceUser: custom schema URN required")
+		return nil, &ErrorMissingCustomSchema
+	}
+
 	runtimeCtx := security.WithRuntimeContext(ctx)
 
 	existingUser, svcErr := s.userService.GetUser(ctx, userID, false)
