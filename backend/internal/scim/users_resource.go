@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -19,9 +22,11 @@ func stripCredentialFields(
 	if len(credentialKeys) == 0 {
 		return attrs
 	}
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
+
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(attrs, &m); err != nil {
-		log.GetLogger().Error(ctx,
+		logger.Error(ctx,
 			"stripCredentialFields: failed to parse user attributes; returning empty object to prevent credential leak",
 			log.Error(err))
 		return json.RawMessage(`{}`)
@@ -36,7 +41,7 @@ func stripCredentialFields(
 	}
 	stripped, err := json.Marshal(m)
 	if err != nil {
-		log.GetLogger().Error(ctx,
+		logger.Error(ctx,
 			"stripCredentialFields: failed to marshal stripped attributes; "+
 				"returning empty object to prevent credential leak",
 			log.Error(err))
@@ -215,6 +220,8 @@ func projectSCIMUserResource(
 	return projectSCIMAttributes(m, u.ExtensionURN, attributes, excludedAttributes), nil
 }
 
+// userVersionState extracts the state of a user that determines its ETag version.
+// The ETag covers the user's raw JSON attribute payload.
 func userVersionState(u user.User) any {
 	return struct {
 		Attributes json.RawMessage

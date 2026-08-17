@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -13,6 +16,8 @@ import (
 	"github.com/thunder-id/thunderid/internal/user"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
+
+const usersServiceLoggerComponentName = "SCIMUsersService"
 
 // SCIMUsersServiceInterface defines the Users CRUD operations exposed to the users handler.
 type SCIMUsersServiceInterface interface {
@@ -47,9 +52,10 @@ func newSCIMUsersService(
 	}
 }
 
+// ListUsers retrieves a paginated list of SCIM User resources filtered by search criteria.
 func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 	filters map[string]interface{}, baseURL string) (SCIMUserListResponse, *tidcommon.ServiceError) {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	if startIndex < 1 {
 		startIndex = 1
@@ -66,13 +72,24 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 	}
 	scimUsers := make([]SCIMUser, 0, len(listResp.Users))
 	credKeysByType := make(map[string]map[string]struct{})
+	unresolvedTypes := make(map[string]struct{})
 	for _, u := range listResp.Users {
-		extensionURN := buildSchemaURN(u.Type)
+		if _, unresolved := unresolvedTypes[u.Type]; unresolved {
+			continue
+		}
 		credKeys, ok := credKeysByType[u.Type]
 		if !ok {
-			credKeys = s.getCredentialKeys(ctx, u.Type)
+			var svcErr *tidcommon.ServiceError
+			credKeys, svcErr = s.getCredentialKeys(ctx, u.Type)
+			if svcErr != nil {
+				logger.Warn(ctx, "SCIM ListUsers: omitting user with unresolvable entity type",
+					log.String("userID", u.ID), log.String("userType", u.Type))
+				unresolvedTypes[u.Type] = struct{}{}
+				continue
+			}
 			credKeysByType[u.Type] = credKeys
 		}
+		extensionURN := buildSchemaURN(u.Type)
 		scimUsers = append(scimUsers, buildSCIMUserResource(ctx, u, extensionURN, baseURL, credKeys))
 	}
 
@@ -83,7 +100,7 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 func (s *scimUsersService) GetUser(
 	ctx context.Context, userID, baseURL string,
 ) (*SCIMUser, *tidcommon.ServiceError) {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	u, svcErr := s.userService.GetUser(ctx, userID, false)
 	if svcErr != nil {
@@ -93,7 +110,10 @@ func (s *scimUsersService) GetUser(
 	}
 
 	extensionURN := buildSchemaURN(u.Type)
-	credKeys := s.getCredentialKeys(ctx, u.Type)
+	credKeys, svcErr := s.getCredentialKeys(ctx, u.Type)
+	if svcErr != nil {
+		return nil, svcErr
+	}
 	scimUser := buildSCIMUserResource(ctx, *u, extensionURN, baseURL, credKeys)
 	return &scimUser, nil
 }
@@ -102,7 +122,7 @@ func (s *scimUsersService) GetUser(
 func (s *scimUsersService) CreateUser(
 	ctx context.Context, payload *SCIMUserPayload, baseURL string,
 ) (*SCIMUser, *tidcommon.ServiceError) {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	runtimeCtx := security.WithRuntimeContext(ctx)
 	var canonicalName string
@@ -130,14 +150,12 @@ func (s *scimUsersService) CreateUser(
 		return nil, &ErrorUnknownUserType
 	}
 
-	var consumedCoreKeys map[string]struct{}
 	if len(payload.CoreAttrs) > 0 {
-		reverseMapped, consumed, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
+		reverseMapped, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
 		if err != nil {
 			logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
 			return nil, &ErrorInternalServer
 		}
-		consumedCoreKeys = consumed
 		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
 			logger.Debug(ctx, "SCIM CreateUser: conflicting value between core and custom schema",
 				log.Any("error", svcErr))
@@ -154,7 +172,7 @@ func (s *scimUsersService) CreateUser(
 			log.String("userType", canonicalName), log.Any("missing", missing))
 		return nil, newMissingRequiredAttributesError(canonicalName, missing)
 	}
-	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, payload.CoreAttrs, consumedCoreKeys, et.Schema)
+	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, et.Schema)
 	if err != nil {
 		logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
 		return nil, &ErrorInternalServer
@@ -181,7 +199,10 @@ func (s *scimUsersService) CreateUser(
 		return nil, mapUserServiceErrorToSCIM(svcErr)
 	}
 	extensionURN := buildSchemaURN(created.Type)
-	credKeys := s.getCredentialKeys(ctx, canonicalName)
+	credKeys, svcErr := s.getCredentialKeys(ctx, canonicalName)
+	if svcErr != nil {
+		return nil, svcErr
+	}
 	scimUser := buildSCIMUserResource(ctx, *created, extensionURN, baseURL, credKeys)
 	return &scimUser, nil
 }
@@ -190,7 +211,7 @@ func (s *scimUsersService) CreateUser(
 func (s *scimUsersService) ReplaceUser(
 	ctx context.Context, userID string, payload *SCIMUserPayload, ifMatch, baseURL string,
 ) (*SCIMUser, *tidcommon.ServiceError) {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	runtimeCtx := security.WithRuntimeContext(ctx)
 
@@ -232,14 +253,12 @@ func (s *scimUsersService) ReplaceUser(
 			log.String("userTypeName", canonicalName), log.Any("error", svcErr))
 		return nil, &ErrorUnknownUserType
 	}
-	var consumedCoreKeys map[string]struct{}
 	if len(payload.CoreAttrs) > 0 {
-		reverseMapped, consumed, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
+		reverseMapped, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
 		if err != nil {
 			logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
 			return nil, &ErrorInternalServer
 		}
-		consumedCoreKeys = consumed
 		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
 			logger.Debug(ctx, "SCIM ReplaceUser: conflicting value between core and custom schema",
 				log.Any("error", svcErr))
@@ -256,7 +275,7 @@ func (s *scimUsersService) ReplaceUser(
 			log.String("userType", canonicalName), log.Any("missing", missing))
 		return nil, newMissingRequiredAttributesError(canonicalName, missing)
 	}
-	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, payload.CoreAttrs, consumedCoreKeys, et.Schema)
+	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, et.Schema)
 	if err != nil {
 		logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
 		return nil, &ErrorInternalServer
@@ -285,14 +304,17 @@ func (s *scimUsersService) ReplaceUser(
 	}
 
 	extensionURN := buildSchemaURN(result.Type)
-	credKeys := s.getCredentialKeys(ctx, canonicalName)
+	credKeys, svcErr := s.getCredentialKeys(ctx, canonicalName)
+	if svcErr != nil {
+		return nil, svcErr
+	}
 	scimUser := buildSCIMUserResource(ctx, *result, extensionURN, baseURL, credKeys)
 	return &scimUser, nil
 }
 
 // DeleteUser deletes a user by ID.
 func (s *scimUsersService) DeleteUser(ctx context.Context, userID string, ifMatch string) *tidcommon.ServiceError {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	if trimmed := strings.TrimSpace(ifMatch); trimmed != "" {
 		existingUser, svcErr := s.userService.GetUser(ctx, userID, false)
@@ -315,17 +337,25 @@ func (s *scimUsersService) DeleteUser(ctx context.Context, userID string, ifMatc
 	return nil
 }
 
-func (s *scimUsersService) getCredentialKeys(ctx context.Context, canonicalName string) map[string]struct{} {
+// getCredentialKeys returns a set of attribute names that represent credentials for the given user type.
+func (s *scimUsersService) getCredentialKeys(
+	ctx context.Context, canonicalName string,
+) (map[string]struct{}, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
+
 	credKeys := make(map[string]struct{})
 	// Use elevated runtime context if necessary, but we are just reading schema info.
 	credentialInfos, err := s.entityTypeService.GetAttributes(security.WithRuntimeContext(ctx),
 		entitytype.TypeCategoryUser, canonicalName, true, false, false)
-	if err == nil {
-		for _, info := range credentialInfos {
-			credKeys[info.Attribute] = struct{}{}
-		}
+	if err != nil {
+		logger.Error(ctx, "SCIM: failed to resolve credential attribute keys",
+			log.String("userType", canonicalName), log.Any("error", err))
+		return nil, &ErrorInternalServer
 	}
-	return credKeys
+	for _, info := range credentialInfos {
+		credKeys[info.Attribute] = struct{}{}
+	}
+	return credKeys, nil
 }
 
 // mergeReverseMappedCoreAttrs merges core-mapped attribute values (reverse-mapped from the
@@ -365,21 +395,20 @@ func jsonRawValuesEqual(a, b json.RawMessage) bool {
 }
 
 // mapUserServiceErrorToSCIM translates a user service error into a SCIM package error.
-// Uses the exact error codes from user/error_constants.go.
 func mapUserServiceErrorToSCIM(svcErr *tidcommon.ServiceError) *tidcommon.ServiceError {
 	if svcErr == nil {
 		return nil
 	}
 	switch svcErr.Code {
-	case "USR-1003": // user.ErrorUserNotFound
+	case user.ErrorUserNotFound.Code:
 		return &ErrorUserNotFound
-	case "USR-1014": // user.ErrorAttributeConflict
+	case user.ErrorAttributeConflict.Code:
 		return &ErrorUniquenessConflict
-	case "USR-1019": // user.ErrorSchemaValidationFailed
+	case user.ErrorSchemaValidationFailed.Code:
 		return &ErrorSchemaValidationFailed
-	case "USR-1021": // user.ErrorEntityTypeNotFound
+	case user.ErrorEntityTypeNotFound.Code:
 		return &ErrorUnknownUserType
-	case "USR-1025": // user.ErrorCannotModifyDeclarativeResource
+	case user.ErrorCannotModifyDeclarativeResource.Code:
 		return &ErrorMutabilityViolation
 	case tidcommon.ErrorUnauthorized.Code:
 		return svcErr

@@ -1,27 +1,10 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -46,7 +29,7 @@ func TestHandleServiceProviderConfigGetRequest_Success(t *testing.T) {
 		},
 		Filter: SCIMFilterConfig{
 			Supported:  true,
-			MaxResults: 200,
+			MaxResults: constants.MaxPageSize,
 		},
 		ChangePassword: SCIMSupportedFeature{Supported: false},
 		Sort:           SCIMSupportedFeature{Supported: false},
@@ -70,7 +53,7 @@ func TestHandleServiceProviderConfigGetRequest_Success(t *testing.T) {
 	mockSvc.On("GetServiceProviderConfig", mock.Anything, testBaseURL).
 		Return(expectedConfig)
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ServiceProviderConfig", nil)
 	rr := httptest.NewRecorder()
 
@@ -97,7 +80,7 @@ func TestHandleServiceProviderConfigGetRequest_PassesBaseURL(t *testing.T) {
 			capturedURL = args.String(1)
 		})
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ServiceProviderConfig", nil)
 	rr := httptest.NewRecorder()
 
@@ -114,7 +97,7 @@ func TestHandleServiceProviderConfigGetRequest_ResponseContainsCorrectSchema(t *
 			Schemas: []string{SCIMServiceProviderConfigSchemaURN},
 		})
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ServiceProviderConfig", nil)
 	rr := httptest.NewRecorder()
 
@@ -128,7 +111,7 @@ func TestHandleServiceProviderConfigGetRequest_ResponseContainsCorrectSchema(t *
 }
 
 func TestHandleUnsupportedRequest_Returns501(t *testing.T) {
-	h := newSCIMHandler(NewSCIMServiceInterfaceMock(t), testBaseURL)
+	h := newSCIMDiscoveryHandler(NewSCIMServiceInterfaceMock(t), testBaseURL)
 	req := httptest.NewRequest(http.MethodPost, "/scim/v2/SomeUnimplementedEndpoint", nil)
 	rr := httptest.NewRecorder()
 
@@ -187,9 +170,8 @@ func TestHandleSCIMError_ErrorMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/scim/v2/test", nil)
 			rr := httptest.NewRecorder()
-			h := newSCIMHandler(nil, "")
 
-			h.handleSCIMError(rr, req, tc.svcErr)
+			handleSCIMError(rr, req, tc.svcErr)
 
 			require.Equal(t, tc.wantHTTPStatus, rr.Code)
 
@@ -215,7 +197,7 @@ func TestHandleSchemaListRequest_Success(t *testing.T) {
 	mockSvc.On("ListSchemas", mock.Anything, testBaseURL).
 		Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas", nil)
 	rr := httptest.NewRecorder()
 
@@ -237,7 +219,7 @@ func TestHandleSchemaListRequest_ErrorCases(t *testing.T) {
 		mockSvc.On("ListSchemas", mock.Anything, testBaseURL).
 			Return(SCIMSchemaListResponse{}, &ErrorSchemaNotFound)
 
-		h := newSCIMHandler(mockSvc, testBaseURL)
+		h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas", nil)
 		rr := httptest.NewRecorder()
 
@@ -259,7 +241,7 @@ func TestHandleSchemaGetRequest_Success(t *testing.T) {
 	mockSvc.On("GetSchema", mock.Anything, schemaURN, testBaseURL).
 		Return(expectedSchema, (*tidcommon.ServiceError)(nil))
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas/"+schemaURN, nil)
 	req.SetPathValue("id", schemaURN)
 	rr := httptest.NewRecorder()
@@ -281,7 +263,7 @@ func TestHandleSchemaGetRequest_ErrorCases(t *testing.T) {
 		mockSvc.On("GetSchema", mock.Anything, "urn:unknown", testBaseURL).
 			Return((*SCIMSchema)(nil), &ErrorSchemaNotFound)
 
-		h := newSCIMHandler(mockSvc, testBaseURL)
+		h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas/urn:unknown", nil)
 		req.SetPathValue("id", "urn:unknown")
 		rr := httptest.NewRecorder()
@@ -294,7 +276,7 @@ func TestHandleSchemaGetRequest_ErrorCases(t *testing.T) {
 	t.Run("MissingID_NoServiceCall", func(t *testing.T) {
 		mockSvc := NewSCIMServiceInterfaceMock(t)
 
-		h := newSCIMHandler(mockSvc, testBaseURL)
+		h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas/", nil)
 		rr := httptest.NewRecorder()
 
@@ -304,32 +286,7 @@ func TestHandleSchemaGetRequest_ErrorCases(t *testing.T) {
 	})
 }
 
-type marshalErrorStruct struct{}
-
-func (marshalErrorStruct) MarshalJSON() ([]byte, error) {
-	return nil, fmt.Errorf("forced encode error")
-}
-
-func TestWriteSCIMSuccessResponse_EncodeError(t *testing.T) {
-	rr := httptest.NewRecorder()
-	writeSCIMSuccessResponse(context.Background(), rr, http.StatusOK, marshalErrorStruct{})
-	require.Equal(t, http.StatusInternalServerError, rr.Code)
-}
-
-func TestWriteSCIMErrorResponse_EmptySchemas(t *testing.T) {
-	rr := httptest.NewRecorder()
-	writeSCIMErrorResponse(context.Background(), rr, http.StatusBadRequest, SCIMErrorResponse{
-		Status: "400",
-	})
-	require.Equal(t, http.StatusBadRequest, rr.Code)
-	var errResp SCIMErrorResponse
-	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
-	require.Equal(t, []string{SCIMErrorSchemaURN}, errResp.Schemas)
-}
-
 func TestHandleSCIMError_ServerErrorType(t *testing.T) {
-	mockSvc := NewSCIMServiceInterfaceMock(t)
-	h := newSCIMHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Schemas", nil)
 	rr := httptest.NewRecorder()
 
@@ -339,35 +296,11 @@ func TestHandleSCIMError_ServerErrorType(t *testing.T) {
 			DefaultValue: "something went wrong internally",
 		},
 	}
-	h.handleSCIMError(rr, req, svcErr)
+	handleSCIMError(rr, req, svcErr)
 
 	require.Equal(t, http.StatusInternalServerError, rr.Code)
 	var errResp SCIMErrorResponse
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&errResp))
 	require.Equal(t, "500", errResp.Status)
 	require.Equal(t, "something went wrong internally", errResp.Detail)
-}
-
-func TestMapSCIMError_UncoveredCodes(t *testing.T) {
-	status1, scimType1 := mapSCIMError(&ErrorInvalidPatchPath)
-	require.Equal(t, http.StatusBadRequest, status1)
-	require.Equal(t, scimErrorTypeInvalidPath, scimType1)
-
-	status2, scimType2 := mapSCIMError(&ErrorInternalServer)
-	require.Equal(t, http.StatusInternalServerError, status2)
-	require.Equal(t, "", scimType2)
-
-	status3, scimType3 := mapSCIMError(&ErrorFilterNotSupported)
-	require.Equal(t, http.StatusBadRequest, status3)
-	require.Equal(t, "invalidFilter", scimType3)
-
-	status4, scimType4 := mapSCIMError(&ErrorPreconditionFailed)
-	require.Equal(t, http.StatusPreconditionFailed, status4)
-	require.Equal(t, "", scimType4)
-
-	// Default case
-	defaultErr := &tidcommon.ServiceError{Code: "BOGUS-CODE"}
-	status5, scimType5 := mapSCIMError(defaultErr)
-	require.Equal(t, http.StatusBadRequest, status5)
-	require.Equal(t, scimErrorTypeInvalidValue, scimType5)
 }

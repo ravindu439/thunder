@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -36,11 +39,9 @@ func (u SCIMUser) MarshalJSON() ([]byte, error) {
 		return nil, fmt.Errorf("SCIMUser.MarshalJSON: failed to marshal base: %w", err)
 	}
 
-	// No extension attributes — return base object as-is.
-	if len(u.Attributes) == 0 || u.ExtensionURN == "" {
-		if len(u.CoreAttrs) == 0 {
-			return baseBytes, nil
-		}
+	hasExtension := len(u.Attributes) > 0 && u.ExtensionURN != ""
+	if !hasExtension && len(u.CoreAttrs) == 0 {
+		return baseBytes, nil
 	}
 
 	// Merge extension attributes under the URN key into the base map.

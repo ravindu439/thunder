@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -197,6 +200,46 @@ func TestHandleMeGetRequest_NoSubject_Returns401(t *testing.T) {
 	h.HandleMeGetRequest(rr, req)
 
 	require.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestHandleMeGetRequest_AppliesAttributeProjection(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	expectedUser := &SCIMUser{
+		ID:      "user-123",
+		Schemas: []string{SCIMCoreUserSchemaURN},
+		Meta:    SCIMMeta{ResourceType: "User", Version: `W/"abc12345"`},
+		CoreAttrs: map[string]json.RawMessage{
+			"userName": json.RawMessage(`"alice"`),
+			"active":   json.RawMessage(`true`),
+		},
+	}
+	mockSvc.On("GetUser", mock.Anything, "user-123", testBaseURL).Return(expectedUser, (*tidcommon.ServiceError)(nil))
+
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Me?attributes=userName", nil)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeGetRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	var got map[string]interface{}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, "alice", got["userName"])
+	require.NotContains(t, got, "active")
+}
+
+func TestHandleMeGetRequest_ConflictingAttributesParams_Returns400(t *testing.T) {
+	h := newSCIMUsersHandler(NewSCIMUsersServiceInterfaceMock(t), testBaseURL)
+	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Me?attributes=userName&excludedAttributes=active", nil)
+	authCtx := security.NewSecurityContextForTest("user-123", "", "", nil, nil)
+	req = req.WithContext(security.WithSecurityContextTest(req.Context(), authCtx))
+	rr := httptest.NewRecorder()
+
+	h.HandleMeGetRequest(rr, req)
+
+	require.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 func TestHandleMeGetRequest_ServiceError_Returns404(t *testing.T) {
@@ -986,100 +1029,6 @@ func TestHandleUsersDeleteRequest_PreconditionFailed(t *testing.T) {
 	h.HandleUsersDeleteRequest(rr, req)
 
 	require.Equal(t, http.StatusPreconditionFailed, rr.Code)
-}
-
-// --- parseSCIMFilterForEq direct unit tests ---
-
-func TestParseSCIMFilterForEq_EmptyString_ReturnsNil(t *testing.T) {
-	filters, err := parseSCIMFilterForEq("")
-	require.NoError(t, err)
-	require.Nil(t, filters)
-}
-
-func TestParseSCIMFilterForEq_UnsupportedOperator_ReturnsError(t *testing.T) {
-	tests := []string{
-		`userName ne "alice"`,
-		`userName co "ali"`,
-		`userName sw "al"`,
-		`userName ew "ce"`,
-		`userName pr`,
-		`age gt 5`,
-		`age lt 5`,
-		`age ge 5`,
-		`age le 5`,
-	}
-	for _, filter := range tests {
-		t.Run(filter, func(t *testing.T) {
-			_, err := parseSCIMFilterForEq(filter)
-			require.Error(t, err)
-		})
-	}
-}
-
-func TestParseSCIMFilterForEq_MalformedExpression_ReturnsError(t *testing.T) {
-	_, err := parseSCIMFilterForEq("userName")
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_InvalidCompValue_ReturnsError(t *testing.T) {
-	_, err := parseSCIMFilterForEq("userName eq null")
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_CompoundAnd_DuplicateAttribute_ReturnsError(t *testing.T) {
-	_, err := parseSCIMFilterForEq(`userName eq "alice" and userName eq "bob"`)
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_CompoundAnd_MalformedSecondClause_ReturnsError(t *testing.T) {
-	_, err := parseSCIMFilterForEq(`userName eq "alice" and active`)
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_Or_StillUnsupported(t *testing.T) {
-	_, err := parseSCIMFilterForEq(`userName eq "alice" or active eq true`)
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_Not_StillUnsupported(t *testing.T) {
-	_, err := parseSCIMFilterForEq(`not userName eq "alice"`)
-	require.Error(t, err)
-}
-
-func TestParseSCIMFilterForEq_Grouping_StillUnsupported(t *testing.T) {
-	_, err := parseSCIMFilterForEq(`(userName eq "alice")`)
-	require.Error(t, err)
-}
-
-// --- parseSCIMCompValue direct unit tests ---
-
-func TestParseSCIMCompValue(t *testing.T) {
-	tests := []struct {
-		name      string
-		raw       string
-		expected  interface{}
-		expectErr bool
-	}{
-		{name: "quoted string", raw: `"alice"`, expected: "alice"},
-		{name: "unterminated quoted string", raw: `"alice`, expectErr: true},
-		{name: "true", raw: "true", expected: true},
-		{name: "false", raw: "false", expected: false},
-		{name: "null", raw: "null", expectErr: true},
-		{name: "integer", raw: "42", expected: int64(42)},
-		{name: "decimal", raw: "3.14", expected: 3.14},
-		{name: "unrecognized", raw: "notavalue", expectErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseSCIMCompValue(tt.raw)
-			if tt.expectErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.expected, got)
-		})
-	}
 }
 
 func TestParseCSVQueryParam(t *testing.T) {

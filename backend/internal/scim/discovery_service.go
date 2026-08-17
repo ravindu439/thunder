@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -31,7 +16,6 @@ import (
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
-	"github.com/thunder-id/thunderid/internal/user"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
 
@@ -52,10 +36,11 @@ type SCIMServiceInterface interface {
 	) (*SCIMResourceType, *tidcommon.ServiceError)
 }
 
-// scimService coordinates SCIM operations, delegating user and entity type
-// operations to existing ThunderID services.
-type scimService struct {
-	userService       user.UserServiceInterface
+const serviceLoggerComponentName = "SCIMService"
+
+// scimDiscoveryService coordinates SCIM discovery operations (ServiceProviderConfig,
+// Schemas, ResourceTypes), delegating entity type operations to existing ThunderID services.
+type scimDiscoveryService struct {
 	entityTypeService entitytype.EntityTypeServiceInterface
 	cfg               scimconfig.SCIMConfig
 
@@ -64,21 +49,17 @@ type scimService struct {
 	// for the lifetime of the service instance; differs across deployments when an
 	// operator changes a capability flag.
 	configVersion string
-	logger        *log.Logger
 }
 
-// newSCIMService creates a new scimService instance.
-func newSCIMService(
-	userService user.UserServiceInterface,
+// newSCIMDiscoveryService creates a new scimDiscoveryService instance.
+func newSCIMDiscoveryService(
 	entityTypeService entitytype.EntityTypeServiceInterface,
 	cfg scimconfig.SCIMConfig,
-) *scimService {
-	return &scimService{
-		userService:       userService,
+) *scimDiscoveryService {
+	return &scimDiscoveryService{
 		entityTypeService: entityTypeService,
 		cfg:               cfg,
 		configVersion:     computeSCIMConfigVersion(cfg),
-		logger:            log.GetLogger().With(log.String(log.LoggerKeyComponentName, "SCIMService")),
 	}
 }
 
@@ -131,7 +112,7 @@ func computeSCIMConfigVersion(cfg scimconfig.SCIMConfig) string {
 
 // GetServiceProviderConfig returns the SCIM ServiceProviderConfig resource
 // describing the server's supported capabilities per RFC 7643 §5.
-func (s *scimService) GetServiceProviderConfig(_ context.Context, baseURL string) SCIMServiceProviderConfig {
+func (s *scimDiscoveryService) GetServiceProviderConfig(_ context.Context, baseURL string) SCIMServiceProviderConfig {
 	location := fmt.Sprintf("%s%s/ServiceProviderConfig", baseURL, SCIMBasePath)
 
 	meta := SCIMMeta{
@@ -182,10 +163,10 @@ func (s *scimService) GetServiceProviderConfig(_ context.Context, baseURL string
 
 // ListSchemas returns all SCIM schemas: the core User schema, the core Group schema,
 // plus one extension schema per registered ThunderID user-type entity type.
-func (s *scimService) ListSchemas(
+func (s *scimDiscoveryService) ListSchemas(
 	ctx context.Context, baseURL string,
 ) (SCIMSchemaListResponse, *tidcommon.ServiceError) {
-	logger := s.logger
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 
 	// --- 1. Collect all entity type names (single shared paginator) ---
 	names, svcErr := s.listUserEntityTypeNames(ctx)
@@ -236,10 +217,10 @@ func (s *scimService) ListSchemas(
 // core User or Group schema for their RFC 7643 URNs, or a dynamically built
 // extension schema for a registered ThunderID user-type URN. Returns
 // ErrorSchemaNotFound if the URN does not match any known schema.
-func (s *scimService) GetSchema(
+func (s *scimDiscoveryService) GetSchema(
 	ctx context.Context, schemaURN string, baseURL string,
 ) (*SCIMSchema, *tidcommon.ServiceError) {
-	logger := s.logger
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 
 	trimmedURN := strings.TrimSpace(schemaURN)
 	if trimmedURN == "" {
@@ -248,24 +229,22 @@ func (s *scimService) GetSchema(
 
 	// Case-insensitive URN comparison per RFC 7643 §1.2 which states schema URNs
 	// "SHOULD" be compared case-insensitively.
-	lowerURN := strings.ToLower(trimmedURN)
-
 	// --- 1. Core User schema (static, RFC 7643 §4.1) ---
-	if lowerURN == strings.ToLower(SCIMCoreUserSchemaURN) {
+	if strings.EqualFold(trimmedURN, SCIMCoreUserSchemaURN) {
 		schema := buildCoreUserSchema(baseURL)
 		schema.Schemas = []string{SCIMSchemaSchemaURN}
 		return &schema, nil
 	}
 
 	// --- 2. Core Group schema (static, RFC 7643 §4.2) ---
-	if lowerURN == strings.ToLower(SCIMCoreGroupSchemaURN) {
+	if strings.EqualFold(trimmedURN, SCIMCoreGroupSchemaURN) {
 		schema := buildCoreGroupSchema(baseURL)
 		schema.Schemas = []string{SCIMSchemaSchemaURN}
 		return &schema, nil
 	}
 
 	// --- 3. ThunderID extension schema (dynamic, from DB) ---
-	userTypeName, ok := parseUserTypeFromSchemaURN(lowerURN)
+	userTypeName, ok := parseUserTypeFromSchemaURN(trimmedURN)
 	if !ok {
 		// URN does not match any known pattern.
 		return nil, &ErrorSchemaNotFound
@@ -288,6 +267,9 @@ func (s *scimService) GetSchema(
 		runtimeCtx, entitytype.TypeCategoryUser, entityTypeName,
 	)
 	if svcErr != nil {
+		if svcErr.Type == tidcommon.ServerErrorType {
+			return nil, &ErrorInternalServer
+		}
 		// Entity type not found or any other non-auth error → schema not found.
 		logger.Debug(ctx, "Entity type not found for SCIM schema URN",
 			log.String("urn", schemaURN),
@@ -311,7 +293,7 @@ func (s *scimService) GetSchema(
 // ListResourceTypes returns all SCIM resource types supported by ThunderID.
 // ThunderID exposes "User" and "Group" resource types. The User schemaExtensions
 // array is built dynamically — one entry per registered user-type entity type.
-func (s *scimService) ListResourceTypes(
+func (s *scimDiscoveryService) ListResourceTypes(
 	ctx context.Context, baseURL string,
 ) (SCIMResourceTypeListResponse, *tidcommon.ServiceError) {
 	userRT, svcErr := s.buildUserResourceType(ctx, baseURL)
@@ -333,10 +315,10 @@ func (s *scimService) ListResourceTypes(
 
 // GetResourceType returns a single SCIM resource type by ID.
 // Supported IDs are "User" and "Group" (case-insensitive). All others return 404.
-func (s *scimService) GetResourceType(
+func (s *scimDiscoveryService) GetResourceType(
 	ctx context.Context, resourceTypeID string, baseURL string,
 ) (*SCIMResourceType, *tidcommon.ServiceError) {
-	logger := s.logger
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 
 	trimmed := strings.TrimSpace(resourceTypeID)
 	switch {
@@ -359,9 +341,9 @@ func (s *scimService) GetResourceType(
 // returns a flat slice of their names.
 // This is the single authoritative pagination loop for entity type name discovery.
 // ListSchemas uses it to avoid duplicating pagination logic.
-func (s *scimService) listUserEntityTypeNames(ctx context.Context) ([]string, *tidcommon.ServiceError) {
+func (s *scimDiscoveryService) listUserEntityTypeNames(ctx context.Context) ([]string, *tidcommon.ServiceError) {
 	runtimeCtx := security.WithRuntimeContext(ctx)
-	logger := s.logger
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 	names := make([]string, 0, 16)
 	offset := 0
 	for {
@@ -392,7 +374,7 @@ func (s *scimService) listUserEntityTypeNames(ctx context.Context) ([]string, *t
 // user-type entity type names.
 // The core User schema URN is always the primary Schema field; each registered
 // user-type contributes one required=false extension entry.
-func (s *scimService) buildUserResourceType(
+func (s *scimDiscoveryService) buildUserResourceType(
 	ctx context.Context, baseURL string,
 ) (SCIMResourceType, *tidcommon.ServiceError) {
 	location := fmt.Sprintf("%s%s/ResourceTypes/%s", baseURL, SCIMBasePath, scimResourceTypeUserID)
