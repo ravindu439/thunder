@@ -105,11 +105,21 @@ func (s *scimUsersService) CreateUser(
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
 
 	runtimeCtx := security.WithRuntimeContext(ctx)
-	canonicalName, svcErr := resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
-	if svcErr != nil || canonicalName == "" {
-		logger.Error(ctx, "SCIM CreateUser: entity type not found",
-			log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
-		return nil, &ErrorUnknownUserType
+	var canonicalName string
+	var svcErr *tidcommon.ServiceError
+	if payload.UserTypeName == "" {
+		canonicalName, svcErr = resolveDefaultEntityTypeName(runtimeCtx, s.entityTypeService)
+		if svcErr != nil {
+			logger.Error(ctx, "SCIM CreateUser: no default user type available", log.Any("error", svcErr))
+			return nil, svcErr
+		}
+	} else {
+		canonicalName, svcErr = resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
+		if svcErr != nil || canonicalName == "" {
+			logger.Error(ctx, "SCIM CreateUser: entity type not found",
+				log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
+			return nil, &ErrorUnknownUserType
+		}
 	}
 
 	et, svcErr := s.entityTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, canonicalName)
@@ -182,13 +192,12 @@ func (s *scimUsersService) ReplaceUser(
 ) (*SCIMUser, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
 
-	runtimeCtx := security.WithRuntimeContext(ctx)
-	canonicalName, svcErr := resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
-	if svcErr != nil || canonicalName == "" {
-		logger.Error(runtimeCtx, "SCIM ReplaceUser: entity type not found",
-			log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
-		return nil, &ErrorUnknownUserType
+	if payload.UserTypeName == "" {
+		logger.Error(ctx, "SCIM ReplaceUser: custom schema URN required")
+		return nil, &ErrorMissingCustomSchema
 	}
+
+	runtimeCtx := security.WithRuntimeContext(ctx)
 
 	existingUser, svcErr := s.userService.GetUser(ctx, userID, false)
 	if svcErr != nil {
@@ -203,11 +212,23 @@ func (s *scimUsersService) ReplaceUser(
 		}
 	}
 
-	if existingUser.Type != canonicalName {
-		logger.Error(ctx, "SCIM ReplaceUser: user type mismatch",
-			log.String("userID", userID), log.String("existingType", existingUser.Type),
-			log.String("requestedType", canonicalName))
-		return nil, &ErrorImmutableUserType
+	// The user's type is immutable, so an omitted extension URN defaults to the
+	// existing type rather than being treated as ambiguous. A supplied URN must
+	// still match the existing type.
+	canonicalName := existingUser.Type
+	if payload.UserTypeName != "" {
+		resolvedName, svcErr := resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
+		if svcErr != nil || resolvedName == "" {
+			logger.Error(runtimeCtx, "SCIM ReplaceUser: entity type not found",
+				log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
+			return nil, &ErrorUnknownUserType
+		}
+		if resolvedName != existingUser.Type {
+			logger.Error(ctx, "SCIM ReplaceUser: user type mismatch",
+				log.String("userID", userID), log.String("existingType", existingUser.Type),
+				log.String("requestedType", resolvedName))
+			return nil, &ErrorImmutableUserType
+		}
 	}
 
 	et, svcErr := s.entityTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, canonicalName)
