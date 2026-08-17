@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -41,6 +44,29 @@ func TestGetUser_Success(t *testing.T) {
 	require.NotNil(t, scimUser)
 	require.Equal(t, "user-123", scimUser.ID)
 	require.Contains(t, scimUser.Schemas, "urn:thunderid:params:scim:schemas:employee:2.0:User")
+}
+
+func TestGetUser_CredentialKeyLookupFailure_DoesNotLeakAttributes(t *testing.T) {
+	mockUserService := usermock.NewUserServiceInterfaceMock(t)
+	mockEntityService := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
+
+	service := newSCIMUsersService(mockUserService, mockEntityService)
+
+	internalUser := &user.User{
+		ID:         "user-123",
+		Type:       testUserTypeEmployee,
+		Attributes: []byte(`{"given_name": "John", "password": "secret"}`),
+	}
+	mockUserService.On("GetUser", mock.Anything, "user-123", false).Return(internalUser, (*tidcommon.ServiceError)(nil))
+	mockEntityService.On(
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+	).Return(nil, &tidcommon.ServiceError{Code: "SVC-500", Type: tidcommon.ServerErrorType})
+
+	scimUser, err := service.GetUser(context.Background(), "user-123", testBaseURL)
+
+	require.Nil(t, scimUser)
+	require.NotNil(t, err)
+	require.Equal(t, ErrorInternalServer.Code, err.Code)
 }
 
 func TestGetUser_NotFound(t *testing.T) {
@@ -156,6 +182,46 @@ func TestListUsers_Success(t *testing.T) {
 
 	require.Nil(t, err)
 	require.Equal(t, 1, resp.TotalResults)
+	require.Len(t, resp.Resources, 1)
+	require.Equal(t, "user-1", resp.Resources[0].ID)
+}
+
+// TestListUsers_UnresolvableUserType_OmitsUserButReturnsRest guards against a single user
+// with a stale/unregistered entity type (e.g. leftover declarative fixture data) taking down
+// an entire unfiltered listing. The user with the bad type is silently omitted; other users
+// are still returned.
+func TestListUsers_UnresolvableUserType_OmitsUserButReturnsRest(t *testing.T) {
+	mockUserService := usermock.NewUserServiceInterfaceMock(t)
+	mockEntityService := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
+
+	service := newSCIMUsersService(mockUserService, mockEntityService)
+
+	const testUnknownUserType = "ghost-type"
+	ghostUser := user.User{
+		ID:         "user-ghost",
+		Type:       testUnknownUserType,
+		Attributes: []byte(`{"given_name":"Ghost"}`),
+	}
+	goodUser := user.User{
+		ID:         "user-1",
+		Type:       testUserTypeEmployee,
+		Attributes: []byte(`{"given_name":"Alice"}`),
+	}
+	mockUserService.On("GetUserList", mock.Anything, 20, 0, (map[string]interface{})(nil), false).
+		Return(&user.UserListResponse{
+			TotalResults: 2,
+			Users:        []user.User{ghostUser, goodUser},
+		}, (*tidcommon.ServiceError)(nil))
+	mockEntityService.On(
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUnknownUserType, true, false, false,
+	).Return(nil, &tidcommon.ServiceError{Code: "USRS-1002", Type: tidcommon.ClientErrorType})
+	mockEntityService.On(
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
+
+	resp, err := service.ListUsers(context.Background(), 1, 20, nil, testBaseURL)
+
+	require.Nil(t, err)
 	require.Len(t, resp.Resources, 1)
 	require.Equal(t, "user-1", resp.Resources[0].ID)
 }

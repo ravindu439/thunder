@@ -11,9 +11,10 @@ info:
     - **`/ServiceProviderConfig`**: Public endpoint. No authentication required.
     - **`/ResourceTypes`**: Public endpoint. No authentication required.
     - **`/Schemas`**: Protected endpoint. Requires a valid bearer token. Tenant isolation is enforced based on the authenticated context.
+    - **`/Users`**, **`/Groups`**, **`/Me`**: Protected endpoints. Require a valid bearer token.
 
     ### Unimplemented Endpoints
-    Per the SCIM specification, endpoints that are not yet implemented by the server (such as `/Users`, `/Groups`, `/Bulk`, and `/.search`) will return a **501 Not Implemented** HTTP status code rather than a generic 404. This correctly signals to SCIM clients that the feature is unsupported.
+    Per the SCIM specification, endpoints that are not yet implemented by the server (such as `/Bulk` and the root `/.search`) will return a **501 Not Implemented** HTTP status code rather than a generic 404. This correctly signals to SCIM clients that the feature is unsupported.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -29,6 +30,8 @@ servers:
 tags:
   - name: SCIM Discovery
     description: Endpoints for discovering supported SCIM capabilities, schemas, and resource types.
+  - name: SCIM Provisioning
+    description: Endpoints for provisioning and managing Users and Groups (RFC 7644).
 
 security:
   - bearerAuth: []
@@ -139,6 +142,637 @@ paths:
         '500':
           description: Internal Server Error
 
+  /Users:
+    get:
+      tags:
+        - SCIM Provisioning
+      summary: List Users
+      description: Returns a paginated list of users. Supports `startIndex` and `count` query parameters for pagination (RFC 7644 §3.4.2). Filtering and sorting are not supported and return 400 if requested.
+      parameters:
+        - name: startIndex
+          in: query
+          description: 1-based index of the first result (default 1).
+          schema:
+            type: integer
+            default: 1
+        - name: count
+          in: query
+          description: Maximum number of results per page (default 20, max 100).
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '400':
+          description: Bad Request (e.g., unsupported filter or sort parameter)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal Server Error
+    post:
+      tags:
+        - SCIM Provisioning
+      summary: Create User
+      description: Creates a new user. The request body must include the SCIM Core User schema URN (`urn:ietf:params:scim:schemas:core:2.0:User`) and optionally a ThunderID extension URN for custom user types (RFC 7644 §3.3).
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URL of the created user resource.
+              schema:
+                type: string
+            ETag:
+              description: Entity tag for the created resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Bad Request (e.g., missing required schema URN, duplicate schemas, invalid payload)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '409':
+          description: Conflict (e.g., username already exists)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+
+  /Users/{id}:
+    get:
+      tags:
+        - SCIM Provisioning
+      summary: Get User
+      description: Returns a single user by ID (RFC 7644 §3.4.1).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the user.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the current resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: User not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    put:
+      tags:
+        - SCIM Provisioning
+      summary: Replace User
+      description: Fully replaces a user resource (RFC 7644 §3.5.1). Supports optimistic concurrency via `If-Match`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the user.
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET or create response. If provided, the update is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the updated resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: User not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    delete:
+      tags:
+        - SCIM Provisioning
+      summary: Delete User
+      description: Deletes a user by ID (RFC 7644 §3.6). Supports optimistic concurrency via `If-Match`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the user.
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET. If provided, the delete is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '401':
+          description: Unauthorized
+        '404':
+          description: User not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    patch:
+      tags:
+        - SCIM Provisioning
+      summary: Patch User (Not Implemented)
+      description: Returns 501 Not Implemented per the SCIM specification. User resource patching is currently unsupported.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the user.
+          schema:
+            type: string
+      responses:
+        '501':
+          description: Not Implemented
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /Users/.search:
+    post:
+      tags:
+        - SCIM Provisioning
+      summary: Search Users
+      description: Searches users using a POST body with a SCIM filter expression (RFC 7644 §3.4.3). The request body must include the `urn:ietf:params:scim:api:messages:2.0:SearchRequest` schema URN.
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '400':
+          description: Bad Request (e.g., missing schema URN, unsupported filter)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal Server Error
+
+  /Me:
+    get:
+      tags:
+        - SCIM Provisioning
+      summary: Get Authenticated User
+      description: Returns the user resource corresponding to the authenticated bearer token subject (RFC 7644 §3.11).
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the current resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Authenticated user not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    put:
+      tags:
+        - SCIM Provisioning
+      summary: Replace Authenticated User
+      description: Fully replaces the user resource corresponding to the authenticated bearer token subject (RFC 7644 §3.11). Supports optimistic concurrency via `If-Match`.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET. If provided, the update is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/UserRequest'
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the updated resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+
+  /Groups:
+    get:
+      tags:
+        - SCIM Provisioning
+      summary: List Groups
+      description: Returns a paginated list of groups. Supports `startIndex` and `count` query parameters for pagination. Filtering and sorting are not supported.
+      parameters:
+        - name: startIndex
+          in: query
+          description: 1-based index of the first result (default 1).
+          schema:
+            type: integer
+            default: 1
+        - name: count
+          in: query
+          description: Maximum number of results per page (default 20, max 100).
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '400':
+          description: Bad Request (e.g., unsupported filter or sort parameter)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal Server Error
+    post:
+      tags:
+        - SCIM Provisioning
+      summary: Create Group
+      description: Creates a new group. The request body must include the SCIM Core Group schema URN (`urn:ietf:params:scim:schemas:core:2.0:Group`) and a non-empty `displayName` (RFC 7644 §3.3).
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/GroupRequest'
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: URL of the created group resource.
+              schema:
+                type: string
+            ETag:
+              description: Entity tag for the created resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          description: Bad Request (e.g., missing schema URN, missing displayName)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal Server Error
+
+  /Groups/{id}:
+    get:
+      tags:
+        - SCIM Provisioning
+      summary: Get Group
+      description: Returns a single group by ID (RFC 7644 §3.4.1).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the group.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the current resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Group not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    put:
+      tags:
+        - SCIM Provisioning
+      summary: Replace Group
+      description: Fully replaces a group resource (RFC 7644 §3.5.1). Supports optimistic concurrency via `If-Match`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the group.
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET. If provided, the update is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/GroupRequest'
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the updated resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Group not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    patch:
+      tags:
+        - SCIM Provisioning
+      summary: Patch Group
+      description: |
+        Partially updates a group resource using SCIM PATCH operations (RFC 7644 §3.5.2).
+        Supported paths:
+        - `displayName` — replace only (remove not permitted; displayName is required).
+        - `members` — add or replace the full member list, or remove all members.
+        - `members[value eq "{id}"]` — remove a specific member by ID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the group.
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET. If provided, the update is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: '#/components/schemas/PatchRequest'
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag:
+              description: Entity tag for the updated resource version.
+              schema:
+                type: string
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+        '400':
+          description: Bad Request (e.g., missing PatchOp schema URN, unsupported path or operation)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Group not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+    delete:
+      tags:
+        - SCIM Provisioning
+      summary: Delete Group
+      description: Deletes a group by ID (RFC 7644 §3.6). Supports optimistic concurrency via `If-Match`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The unique identifier of the group.
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag value from a previous GET. If provided, the delete is rejected with 412 if the resource has changed.
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No Content
+        '401':
+          description: Unauthorized
+        '404':
+          description: Group not found
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '412':
+          description: Precondition Failed (ETag mismatch)
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+
+  /.search:
+    post:
+      tags:
+        - SCIM Provisioning
+      summary: Bulk Search (Not Implemented)
+      description: Returns 501 Not Implemented per the SCIM specification. Root-level search is currently unsupported.
+      responses:
+        '501':
+          description: Not Implemented
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /Bulk:
+    post:
+      tags:
+        - SCIM Provisioning
+      summary: Bulk Operations (Not Implemented)
+      description: Returns 501 Not Implemented per the SCIM specification. Bulk operations are currently unsupported.
+      responses:
+        '501':
+          description: Not Implemented
+          content:
+            application/scim+json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -150,6 +784,222 @@ components:
     ServiceProviderConfig:
       type: object
       description: SCIM Service Provider Configuration
+
     ListResponse:
       type: object
       description: SCIM List Response containing an array of resources
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example: ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+        totalResults:
+          type: integer
+        startIndex:
+          type: integer
+        itemsPerPage:
+          type: integer
+        Resources:
+          type: array
+          items:
+            type: object
+
+    ErrorResponse:
+      type: object
+      description: SCIM Error Response (RFC 7644 §3.12)
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example: ["urn:ietf:params:scim:api:messages:2.0:Error"]
+        status:
+          type: string
+          description: HTTP status code as a string
+        scimType:
+          type: string
+          description: SCIM error type keyword (e.g., invalidValue, uniqueness, mutability)
+        detail:
+          type: string
+          description: Human-readable description of the error
+
+    UserRequest:
+      type: object
+      description: SCIM User create/replace request body
+      required:
+        - schemas
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - "urn:ietf:params:scim:schemas:core:2.0:User"
+            - "urn:thunderid:params:scim:schemas:employee:2.0:User"
+        userName:
+          type: string
+        name:
+          type: object
+          properties:
+            formatted:
+              type: string
+            givenName:
+              type: string
+            familyName:
+              type: string
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              type:
+                type: string
+              primary:
+                type: boolean
+        active:
+          type: boolean
+
+    UserResponse:
+      type: object
+      description: SCIM User resource response
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        userName:
+          type: string
+        name:
+          type: object
+        emails:
+          type: array
+          items:
+            type: object
+        active:
+          type: boolean
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    GroupRequest:
+      type: object
+      description: SCIM Group create/replace request body
+      required:
+        - schemas
+        - displayName
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example: ["urn:ietf:params:scim:schemas:core:2.0:Group"]
+        displayName:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMember'
+
+    GroupResponse:
+      type: object
+      description: SCIM Group resource response
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+        displayName:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMember'
+        meta:
+          $ref: '#/components/schemas/Meta'
+
+    GroupMember:
+      type: object
+      properties:
+        value:
+          type: string
+          description: The user's unique ID.
+        display:
+          type: string
+          description: The user's display name (read-only, set by the server).
+        type:
+          type: string
+          description: The resource type (always "User").
+          example: User
+
+    PatchRequest:
+      type: object
+      description: SCIM PATCH request body (RFC 7644 §3.5.2)
+      required:
+        - schemas
+        - Operations
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"]
+        Operations:
+          type: array
+          items:
+            type: object
+            required:
+              - op
+            properties:
+              op:
+                type: string
+                enum: [add, remove, replace]
+              path:
+                type: string
+                description: Attribute path to target (e.g., "members", "displayName", "members[value eq \"<id>\"]").
+              value:
+                description: Value for add/replace operations.
+
+    SearchRequest:
+      type: object
+      description: SCIM Search request body (RFC 7644 §3.4.3)
+      required:
+        - schemas
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example: ["urn:ietf:params:scim:api:messages:2.0:SearchRequest"]
+        filter:
+          type: string
+          description: SCIM filter expression (e.g., 'userName eq "alice"').
+        startIndex:
+          type: integer
+          default: 1
+        count:
+          type: integer
+          default: 20
+
+    Meta:
+      type: object
+      description: SCIM resource metadata
+      properties:
+        resourceType:
+          type: string
+        created:
+          type: string
+          format: date-time
+        lastModified:
+          type: string
+          format: date-time
+        location:
+          type: string
+        version:
+          type: string
+          description: ETag value for the resource.

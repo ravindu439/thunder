@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -219,6 +204,76 @@ func (ts *SCIMUsersTestSuite) TestListAndFilterByEmail() {
 	ts.Require().NoError(json.Unmarshal(body, &list))
 	ts.Require().Equal(1, list.TotalResults, "filter should match exactly the one user created for this test")
 	ts.Equal(id, list.Resources[0].ID)
+}
+
+// TestListUsersSkipsUserWithOrphanedType guards against a single user with an
+// unresolvable entity type taking down an unfiltered, system-wide GET /Users list.
+// DeleteUserType doesn't block deletion while users of that type still exist, so a
+// user can end up pointing at a type that no longer exists - a reachable production
+// state, not a synthetic one. The list must omit that user rather than 500 for
+// everyone else in it.
+func (ts *SCIMUsersTestSuite) TestListUsersSkipsUserWithOrphanedType() {
+	// A known-good user that must still be listed once the orphan is present.
+	status, goodUser := ts.createUser("scim.it.orphan-guard", "scim.it.orphan-guard@example.com", nil)
+	ts.Require().Equal(http.StatusCreated, status)
+	goodUserID, _ := goodUser["id"].(string)
+
+	orphanOUID, err := testutils.CreateOrganizationUnit(testutils.OrganizationUnit{
+		Handle:      "scim-it-users-orphan-ou",
+		Name:        "SCIM Users Orphaned-Type Test OU",
+		Description: "OU whose user type gets deleted out from under its user",
+	})
+	ts.Require().NoError(err, "failed to create orphan-type test organization unit")
+	defer func() { _ = testutils.DeleteOrganizationUnit(orphanOUID) }()
+
+	orphanTypeName := "scim-it-users-orphan-person"
+	orphanTypeID, err := testutils.CreateUserType(testutils.UserType{
+		Name: orphanTypeName,
+		OUID: orphanOUID,
+		Schema: map[string]interface{}{
+			"email": map[string]interface{}{"type": "string", "required": true, "unique": true},
+		},
+	})
+	ts.Require().NoError(err, "failed to create orphan-type test entity type")
+
+	orphanURN, _, err := discoverExtensionSchema(orphanTypeName)
+	ts.Require().NoError(err, "failed to discover orphan extension schema via GET /Schemas")
+
+	payload := map[string]interface{}{
+		"schemas": []string{scimCoreUserSchemaURN, orphanURN},
+		"emails": []map[string]interface{}{
+			{"value": "scim.it.users.orphan@example.com", "type": "work"},
+		},
+	}
+	body, err := json.Marshal(payload)
+	ts.Require().NoError(err)
+	status, respBody, err := scimRequest(http.MethodPost, "/Users", body, nil)
+	ts.Require().NoError(err)
+	ts.Require().Equal(http.StatusCreated, status, "failed to provision orphan-type fixture user: %s", respBody)
+
+	var created map[string]interface{}
+	ts.Require().NoError(json.Unmarshal(respBody, &created))
+	orphanUserID, _ := created["id"].(string)
+	ts.Require().NotEmpty(orphanUserID)
+	defer func() { _, _, _ = scimRequest(http.MethodDelete, "/Users/"+orphanUserID, nil, nil) }()
+
+	// Orphan the user: delete its entity type while the user still exists.
+	ts.Require().NoError(testutils.DeleteUserType(orphanTypeID), "failed to delete orphan user type")
+
+	status, listBody, err := scimRequest(http.MethodGet, "/Users", nil, nil)
+	ts.Require().NoError(err)
+	ts.Require().Equal(http.StatusOK, status,
+		"unfiltered GET /Users must not 500 due to one user's dangling type: %s", listBody)
+
+	var list scimUserListResponse
+	ts.Require().NoError(json.Unmarshal(listBody, &list))
+
+	ids := make([]string, 0, len(list.Resources))
+	for _, u := range list.Resources {
+		ids = append(ids, u.ID)
+	}
+	ts.NotContains(ids, orphanUserID, "user with unresolvable type should be omitted, not returned half-built")
+	ts.Contains(ids, goodUserID, "other users must still be listed")
 }
 
 func (ts *SCIMUsersTestSuite) TestReplaceUserUpdatesExtensionAttribute() {

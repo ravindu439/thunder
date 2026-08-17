@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -9,6 +12,7 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/group"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/security"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/tests/mocks/groupmock"
 )
@@ -230,6 +234,43 @@ func TestReplaceGroup_NotFound(t *testing.T) {
 	require.Equal(t, ErrorResourceNotFound.Code, err.Code)
 }
 
+// TestReplaceGroup_PreservesGroupOU_WhenCallerOUDiffers guards against a regression where
+// UpdateGroupRequest.OUID was populated from the caller's own security-context OU
+// (security.GetOUID(ctx)) instead of the target group's existing OUID. The SCIM Group wire
+// schema (RFC 7643 §4.2) has no field for a client to specify an OU, so a plain displayName/
+// members replace must never change which OU the group lives in. group.Service.UpdateGroup
+// treats any OUID different from the group's current one as an explicit OU-move request
+// (isOrganizationUnitChanged) and will attempt to move the group if the caller happens to
+// pass both the source and target OU access checks — e.g. a caller with access to multiple
+// OUs renaming a group that lives in an OU other than their own current context OU. This
+// test uses a caller context OU ("ou-caller") that differs from the target group's actual
+// OU ("ou-target") and asserts UpdateGroup is invoked with the group's own OUID, not the
+// caller's.
+func TestReplaceGroup_PreservesGroupOU_WhenCallerOUDiffers(t *testing.T) {
+	mockGroupService := groupmock.NewGroupServiceInterfaceMock(t)
+	service := newSCIMGroupsService(mockGroupService)
+
+	mockGroupService.On("GetGroup", mock.Anything, "group-1", false).
+		Return(&group.Group{ID: "group-1", Name: "Old Name", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("UpdateGroup", mock.Anything, "group-1",
+		group.UpdateGroupRequest{Name: "New Name", OUID: "ou-target"}).
+		Return(&group.Group{ID: "group-1", Name: "New Name", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("GetGroupMembers", mock.Anything, "group-1", serverconst.MaxPageSize, 0, false).
+		Return(&group.MemberListResponse{}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("GetGroup", mock.Anything, "group-1", true).
+		Return(&group.Group{ID: "group-1", Name: "New Name", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("GetGroupMembers", mock.Anything, "group-1", serverconst.MaxPageSize, 0, true).
+		Return(&group.MemberListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	callerCtx := security.WithSecurityContextTest(context.Background(),
+		security.NewSecurityContextForTest("caller-user", "ou-caller", "", nil, nil))
+
+	scimGroup, err := service.ReplaceGroup(callerCtx, "group-1", "New Name", nil, "", testBaseURL)
+
+	require.Nil(t, err)
+	require.Equal(t, "New Name", scimGroup.DisplayName)
+}
+
 func TestPatchGroup_DisplayNameReplace(t *testing.T) {
 	mockGroupService := groupmock.NewGroupServiceInterfaceMock(t)
 	service := newSCIMGroupsService(mockGroupService)
@@ -247,6 +288,38 @@ func TestPatchGroup_DisplayNameReplace(t *testing.T) {
 		{Op: scimPatchOpReplace, Target: scimGroupPatchTargetDisplayName, DisplayName: "Renamed"},
 	}
 	scimGroup, err := service.PatchGroup(context.Background(), "group-1", actions, "", testBaseURL)
+
+	require.Nil(t, err)
+	require.Equal(t, "Renamed", scimGroup.DisplayName)
+}
+
+// TestPatchGroup_DisplayNamePreservesGroupOU_WhenCallerOUDiffers is the PatchGroup
+// counterpart to TestReplaceGroup_PreservesGroupOU_WhenCallerOUDiffers: a displayName-only
+// PATCH must not move the group to the caller's own OU just because applyDisplayNamePatch
+// builds an UpdateGroupRequest. It asserts UpdateGroup is called with the target group's
+// own OUID (threaded in from PatchGroup's initial GetGroup fetch), not
+// security.GetOUID(ctx).
+func TestPatchGroup_DisplayNamePreservesGroupOU_WhenCallerOUDiffers(t *testing.T) {
+	mockGroupService := groupmock.NewGroupServiceInterfaceMock(t)
+	service := newSCIMGroupsService(mockGroupService)
+
+	mockGroupService.On("GetGroup", mock.Anything, "group-1", false).
+		Return(&group.Group{ID: "group-1", Name: "Old", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("UpdateGroup", mock.Anything, "group-1",
+		group.UpdateGroupRequest{Name: "Renamed", OUID: "ou-target"}).
+		Return(&group.Group{ID: "group-1", Name: "Renamed", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("GetGroup", mock.Anything, "group-1", true).
+		Return(&group.Group{ID: "group-1", Name: "Renamed", OUID: "ou-target"}, (*tidcommon.ServiceError)(nil))
+	mockGroupService.On("GetGroupMembers", mock.Anything, "group-1", serverconst.MaxPageSize, 0, true).
+		Return(&group.MemberListResponse{}, (*tidcommon.ServiceError)(nil))
+
+	callerCtx := security.WithSecurityContextTest(context.Background(),
+		security.NewSecurityContextForTest("caller-user", "ou-caller", "", nil, nil))
+
+	actions := []SCIMGroupPatchAction{
+		{Op: scimPatchOpReplace, Target: scimGroupPatchTargetDisplayName, DisplayName: "Renamed"},
+	}
+	scimGroup, err := service.PatchGroup(callerCtx, "group-1", actions, "", testBaseURL)
 
 	require.Nil(t, err)
 	require.Equal(t, "Renamed", scimGroup.DisplayName)

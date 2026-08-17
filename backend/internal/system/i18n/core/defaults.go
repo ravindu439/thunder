@@ -1026,6 +1026,8 @@ var defaultMessages = map[string]string{
 	"error.scim.invalid_content_type_description": "Request Content-Type must be application/scim+json",
 	"error.scim.invalid_custom_schema_urn": "Invalid custom schema URN",
 	"error.scim.invalid_custom_schema_urn_description": "The provided ThunderID schema URN is malformed",
+	"error.scim.invalid_filter_syntax": "Invalid filter syntax",
+	"error.scim.invalid_filter_syntax_description": "The filter query parameter is not a syntactically valid expression",
 	"error.scim.invalid_group_member": "Invalid group member",
 	"error.scim.invalid_group_member_description": "One or more group members do not exist or do not match the specified type",
 	"error.scim.invalid_patch_op": "Invalid patch operation",

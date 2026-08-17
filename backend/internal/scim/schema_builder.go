@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -688,17 +673,13 @@ func missingRequiredAttrs(
 	return missing, nil
 }
 
-// undeclaredAttrs returns the names of attributes present in extensionAttrs or coreAttrs
-// that are not declared in the entity-type schema or reverse-mapped to a schema property.
-// Matching is case-insensitive per SCIM RFC 7643 §2.1.
+// undeclaredAttrs returns the names of attributes present in extensionAttrs that are not
+// declared in the entity-type schema. Matching is case-insensitive per SCIM RFC 7643 §2.1.
 // This lets CreateUser/ReplaceUser reject a request with a clear, per-user-type message
-// instead of a generic failure.
-func undeclaredAttrs(
-	extensionAttrs map[string]json.RawMessage,
-	_ map[string]json.RawMessage,
-	_ map[string]struct{},
-	schema json.RawMessage,
-) ([]string, error) {
+// instead of a generic failure. Core attributes are intentionally not checked: real SCIM
+// clients send standard envelope fields (active, displayName, externalId, groups, locale,
+// password, ...) that a business schema has no reason to declare.
+func undeclaredAttrs(extensionAttrs map[string]json.RawMessage, schema json.RawMessage) ([]string, error) {
 	rawProps, hasSchema, err := parseSchemaRawProps(schema)
 	if err != nil || !hasSchema {
 		return nil, err
@@ -710,11 +691,6 @@ func undeclaredAttrs(
 			undeclared = append(undeclared, name)
 		}
 	}
-
-	// Core attribute undeclared-checking is dropped for now: real SCIM clients send
-	// standard envelope fields (active, displayName, externalId, groups, locale,
-	// password, ...) that a business schema has no reason to declare. TODO: revisit
-	// with a proper per-attribute error mechanism.
 
 	sort.Strings(undeclared)
 	return undeclared, nil
