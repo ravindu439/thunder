@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
+	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
@@ -90,7 +91,8 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 			credKeysByType[u.Type] = credKeys
 		}
 		extensionURN := buildSchemaURN(u.Type)
-		scimUsers = append(scimUsers, buildSCIMUserResource(ctx, u, extensionURN, baseURL, credKeys))
+		scimUsers = append(scimUsers, buildSCIMUserResource(
+			ctx, u, extensionURN, baseURL, credKeys, scimconfig.ReturnMappedCoreAttrsOnGet))
 	}
 
 	return buildSCIMUserListResponse(scimUsers, listResp.TotalResults, startIndex, len(scimUsers)), nil
@@ -114,7 +116,7 @@ func (s *scimUsersService) GetUser(
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	scimUser := buildSCIMUserResource(ctx, *u, extensionURN, baseURL, credKeys)
+	scimUser := buildSCIMUserResource(ctx, *u, extensionURN, baseURL, credKeys, scimconfig.ReturnMappedCoreAttrsOnGet)
 	return &scimUser, nil
 }
 
@@ -203,7 +205,7 @@ func (s *scimUsersService) CreateUser(
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	scimUser := buildSCIMUserResource(ctx, *created, extensionURN, baseURL, credKeys)
+	scimUser := buildSCIMUserResource(ctx, *created, extensionURN, baseURL, credKeys, len(payload.CoreAttrs) > 0)
 	return &scimUser, nil
 }
 
@@ -308,7 +310,7 @@ func (s *scimUsersService) ReplaceUser(
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	scimUser := buildSCIMUserResource(ctx, *result, extensionURN, baseURL, credKeys)
+	scimUser := buildSCIMUserResource(ctx, *result, extensionURN, baseURL, credKeys, len(payload.CoreAttrs) > 0)
 	return &scimUser, nil
 }
 

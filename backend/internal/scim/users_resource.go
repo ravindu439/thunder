@@ -51,8 +51,13 @@ func stripCredentialFields(
 }
 
 // buildSCIMUserResource converts a Thunder user.User into a SCIMUser wire response.
+// includeCoreAttrs controls whether the response's mapped core schema fields
+// (userName, emails, name, etc.) are populated: callers backing a request
+// payload should pass whether that payload carried core attributes, so a
+// purely custom-schema request doesn't get core fields mixed into its response.
 func buildSCIMUserResource(
-	ctx context.Context, u user.User, extensionURN, baseURL string, credKeys map[string]struct{},
+	ctx context.Context, u user.User, extensionURN, baseURL string,
+	credKeys map[string]struct{}, includeCoreAttrs bool,
 ) SCIMUser {
 	location := fmt.Sprintf("%s%s/Users/%s", baseURL, SCIMBasePath, u.ID)
 
@@ -69,7 +74,9 @@ func buildSCIMUserResource(
 
 	if len(u.Attributes) > 0 {
 		scimUser.Attributes = stripCredentialFields(ctx, u.Attributes, credKeys)
-		scimUser.CoreAttrs = mapToCoreAttrs(scimUser.Attributes)
+		if includeCoreAttrs {
+			scimUser.CoreAttrs = mapToCoreAttrs(scimUser.Attributes)
+		}
 	}
 
 	return scimUser

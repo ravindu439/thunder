@@ -73,6 +73,14 @@ const (
 	PaginationMaxPageSize = serverconst.MaxPageSize
 )
 
+// ReturnMappedCoreAttrsOnGet controls whether GET responses (GetUser,
+// ListUsers) include core schema fields (userName, emails, name, etc.)
+// mapped from stored attributes, or only the custom extension schema.
+// Defaults to true so GET returns the full resource representation per
+// RFC 7644. A var rather than a const: intended to become
+// request-configurable once the frontend toggle for this is implemented.
+var ReturnMappedCoreAttrsOnGet = true
+
 // SCIMConfig holds the SCIM service configuration resolved from the
 // server runtime. All protocol capability flags are code-level constants
 // above; this struct carries only the server-identity fields that must be
