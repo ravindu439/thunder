@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -254,21 +239,28 @@ func isUnsupportedSCIMFilterAttr(attr string) bool {
 	return ok
 }
 
-// isCanonicalAddrSubAttr reports whether key is a canonical sub-attribute for
-// the SCIM addresses field, derived dynamically from coreAttrRules kindAddrPart rules.
-func isCanonicalAddrSubAttr(key string) bool {
-	lk := strings.ToLower(key)
-	if lk == scimTypeKey || lk == scimPrimaryKey || lk == scimFormattedKey {
-		return true
+var canonicalAddrSubAttrs = buildCanonicalAddrSubAttrs()
+
+func buildCanonicalAddrSubAttrs() map[string]struct{} {
+	m := map[string]struct{}{
+		scimTypeKey:      {},
+		scimPrimaryKey:   {},
+		scimFormattedKey: {},
 	}
 	for _, rule := range coreAttrRules {
-		isAddrRuleMatch := rule.kind == kindAddrPart &&
-			(strings.EqualFold(rule.subAttr, key) || strings.EqualFold(rule.candidate, key))
-		if isAddrRuleMatch {
-			return true
+		if rule.kind == kindAddrPart {
+			m[strings.ToLower(rule.subAttr)] = struct{}{}
+			m[strings.ToLower(rule.candidate)] = struct{}{}
 		}
 	}
-	return false
+	return m
+}
+
+// isCanonicalAddrSubAttr reports whether key is a canonical sub-attribute for
+// the SCIM addresses field, derived dynamically from canonicalAddrSubAttrs.
+func isCanonicalAddrSubAttr(key string) bool {
+	_, ok := canonicalAddrSubAttrs[strings.ToLower(key)]
+	return ok
 }
 
 func normalizeAndTranslateAddrOutbound(arr []map[string]interface{}) []map[string]interface{} {
@@ -396,27 +388,26 @@ func mapToCoreAttrs(rawAttrs json.RawMessage) map[string]json.RawMessage {
 }
 
 func reverseMapCoreAttrsForSchema(coreAttrs map[string]json.RawMessage,
-	schema json.RawMessage) (map[string]json.RawMessage, map[string]struct{}, error) {
+	schema json.RawMessage) (map[string]json.RawMessage, error) {
 	if len(coreAttrs) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	if len(schema) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	var rawProps map[string]rawPropertyDef
 	if err := json.Unmarshal(schema, &rawProps); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(rawProps) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	result := make(map[string]json.RawMessage)
-	consumedCoreKeys := make(map[string]struct{})
 
 	for _, rule := range coreAttrRules {
 		lookupField := reverseLookupField(rule)
-		coreVal, actualKey := findCoreAttrValue(coreAttrs, lookupField)
+		coreVal, _ := findCoreAttrValue(coreAttrs, lookupField)
 		if len(coreVal) == 0 {
 			continue
 		}
@@ -428,14 +419,13 @@ func reverseMapCoreAttrsForSchema(coreAttrs map[string]json.RawMessage,
 
 		if b, ok := reverseMapRuleValue(rule, coreVal, rawProps[targetAttrName]); ok {
 			result[targetAttrName] = b
-			consumedCoreKeys[actualKey] = struct{}{}
 		}
 	}
 
 	if len(result) == 0 {
-		return nil, consumedCoreKeys, nil
+		return nil, nil
 	}
-	return result, consumedCoreKeys, nil
+	return result, nil
 }
 
 func findCoreAttrValue(coreAttrs map[string]json.RawMessage, targetField scimCoreField) (json.RawMessage, string) {

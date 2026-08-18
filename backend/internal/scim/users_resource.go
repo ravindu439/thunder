@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -19,9 +22,11 @@ func stripCredentialFields(
 	if len(credentialKeys) == 0 {
 		return attrs
 	}
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
+
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(attrs, &m); err != nil {
-		log.GetLogger().Error(ctx,
+		logger.Error(ctx,
 			"stripCredentialFields: failed to parse user attributes; returning empty object to prevent credential leak",
 			log.Error(err))
 		return json.RawMessage(`{}`)
@@ -36,7 +41,7 @@ func stripCredentialFields(
 	}
 	stripped, err := json.Marshal(m)
 	if err != nil {
-		log.GetLogger().Error(ctx,
+		logger.Error(ctx,
 			"stripCredentialFields: failed to marshal stripped attributes; "+
 				"returning empty object to prevent credential leak",
 			log.Error(err))
@@ -46,8 +51,13 @@ func stripCredentialFields(
 }
 
 // buildSCIMUserResource converts a Thunder user.User into a SCIMUser wire response.
+// includeCoreAttrs controls whether the response's mapped core schema fields
+// (userName, emails, name, etc.) are populated: callers backing a request
+// payload should pass whether that payload carried core attributes, so a
+// purely custom-schema request doesn't get core fields mixed into its response.
 func buildSCIMUserResource(
-	ctx context.Context, u user.User, extensionURN, baseURL string, credKeys map[string]struct{},
+	ctx context.Context, u user.User, extensionURN, baseURL string,
+	credKeys map[string]struct{}, includeCoreAttrs bool,
 ) SCIMUser {
 	location := fmt.Sprintf("%s%s/Users/%s", baseURL, SCIMBasePath, u.ID)
 
@@ -64,7 +74,9 @@ func buildSCIMUserResource(
 
 	if len(u.Attributes) > 0 {
 		scimUser.Attributes = stripCredentialFields(ctx, u.Attributes, credKeys)
-		scimUser.CoreAttrs = mapToCoreAttrs(scimUser.Attributes)
+		if includeCoreAttrs {
+			scimUser.CoreAttrs = mapToCoreAttrs(scimUser.Attributes)
+		}
 	}
 
 	return scimUser
@@ -215,6 +227,8 @@ func projectSCIMUserResource(
 	return projectSCIMAttributes(m, u.ExtensionURN, attributes, excludedAttributes), nil
 }
 
+// userVersionState extracts the state of a user that determines its ETag version.
+// The ETag covers the user's raw JSON attribute payload.
 func userVersionState(u user.User) any {
 	return struct {
 		Attributes json.RawMessage

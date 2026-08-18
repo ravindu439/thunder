@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -547,7 +550,6 @@ func TestHandleGroupsDeleteRequest_ErrorScenarios(t *testing.T) {
 }
 
 func TestGroupsHandler_HandleSCIMError_ServerError(t *testing.T) {
-	h := newSCIMGroupsHandler(nil, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups/group-1", nil)
 	req.SetPathValue("id", "group-1")
 	rr := httptest.NewRecorder()
@@ -558,7 +560,7 @@ func TestGroupsHandler_HandleSCIMError_ServerError(t *testing.T) {
 			DefaultValue: "internal server error happened",
 		},
 	}
-	h.handleSCIMError(rr, req, svcErr)
+	handleSCIMError(rr, req, svcErr)
 
 	require.Equal(t, http.StatusInternalServerError, rr.Code)
 	var errResp SCIMErrorResponse

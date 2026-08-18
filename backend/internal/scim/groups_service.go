@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -6,9 +9,12 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/group"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
+
+const groupServiceLoggerComponentName = "SCIMGroupsService"
 
 // SCIMGroupsServiceInterface defines the Groups CRUD operations exposed to the handler.
 type SCIMGroupsServiceInterface interface {
@@ -25,18 +31,23 @@ type SCIMGroupsServiceInterface interface {
 	DeleteGroup(ctx context.Context, groupID string, ifMatch string) *tidcommon.ServiceError
 }
 
+// scimGroupsService implements SCIMGroupsServiceInterface.
 type scimGroupsService struct {
 	groupService group.GroupServiceInterface
 }
 
+// newSCIMGroupsService creates a new scimGroupsService instance.
 func newSCIMGroupsService(groupService group.GroupServiceInterface) SCIMGroupsServiceInterface {
 	return &scimGroupsService{
 		groupService: groupService,
 	}
 }
 
+// ListGroups retrieves a paginated list of SCIM Group resources.
 func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count int,
 	baseURL string) (SCIMGroupListResponse, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	if startIndex < 1 {
 		startIndex = 1
 	}
@@ -47,6 +58,7 @@ func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count in
 	offset := startIndex - 1
 	listResp, svcErr := s.groupService.GetGroupList(ctx, count, offset, true)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM ListGroups: failed to get group list", log.Any("error", svcErr))
 		return SCIMGroupListResponse{}, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	scimGroups := make([]SCIMGroup, 0, len(listResp.Groups))
@@ -55,6 +67,8 @@ func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count in
 		// either for database-backed groups, so calling it here would be redundant.
 		members, svcErr := s.fetchAllGroupMembers(ctx, g.ID, true)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM ListGroups: failed to fetch group members",
+				log.String("groupID", g.ID), log.Any("error", svcErr))
 			return SCIMGroupListResponse{}, mapGroupServiceErrorToSCIM(svcErr)
 		}
 		full := group.Group{
@@ -71,15 +85,22 @@ func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count in
 	return buildSCIMGroupListResponse(scimGroups, listResp.TotalResults, startIndex, len(scimGroups)), nil
 }
 
+// GetGroup retrieves a single SCIM Group by ID.
 func (s *scimGroupsService) GetGroup(ctx context.Context, groupID, baseURL string,
 ) (*SCIMGroup, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	g, svcErr := s.groupService.GetGroup(ctx, groupID, true)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM GetGroup: group service error",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	// GetGroup does not populate Members for database-backed groups, so fetch separately.
 	members, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM GetGroup: failed to fetch group members",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	g.Members = members
@@ -87,10 +108,14 @@ func (s *scimGroupsService) GetGroup(ctx context.Context, groupID, baseURL strin
 	return &scimGroup, nil
 }
 
+// CreateGroup creates a new SCIM Group resource.
 func (s *scimGroupsService) CreateGroup(ctx context.Context, displayName string,
 	members []SCIMGroupMember, baseURL string) (*SCIMGroup, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	thunderMembers, svcErr := scimMembersToThunder(members)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM CreateGroup: invalid member type", log.Any("error", svcErr))
 		return nil, svcErr
 	}
 
@@ -102,6 +127,7 @@ func (s *scimGroupsService) CreateGroup(ctx context.Context, displayName string,
 
 	created, svcErr := s.groupService.CreateGroup(ctx, req)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM CreateGroup: group service error", log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	return s.GetGroup(ctx, created.ID, baseURL)
@@ -115,22 +141,30 @@ func (s *scimGroupsService) CreateGroup(ctx context.Context, displayName string,
 // operation; fixing this requires a new transactional method at the group service layer.
 func (s *scimGroupsService) ReplaceGroup(ctx context.Context, groupID, displayName string,
 	members []SCIMGroupMember, ifMatch, baseURL string) (*SCIMGroup, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	thunderMembers, svcErr := scimMembersToThunder(members)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM ReplaceGroup: invalid member type", log.Any("error", svcErr))
 		return nil, svcErr
 	}
 
 	g, svcErr := s.groupService.GetGroup(ctx, groupID, false)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM ReplaceGroup: group service error",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	if g.IsReadOnly {
+		logger.Debug(ctx, "SCIM ReplaceGroup: group is read-only", log.String("groupID", groupID))
 		return nil, &ErrorMutabilityViolation
 	}
 
 	if trimmed := strings.TrimSpace(ifMatch); trimmed != "" {
 		existingMembers, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM ReplaceGroup: failed to fetch group members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return nil, mapGroupServiceErrorToSCIM(svcErr)
 		}
 		g.Members = existingMembers
@@ -139,24 +173,32 @@ func (s *scimGroupsService) ReplaceGroup(ctx context.Context, groupID, displayNa
 		}
 	}
 
-	req := group.UpdateGroupRequest{Name: displayName, OUID: security.GetOUID(ctx)}
+	req := group.UpdateGroupRequest{Name: displayName, OUID: g.OUID}
 	_, svcErr = s.groupService.UpdateGroup(ctx, groupID, req)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM ReplaceGroup: failed to update group",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 
 	// Full replace: remove all existing members, add new ones
 	existingMembers, svcErr := s.fetchAllGroupMembers(ctx, groupID, false)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM ReplaceGroup: failed to fetch existing members",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	if len(existingMembers) > 0 {
 		if _, svcErr = s.groupService.RemoveGroupMembers(ctx, groupID, existingMembers); svcErr != nil {
+			logger.Error(ctx, "SCIM ReplaceGroup: failed to remove existing members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return nil, mapGroupServiceErrorToSCIM(svcErr)
 		}
 	}
 	if len(thunderMembers) > 0 {
 		if _, svcErr = s.groupService.AddGroupMembers(ctx, groupID, thunderMembers); svcErr != nil {
+			logger.Error(ctx, "SCIM ReplaceGroup: failed to add new members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return nil, mapGroupServiceErrorToSCIM(svcErr)
 		}
 	}
@@ -172,17 +214,24 @@ func (s *scimGroupsService) ReplaceGroup(ctx context.Context, groupID, displayNa
 // ReplaceGroup for the same limitation in the underlying group service calls.
 func (s *scimGroupsService) PatchGroup(ctx context.Context, groupID string, actions []SCIMGroupPatchAction,
 	ifMatch, baseURL string) (*SCIMGroup, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	g, svcErr := s.groupService.GetGroup(ctx, groupID, false)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM PatchGroup: group service error",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return nil, mapGroupServiceErrorToSCIM(svcErr)
 	}
 	if g.IsReadOnly {
+		logger.Debug(ctx, "SCIM PatchGroup: group is read-only", log.String("groupID", groupID))
 		return nil, &ErrorMutabilityViolation
 	}
 
 	if trimmed := strings.TrimSpace(ifMatch); trimmed != "" {
 		existingMembers, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM PatchGroup: failed to fetch group members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return nil, mapGroupServiceErrorToSCIM(svcErr)
 		}
 		g.Members = existingMembers
@@ -195,7 +244,7 @@ func (s *scimGroupsService) PatchGroup(ctx context.Context, groupID string, acti
 		var applyErr *tidcommon.ServiceError
 		switch action.Target {
 		case scimGroupPatchTargetDisplayName:
-			applyErr = s.applyDisplayNamePatch(ctx, groupID, action)
+			applyErr = s.applyDisplayNamePatch(ctx, groupID, g.OUID, action)
 		case scimGroupPatchTargetMembers:
 			applyErr = s.applyMembersPatch(ctx, groupID, action)
 		}
@@ -207,18 +256,26 @@ func (s *scimGroupsService) PatchGroup(ctx context.Context, groupID string, acti
 	return s.GetGroup(ctx, groupID, baseURL)
 }
 
+// DeleteGroup deletes a group by ID.
 func (s *scimGroupsService) DeleteGroup(ctx context.Context, groupID string, ifMatch string,
 ) *tidcommon.ServiceError {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	g, svcErr := s.groupService.GetGroup(ctx, groupID, false)
 	if svcErr != nil {
+		logger.Debug(ctx, "SCIM DeleteGroup: group service error",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return mapGroupServiceErrorToSCIM(svcErr)
 	}
 	if g.IsReadOnly {
+		logger.Debug(ctx, "SCIM DeleteGroup: group is read-only", log.String("groupID", groupID))
 		return &ErrorMutabilityViolation
 	}
 	if trimmed := strings.TrimSpace(ifMatch); trimmed != "" {
 		existingMembers, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM DeleteGroup: failed to fetch group members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return mapGroupServiceErrorToSCIM(svcErr)
 		}
 		g.Members = existingMembers
@@ -226,30 +283,47 @@ func (s *scimGroupsService) DeleteGroup(ctx context.Context, groupID string, ifM
 			return svcErr
 		}
 	}
-	return mapGroupServiceErrorToSCIM(s.groupService.DeleteGroup(ctx, groupID))
+	svcErr = s.groupService.DeleteGroup(ctx, groupID)
+	if svcErr != nil {
+		logger.Error(ctx, "SCIM DeleteGroup: failed to delete group",
+			log.String("groupID", groupID), log.Any("error", svcErr))
+	}
+	return mapGroupServiceErrorToSCIM(svcErr)
 }
 
-func (s *scimGroupsService) applyDisplayNamePatch(ctx context.Context, groupID string,
+// applyDisplayNamePatch updates the group's display name.
+func (s *scimGroupsService) applyDisplayNamePatch(ctx context.Context, groupID, ouID string,
 	action SCIMGroupPatchAction) *tidcommon.ServiceError {
-	req := group.UpdateGroupRequest{Name: action.DisplayName, OUID: security.GetOUID(ctx)}
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
+	req := group.UpdateGroupRequest{Name: action.DisplayName, OUID: ouID}
 	if _, svcErr := s.groupService.UpdateGroup(ctx, groupID, req); svcErr != nil {
+		logger.Error(ctx, "SCIM PatchGroup: failed to update displayName",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return mapGroupServiceErrorToSCIM(svcErr)
 	}
 	return nil
 }
 
+// applyMembersPatch applies a member patch action (add, remove, or replace) to a group.
 func (s *scimGroupsService) applyMembersPatch(ctx context.Context, groupID string,
 	action SCIMGroupPatchAction) *tidcommon.ServiceError {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	switch action.Op {
 	case scimPatchOpAdd:
 		thunderMembers, svcErr := scimMembersToThunder(action.Members)
 		if svcErr != nil {
+			logger.Debug(ctx, "SCIM PatchGroup: invalid member type on add",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return svcErr
 		}
 		if len(thunderMembers) == 0 {
 			return nil
 		}
 		if _, svcErr := s.groupService.AddGroupMembers(ctx, groupID, thunderMembers); svcErr != nil {
+			logger.Error(ctx, "SCIM PatchGroup: failed to add members",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return mapGroupServiceErrorToSCIM(svcErr)
 		}
 		return nil
@@ -261,19 +335,27 @@ func (s *scimGroupsService) applyMembersPatch(ctx context.Context, groupID strin
 		// KNOWN LIMITATION: remove-then-add below is non-transactional; see ReplaceGroup.
 		thunderMembers, svcErr := scimMembersToThunder(action.Members)
 		if svcErr != nil {
+			logger.Debug(ctx, "SCIM PatchGroup: invalid member type on replace",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return svcErr
 		}
 		existing, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM PatchGroup: failed to fetch existing members for replace",
+				log.String("groupID", groupID), log.Any("error", svcErr))
 			return mapGroupServiceErrorToSCIM(svcErr)
 		}
 		if len(existing) > 0 {
 			if _, svcErr := s.groupService.RemoveGroupMembers(ctx, groupID, existing); svcErr != nil {
+				logger.Error(ctx, "SCIM PatchGroup: failed to remove existing members for replace",
+					log.String("groupID", groupID), log.Any("error", svcErr))
 				return mapGroupServiceErrorToSCIM(svcErr)
 			}
 		}
 		if len(thunderMembers) > 0 {
 			if _, svcErr := s.groupService.AddGroupMembers(ctx, groupID, thunderMembers); svcErr != nil {
+				logger.Error(ctx, "SCIM PatchGroup: failed to add new members for replace",
+					log.String("groupID", groupID), log.Any("error", svcErr))
 				return mapGroupServiceErrorToSCIM(svcErr)
 			}
 		}
@@ -287,8 +369,12 @@ func (s *scimGroupsService) applyMembersPatch(ctx context.Context, groupID strin
 // that matches no existing member is a no-op, not an error (the "no target" rule).
 func (s *scimGroupsService) applyMembersRemove(ctx context.Context, groupID, filterValue string,
 ) *tidcommon.ServiceError {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	existing, svcErr := s.fetchAllGroupMembers(ctx, groupID, true)
 	if svcErr != nil {
+		logger.Error(ctx, "SCIM PatchGroup: failed to fetch existing members for remove",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return mapGroupServiceErrorToSCIM(svcErr)
 	}
 
@@ -306,6 +392,8 @@ func (s *scimGroupsService) applyMembersRemove(ctx context.Context, groupID, fil
 		return nil
 	}
 	if _, svcErr := s.groupService.RemoveGroupMembers(ctx, groupID, toRemove); svcErr != nil {
+		logger.Error(ctx, "SCIM PatchGroup: failed to remove members",
+			log.String("groupID", groupID), log.Any("error", svcErr))
 		return mapGroupServiceErrorToSCIM(svcErr)
 	}
 	return nil
@@ -318,11 +406,15 @@ func (s *scimGroupsService) applyMembersRemove(ctx context.Context, groupID, fil
 // separately via GetGroupMembers.
 func (s *scimGroupsService) fetchAllGroupMembers(ctx context.Context, groupID string, includeDisplay bool,
 ) ([]group.Member, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, groupServiceLoggerComponentName))
+
 	var members []group.Member
 	offset := 0
 	for {
 		resp, svcErr := s.groupService.GetGroupMembers(ctx, groupID, serverconst.MaxPageSize, offset, includeDisplay)
 		if svcErr != nil {
+			logger.Error(ctx, "SCIM: failed to list group members",
+				log.String("groupID", groupID), log.Int("offset", offset), log.Any("error", svcErr))
 			return nil, svcErr
 		}
 		members = append(members, resp.Members...)
@@ -354,6 +446,7 @@ func scimMembersToThunder(members []SCIMGroupMember) ([]group.Member, *tidcommon
 	return result, nil
 }
 
+// mapGroupServiceErrorToSCIM maps internal group service errors to SCIM package errors.
 func mapGroupServiceErrorToSCIM(svcErr *tidcommon.ServiceError) *tidcommon.ServiceError {
 	if svcErr == nil {
 		return nil

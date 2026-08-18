@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -44,8 +29,14 @@ const (
 	// ThunderIDURNPrefix is the custom URN prefix for ThunderID SCIM schemas.
 	ThunderIDURNPrefix = "urn:thunderid:params:scim:schemas:"
 
+	// ThunderIDURNVersion is the custom URN version for ThunderID SCIM schemas.
+	ThunderIDURNVersion = ":2.0:"
+
+	// ThunderIDUserURNResource is the custom URN resource name for ThunderID SCIM user schemas.
+	ThunderIDUserURNResource = "User"
+
 	// ThunderIDURNSuffix is the custom URN suffix for ThunderID SCIM user schemas.
-	ThunderIDURNSuffix = ":2.0:User"
+	ThunderIDURNSuffix = ThunderIDURNVersion + ThunderIDUserURNResource
 
 	// SCIMCoreGroupSchemaURN is the SCIM core Group schema URN.
 	SCIMCoreGroupSchemaURN = "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -118,6 +109,15 @@ const (
 
 // SCIM Error types
 const (
-	scimErrorTypeInvalidValue = "invalidValue"
-	scimErrorTypeInvalidPath  = "invalidPath"
+	scimErrorTypeInvalidValue  = "invalidValue"
+	scimErrorTypeInvalidPath   = "invalidPath"
+	scimErrorTypeMutability    = "mutability"
+	scimErrorTypeInvalidFilter = "invalidFilter"
+)
+
+// SCIM PATCH operation values (RFC 7644 §3.5.2).
+const (
+	scimPatchOpAdd     = "add"
+	scimPatchOpRemove  = "remove"
+	scimPatchOpReplace = "replace"
 )

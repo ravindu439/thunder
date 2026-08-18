@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -492,6 +477,38 @@ var (
 			DefaultValue: "The request does not carry a valid authenticated subject",
 		},
 	}
+	// ErrorUndeclaredCustomSchemaObject is returned when the request body
+	// contains a ThunderID extension object key that is not declared in
+	// "schemas".
+	ErrorUndeclaredCustomSchemaObject = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1033",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.undeclared_custom_schema_object",
+			DefaultValue: "Undeclared custom schema object",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.scim.undeclared_custom_schema_object_description",
+			DefaultValue: "The request body includes a ThunderID extension object whose schema URN " +
+				"is not declared in the schemas array",
+		},
+	}
+
+	// ErrorInvalidFilterSyntax is returned when the "filter" query parameter (or the
+	// "filter" field of a POST /Users/.search request) does not parse as a supported
+	// "eq"/"and" expression per RFC 7644 §3.4.2.2.
+	ErrorInvalidFilterSyntax = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "SCIM-1034",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.scim.invalid_filter_syntax",
+			DefaultValue: "Invalid filter syntax",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.scim.invalid_filter_syntax_description",
+			DefaultValue: "The filter query parameter is not a syntactically valid expression",
+		},
+	}
 )
 
 // newMissingRequiredAttributesError builds a SCIM-1018 (schema validation failed)
@@ -536,6 +553,17 @@ func newUndeclaredAttributesError(userTypeName string, undeclared []string) *tid
 			"User type %q does not declare the following attribute(s): %s",
 			userTypeName, strings.Join(undeclared, ", "),
 		),
+	}
+	return &svcErr
+}
+
+// newInvalidFilterSyntaxError builds a SCIM-1034 error whose detail names the
+// specific reason the "filter" expression was rejected.
+func newInvalidFilterSyntaxError(detail string) *tidcommon.ServiceError {
+	svcErr := ErrorInvalidFilterSyntax
+	svcErr.ErrorDescription = tidcommon.I18nMessage{
+		Key:          ErrorInvalidFilterSyntax.ErrorDescription.Key,
+		DefaultValue: detail,
 	}
 	return &svcErr
 }

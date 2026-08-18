@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -15,7 +18,7 @@ func TestThunderMemberTypeToSCIM(t *testing.T) {
 }
 
 func TestBuildSCIMGroupMember(t *testing.T) {
-	baseURL := "https://api.example.com"
+	baseURL := testAPIBaseURL
 
 	// Group type member
 	mGroup := group.Member{

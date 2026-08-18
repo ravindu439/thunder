@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -66,6 +69,8 @@ func buildSCIMGroupListResponse(groups []SCIMGroup, totalResults, startIndex, it
 	}
 }
 
+// groupVersionState extracts the state of a group that determines its ETag version.
+// The ETag covers the group's DisplayName and Members list.
 func groupVersionState(g group.Group) any {
 	return struct {
 		DisplayName string

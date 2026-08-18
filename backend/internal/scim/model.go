@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -52,6 +37,15 @@ type SCIMMeta struct {
 	Version      string `json:"version,omitempty"`
 }
 
+// SCIMPaginationConfig captures pagination capability flags per RFC 9865.
+type SCIMPaginationConfig struct {
+	Cursor                  bool   `json:"cursor"`
+	Index                   bool   `json:"index"`
+	DefaultPaginationMethod string `json:"defaultPaginationMethod,omitempty"`
+	DefaultPageSize         int    `json:"defaultPageSize,omitempty"`
+	MaxPageSize             int    `json:"maxPageSize,omitempty"`
+}
+
 // SCIMServiceProviderConfig is the response body for GET /scim/v2/ServiceProviderConfig.
 type SCIMServiceProviderConfig struct {
 	Schemas               []string                   `json:"schemas"`
@@ -61,6 +55,7 @@ type SCIMServiceProviderConfig struct {
 	ChangePassword        SCIMSupportedFeature       `json:"changePassword"`
 	Sort                  SCIMSupportedFeature       `json:"sort"`
 	ETag                  SCIMSupportedFeature       `json:"etag"`
+	Pagination            SCIMPaginationConfig       `json:"pagination"`
 	AuthenticationSchemes []SCIMAuthenticationScheme `json:"authenticationSchemes"`
 	Meta                  SCIMMeta                   `json:"meta"`
 }

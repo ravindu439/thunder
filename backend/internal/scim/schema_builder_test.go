@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -72,15 +57,7 @@ func TestUndeclaredAttrs_ReportsUndeclaredSorted(t *testing.T) {
 		"extra_one":  json.RawMessage(`"one"`),
 		"another":    json.RawMessage(`"two"`),
 	}
-	// Core attributes are not checked for now - real SCIM clients send standard
-	// envelope fields a business schema has no reason to declare.
-	coreAttrs := map[string]json.RawMessage{
-		"userName": json.RawMessage(`"alice"`),
-		"nickName": json.RawMessage(`"Ali"`),
-		"id":       json.RawMessage(`"123"`),
-	}
-	consumedCore := map[string]struct{}{"userName": {}}
-	undeclared, err := undeclaredAttrs(extAttrs, coreAttrs, consumedCore, schema)
+	undeclared, err := undeclaredAttrs(extAttrs, schema)
 	require.NoError(t, err)
 	require.Equal(t, []string{"another", "extra_one"}, undeclared)
 }
@@ -98,7 +75,7 @@ func TestUndeclaredAttrs_CaseInsensitive(t *testing.T) {
 	extAttrs := map[string]json.RawMessage{
 		"Given_Name": json.RawMessage(`"Alice"`),
 	}
-	undeclared, err := undeclaredAttrs(extAttrs, nil, nil, schema)
+	undeclared, err := undeclaredAttrs(extAttrs, schema)
 	require.NoError(t, err)
 	require.Empty(t, undeclared)
 }

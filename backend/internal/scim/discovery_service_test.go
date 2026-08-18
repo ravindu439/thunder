@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package scim
 
@@ -39,11 +24,11 @@ import (
 // testGenericBaseURL is used in tests where the base URL value is irrelevant.
 const testGenericBaseURL = "https://example.com"
 
-// newTestSCIMService creates a scimService with nil user and entity type services.
+// newTestSCIMService creates a scimDiscoveryService with a nil entity type service.
 // This is safe for ServiceProviderConfig tests because GetServiceProviderConfig
-// does not use either of those dependencies.
-func newTestSCIMService() *scimService {
-	return newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+// does not use that dependency.
+func newTestSCIMService() *scimDiscoveryService {
+	return newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 }
 
 // --- GetServiceProviderConfig ---
@@ -86,6 +71,11 @@ func TestGetServiceProviderConfig_CapabilitiesMatchConstants(t *testing.T) {
 	require.Equal(t, scimconfig.ChangePasswordSupported, result.ChangePassword.Supported)
 	require.Equal(t, scimconfig.SortSupported, result.Sort.Supported)
 	require.Equal(t, scimconfig.ETagSupported, result.ETag.Supported)
+	require.Equal(t, scimconfig.PaginationCursorSupported, result.Pagination.Cursor)
+	require.Equal(t, scimconfig.PaginationIndexSupported, result.Pagination.Index)
+	require.Equal(t, scimconfig.PaginationDefaultMethod, result.Pagination.DefaultPaginationMethod)
+	require.Equal(t, scimconfig.PaginationDefaultPageSize, result.Pagination.DefaultPageSize)
+	require.Equal(t, scimconfig.PaginationMaxPageSize, result.Pagination.MaxPageSize)
 
 	if scimconfig.ETagSupported {
 		require.NotEmpty(t, result.Meta.Version)
@@ -145,7 +135,7 @@ func TestGetSchema_ResolvesEntityTypeNameCaseInsensitively(t *testing.T) {
 	mockET.On("GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "Person").
 		Return(et, (*tidcommon.ServiceError)(nil)).Once()
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	result, svcErr := svc.GetSchema(
 		context.Background(),
@@ -323,7 +313,7 @@ func TestMapEntityTypeToSCIMSchema_ValidSchema(t *testing.T) {
 // --- GetSchema additional branches ---
 
 func TestGetSchema_CoreUserURN_ReturnsStaticSchema(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 	schema, svcErr := svc.GetSchema(context.Background(), SCIMCoreUserSchemaURN, testGenericBaseURL)
 	require.Nil(t, svcErr)
 	require.NotNil(t, schema)
@@ -332,7 +322,7 @@ func TestGetSchema_CoreUserURN_ReturnsStaticSchema(t *testing.T) {
 }
 
 func TestGetSchema_UnknownURN_Returns404(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 	schema, svcErr := svc.GetSchema(context.Background(), "urn:unknown:schema", testGenericBaseURL)
 	require.Nil(t, schema)
 	require.NotNil(t, svcErr)
@@ -352,7 +342,7 @@ func TestGetSchema_EntityTypeNotFound_Returns404(t *testing.T) {
 	mockET.On("GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "Ghost").
 		Return((*entitytype.EntityType)(nil), &tidcommon.ServiceError{Code: "ET-404"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
@@ -374,7 +364,7 @@ func TestListSchemas_IncludesCoreUserSchema(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -400,7 +390,7 @@ func TestListSchemas_IncludesExtensionSchemasForEachUserType(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -427,7 +417,7 @@ func TestListSchemas_IncludesCoreGroupSchema(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -447,7 +437,7 @@ func TestListSchemas_SchemasField(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -462,7 +452,7 @@ func TestListSchemas_TotalResultsMatchesResourceCount(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -477,7 +467,7 @@ func TestListSchemas_TotalResultsMatchesResourceCount(t *testing.T) {
 // =====================================================================
 
 func TestGetSchema_EmptyURN_Returns404(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 	schema, svcErr := svc.GetSchema(context.Background(), "   ", testGenericBaseURL)
 	require.Nil(t, schema)
 	require.NotNil(t, svcErr)
@@ -490,7 +480,7 @@ func TestGetSchema_AuthErrorFromResolve_Returns404(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &authErr)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
@@ -513,7 +503,7 @@ func TestGetSchema_EntityTypeNameNotFoundAfterList_Returns404(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
@@ -540,7 +530,7 @@ func TestGetSchema_AuthErrorFromGetEntityTypeByName_Returns404(t *testing.T) {
 	mockET.On("GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "Employee").
 		Return((*entitytype.EntityType)(nil), &authErr)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
@@ -568,7 +558,7 @@ func TestGetSchema_MalformedEntityTypeSchema_Returns500(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
@@ -589,7 +579,7 @@ func TestListSchemas_GetEntityTypeListError_ReturnsError(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &tidcommon.ServiceError{Code: "ET-500"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.NotNil(t, svcErr)
@@ -609,7 +599,7 @@ func TestListSchemas_GetEntityTypeByNameError_SkipsItem(t *testing.T) {
 	mockET.On("GetEntityTypeByName", mock.Anything, entitytype.TypeCategoryUser, "Broken").
 		Return((*entitytype.EntityType)(nil), &tidcommon.ServiceError{Code: "ET-404"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -636,7 +626,7 @@ func TestListSchemas_MalformedEntityTypeSchema_SkipsItem(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -677,7 +667,7 @@ func TestListSchemas_PaginationFetchesSecondPage(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		).Once()
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -695,7 +685,7 @@ func TestResolveEntityTypeName_AuthError_Returns404(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &authErr)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	_, svcErr := svc.GetSchema(
 		context.Background(),
@@ -711,7 +701,7 @@ func TestResolveEntityTypeName_NonAuthListError_Returns404(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &tidcommon.ServiceError{Code: "ET-DB-ERR"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	_, svcErr := svc.GetSchema(
 		context.Background(),
@@ -734,7 +724,7 @@ func TestListResourceTypes_ReturnsUserAndGroupResourceType(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListResourceTypes(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -753,7 +743,7 @@ func TestListResourceTypes_SchemasField(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListResourceTypes(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -773,7 +763,7 @@ func TestListResourceTypes_IncludesExtensionPerEntityType(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListResourceTypes(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -787,7 +777,7 @@ func TestListResourceTypes_EntityTypeListError_ReturnsError(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &tidcommon.ServiceError{Code: "ET-500"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListResourceTypes(context.Background(), testGenericBaseURL)
 	require.NotNil(t, svcErr)
@@ -803,7 +793,7 @@ func TestListResourceTypes_MetaLocationContainsBaseURL(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	resp, svcErr := svc.ListResourceTypes(context.Background(), baseURL)
 	require.Nil(t, svcErr)
@@ -824,7 +814,7 @@ func TestGetResourceType_UserID_ReturnsUserResourceType(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "User", testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -841,7 +831,7 @@ func TestGetResourceType_CaseInsensitiveID(t *testing.T) {
 			(*tidcommon.ServiceError)(nil),
 		)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "user", testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -851,7 +841,7 @@ func TestGetResourceType_CaseInsensitiveID(t *testing.T) {
 func TestGetResourceType_UnknownID_Returns404(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "Unknown", testGenericBaseURL)
 	require.Nil(t, rt)
@@ -864,7 +854,7 @@ func TestGetResourceType_EntityTypeListError_Propagates(t *testing.T) {
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &tidcommon.ServiceError{Code: "ET-500"})
 
-	svc := newSCIMService(nil, mockET, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(mockET, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "User", testGenericBaseURL)
 	require.Nil(t, rt)
@@ -899,7 +889,7 @@ func TestHandleResourceTypeListRequest_Success(t *testing.T) {
 	mockSvc.On("ListResourceTypes", mock.Anything, testBaseURL).
 		Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes", nil)
 	rr := httptest.NewRecorder()
 
@@ -921,7 +911,7 @@ func TestHandleResourceTypeListRequest_ServiceError(t *testing.T) {
 	mockSvc.On("ListResourceTypes", mock.Anything, testBaseURL).
 		Return(SCIMResourceTypeListResponse{}, &ErrorResourceTypeNotFound)
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes", nil)
 	rr := httptest.NewRecorder()
 
@@ -941,7 +931,7 @@ func TestHandleResourceTypeGetRequest_Success(t *testing.T) {
 	mockSvc.On("GetResourceType", mock.Anything, scimResourceTypeUserID, testBaseURL).
 		Return(expectedRT, (*tidcommon.ServiceError)(nil))
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/User", nil)
 	req.SetPathValue("id", scimResourceTypeUserID)
 	rr := httptest.NewRecorder()
@@ -961,7 +951,7 @@ func TestHandleResourceTypeGetRequest_NotFound(t *testing.T) {
 	mockSvc.On("GetResourceType", mock.Anything, "Group", testBaseURL).
 		Return((*SCIMResourceType)(nil), &ErrorResourceTypeNotFound)
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/Group", nil)
 	req.SetPathValue("id", "Group")
 	rr := httptest.NewRecorder()
@@ -974,7 +964,7 @@ func TestHandleResourceTypeGetRequest_NotFound(t *testing.T) {
 func TestHandleResourceTypeGetRequest_MissingID(t *testing.T) {
 	mockSvc := NewSCIMServiceInterfaceMock(t)
 
-	h := newSCIMHandler(mockSvc, testBaseURL)
+	h := newSCIMDiscoveryHandler(mockSvc, testBaseURL)
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/ResourceTypes/", nil)
 	// Intentionally do NOT set path value.
 	rr := httptest.NewRecorder()
@@ -993,8 +983,7 @@ func TestHandleSCIMError_ServerErrorType_Returns500(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/test", nil)
 	rr := httptest.NewRecorder()
 
-	h := newSCIMHandler(nil, "")
-	h.handleSCIMError(rr, req, svcErr)
+	handleSCIMError(rr, req, svcErr)
 
 	require.Equal(t, http.StatusInternalServerError, rr.Code)
 
@@ -1009,8 +998,7 @@ func TestHandleSCIMError_AuthError_Returns403(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/test", nil)
 	rr := httptest.NewRecorder()
 
-	h := newSCIMHandler(nil, "")
-	h.handleSCIMError(rr, req, &authErr)
+	handleSCIMError(rr, req, &authErr)
 
 	require.Equal(t, http.StatusForbidden, rr.Code)
 
@@ -1025,8 +1013,7 @@ func TestHandleSCIMError_DefaultFallback_Returns400InvalidValue(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/scim/v2/test", nil)
 	rr := httptest.NewRecorder()
 
-	h := newSCIMHandler(nil, "")
-	h.handleSCIMError(rr, req, unknownErr)
+	handleSCIMError(rr, req, unknownErr)
 
 	require.Equal(t, http.StatusBadRequest, rr.Code)
 
@@ -1135,7 +1122,7 @@ func TestBuildCoreGroupSchema_ContainsRequiredAttributes(t *testing.T) {
 // =====================================================================
 
 func TestGetSchema_CoreGroupURN_ReturnsStaticSchema(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 	schema, svcErr := svc.GetSchema(context.Background(), SCIMCoreGroupSchemaURN, testGenericBaseURL)
 	require.Nil(t, svcErr)
 	require.NotNil(t, schema)
@@ -1144,7 +1131,7 @@ func TestGetSchema_CoreGroupURN_ReturnsStaticSchema(t *testing.T) {
 }
 
 func TestGetSchema_CoreGroupURN_CaseInsensitive(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 	schema, svcErr := svc.GetSchema(
 		context.Background(),
 		"URN:IETF:PARAMS:SCIM:SCHEMAS:CORE:2.0:GROUP",
@@ -1160,7 +1147,7 @@ func TestGetSchema_CoreGroupURN_CaseInsensitive(t *testing.T) {
 // =====================================================================
 
 func TestGetResourceType_GroupID_ReturnsGroupResourceType(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "Group", testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -1172,7 +1159,7 @@ func TestGetResourceType_GroupID_ReturnsGroupResourceType(t *testing.T) {
 }
 
 func TestGetResourceType_GroupID_CaseInsensitive(t *testing.T) {
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "group", testGenericBaseURL)
 	require.Nil(t, svcErr)
@@ -1182,7 +1169,7 @@ func TestGetResourceType_GroupID_CaseInsensitive(t *testing.T) {
 
 func TestGetResourceType_GroupMetaLocation(t *testing.T) {
 	baseURL := testBaseURL
-	svc := newSCIMService(nil, nil, scimconfig.SCIMConfig{})
+	svc := newSCIMDiscoveryService(nil, scimconfig.SCIMConfig{})
 
 	rt, svcErr := svc.GetResourceType(context.Background(), "Group", baseURL)
 	require.Nil(t, svcErr)

@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package scimconfig provides the SCIM service configuration.
 package scimconfig
 
 import (
 	"github.com/thunder-id/thunderid/internal/system/config"
+	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 )
 
@@ -51,7 +37,7 @@ const (
 
 	// FilterMaxResults caps the number of resources returned in a single
 	// filtered query, guarding against excessively large result sets.
-	FilterMaxResults = 200
+	FilterMaxResults = serverconst.MaxPageSize
 
 	// ChangePasswordSupported indicates that the SCIM change-password
 	// operation is not yet supported.
@@ -64,7 +50,36 @@ const (
 	// ETagSupported indicates that ETag / versioning is supported
 	// per RFC 7644 §3.14.
 	ETagSupported = true
+
+	// PaginationCursorSupported indicates whether cursor-based pagination
+	// (RFC 9865) is supported. Not implemented; this server only supports
+	// index-based pagination.
+	PaginationCursorSupported = false
+
+	// PaginationIndexSupported indicates whether index-based pagination
+	// (startIndex/count, RFC 7644 §3.4.2.4) is supported.
+	PaginationIndexSupported = true
+
+	// PaginationDefaultMethod is the pagination method used when a client
+	// does not specify a preference. Must be "cursor" or "index" per RFC 9865.
+	PaginationDefaultMethod = "index"
+
+	// PaginationDefaultPageSize is the default number of resources returned
+	// per page when a client does not specify "count".
+	PaginationDefaultPageSize = serverconst.DefaultPageSize
+
+	// PaginationMaxPageSize is the maximum number of resources returned
+	// per page, regardless of the requested "count".
+	PaginationMaxPageSize = serverconst.MaxPageSize
 )
+
+// ReturnMappedCoreAttrsOnGet controls whether GET responses (GetUser,
+// ListUsers) include core schema fields (userName, emails, name, etc.)
+// mapped from stored attributes, or only the custom extension schema.
+// Defaults to true so GET returns the full resource representation per
+// RFC 7644. A var rather than a const: intended to become
+// request-configurable once the frontend toggle for this is implemented.
+var ReturnMappedCoreAttrsOnGet = true
 
 // SCIMConfig holds the SCIM service configuration resolved from the
 // server runtime. All protocol capability flags are code-level constants

@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import "encoding/json"
@@ -5,9 +8,9 @@ import "encoding/json"
 // SCIMGroupMember represents a member in a SCIM Group resource (RFC 7643 §4.2).
 type SCIMGroupMember struct {
 	Value   string `json:"value"`
-	Ref     string `json:"$ref"`
-	Display string `json:"display"`
-	Type    string `json:"type"`
+	Ref     string `json:"$ref,omitempty"`
+	Display string `json:"display,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 // SCIMGroup is the SCIM wire representation of a ThunderID group resource.
@@ -39,4 +42,32 @@ type SCIMGroupPatchOp struct {
 type SCIMGroupPatchRequest struct {
 	Schemas    []string           `json:"schemas"`
 	Operations []SCIMGroupPatchOp `json:"Operations"`
+}
+
+// SCIMGroupPayload is the parsed, validated result of a SCIM Group POST/PUT request body.
+type SCIMGroupPayload struct {
+	DisplayName string
+	Members     []SCIMGroupMember
+}
+
+// scimGroupPatchTarget identifies which attribute a validated PATCH action applies to.
+const (
+	scimGroupPatchTargetDisplayName = "displayName"
+	scimGroupPatchTargetMembers     = "members"
+)
+
+// SCIMGroupPatchAction is a single normalized, validated PATCH operation ready to apply
+// to a group (RFC 7644 §3.5.2).
+type SCIMGroupPatchAction struct {
+	// Op is one of scimPatchOpAdd, scimPatchOpRemove, scimPatchOpReplace.
+	Op string
+	// Target is one of scimGroupPatchTargetDisplayName, scimGroupPatchTargetMembers.
+	Target string
+	// DisplayName holds the new value when Target is scimGroupPatchTargetDisplayName.
+	DisplayName string
+	// FilterValue holds the member id extracted from a members[value eq "<id>"] path,
+	// used for a filtered remove. Empty for an unfiltered members op.
+	FilterValue string
+	// Members holds the member list for add/replace ops targeting members.
+	Members []SCIMGroupMember
 }

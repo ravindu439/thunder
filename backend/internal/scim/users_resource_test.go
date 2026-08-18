@@ -1,3 +1,6 @@
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
 package scim
 
 import (
@@ -9,6 +12,8 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/user"
 )
+
+const testAPIBaseURL = "https://api.example.com"
 
 func TestStripCredentialFields(t *testing.T) {
 	testCases := []struct {
@@ -75,16 +80,30 @@ func TestBuildSCIMUserResource(t *testing.T) {
 		Type:       "Person",
 		Attributes: json.RawMessage(`{"name":"John","password":"pwd"}`),
 	}
-	baseURL := "https://api.example.com"
+	baseURL := testAPIBaseURL
 	extensionURN := "urn:thunderid:params:scim:schemas:person:2.0:User"
 	credKeys := map[string]struct{}{"password": {}}
 
-	scimUser := buildSCIMUserResource(context.Background(), u, extensionURN, baseURL, credKeys)
+	scimUser := buildSCIMUserResource(context.Background(), u, extensionURN, baseURL, credKeys, true)
 
 	require.Equal(t, "user123", scimUser.ID)
 	require.Contains(t, scimUser.Schemas, SCIMCoreUserSchemaURN)
 	require.Contains(t, scimUser.Schemas, extensionURN)
 	require.JSONEq(t, `{"name":"John"}`, string(scimUser.Attributes))
+}
+
+func TestBuildSCIMUserResource_IncludeCoreAttrsFalse_OmitsCoreAttrs(t *testing.T) {
+	u := user.User{
+		ID:         "user123",
+		Type:       "Person",
+		Attributes: json.RawMessage(`{"username":"jdoe"}`),
+	}
+	baseURL := testAPIBaseURL
+	extensionURN := "urn:thunderid:params:scim:schemas:person:2.0:User"
+
+	scimUser := buildSCIMUserResource(context.Background(), u, extensionURN, baseURL, nil, false)
+
+	require.Nil(t, scimUser.CoreAttrs)
 }
 
 func TestBuildSCIMUserListResponse_NilUsers(t *testing.T) {
