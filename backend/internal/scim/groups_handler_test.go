@@ -354,7 +354,7 @@ func TestHandleGroupsListRequest_CustomParamsAndError(t *testing.T) {
 		require.Equal(t, http.StatusOK, rr.Code)
 	})
 
-	t.Run("InvalidParamsUseDefaults", func(t *testing.T) {
+	t.Run("InvalidStartIndexUsesDefault", func(t *testing.T) {
 		mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
 		expectedResp := SCIMGroupListResponse{
 			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: constants.DefaultPageSize,
@@ -364,7 +364,24 @@ func TestHandleGroupsListRequest_CustomParamsAndError(t *testing.T) {
 			Return(expectedResp, (*tidcommon.ServiceError)(nil))
 
 		h := newSCIMGroupsHandler(mockSvc, testBaseURL)
-		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?startIndex=abc&count=-5", nil)
+		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?startIndex=abc", nil)
+		rr := httptest.NewRecorder()
+
+		h.HandleGroupsListRequest(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("NegativeCountInterpretedAsZero", func(t *testing.T) {
+		mockSvc := NewSCIMGroupsServiceInterfaceMock(t)
+		expectedResp := SCIMGroupListResponse{
+			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: 0,
+			Resources: []SCIMGroup{},
+		}
+		mockSvc.On("ListGroups", mock.Anything, 1, 0, testBaseURL).
+			Return(expectedResp, (*tidcommon.ServiceError)(nil))
+
+		h := newSCIMGroupsHandler(mockSvc, testBaseURL)
+		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Groups?count=-5", nil)
 		rr := httptest.NewRecorder()
 
 		h.HandleGroupsListRequest(rr, req)

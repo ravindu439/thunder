@@ -24,7 +24,7 @@ import (
 // testGenericBaseURL is used in tests where the base URL value is irrelevant.
 const testGenericBaseURL = "https://example.com"
 
-// newTestSCIMService creates a scimDiscoveryService with a nil entity type service.
+// newTestSCIMService creates a scimDiscoveryService with a nil user type service.
 // This is safe for ServiceProviderConfig tests because GetServiceProviderConfig
 // does not use that dependency.
 func newTestSCIMService() *scimDiscoveryService {
@@ -118,7 +118,7 @@ func TestComputeSCIMConfigVersion_FollowsWeakETagFormat(t *testing.T) {
 	require.True(t, strings.HasSuffix(version, `"`), `must end with "`)
 }
 
-func TestGetSchema_ResolvesEntityTypeNameCaseInsensitively(t *testing.T) {
+func TestGetSchema_ResolvesUserTypeNameCaseInsensitively(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	et := &entitytype.EntityType{
 		Name:   "Person",
@@ -287,23 +287,23 @@ func TestMapRawProperty_UniqueField(t *testing.T) {
 	require.Equal(t, scimUniquenessServer, attr.Uniqueness)
 }
 
-// --- mapEntityTypeToSCIMSchema ---
+// --- mapUserTypeToSCIMSchema ---
 
-func TestMapEntityTypeToSCIMSchema_InvalidJSON_ReturnsError(t *testing.T) {
+func TestMapUserTypeToSCIMSchema_InvalidJSON_ReturnsError(t *testing.T) {
 	et := entitytype.EntityType{
 		Name:   "Broken",
 		Schema: json.RawMessage(`{INVALID`),
 	}
-	_, err := mapEntityTypeToSCIMSchema(et, testGenericBaseURL)
+	_, err := mapUserTypeToSCIMSchema(et, testGenericBaseURL)
 	require.Error(t, err)
 }
 
-func TestMapEntityTypeToSCIMSchema_ValidSchema(t *testing.T) {
+func TestMapUserTypeToSCIMSchema_ValidSchema(t *testing.T) {
 	et := entitytype.EntityType{
 		Name:   "Employee",
 		Schema: json.RawMessage(`{"userName":{"type":"string","displayName":"User Name"}}`),
 	}
-	schema, err := mapEntityTypeToSCIMSchema(et, testGenericBaseURL)
+	schema, err := mapUserTypeToSCIMSchema(et, testGenericBaseURL)
 	require.NoError(t, err)
 	require.Equal(t, "urn:thunderid:params:scim:schemas:employee:2.0:User", schema.ID)
 	require.Len(t, schema.Attributes, 1)
@@ -329,7 +329,7 @@ func TestGetSchema_UnknownURN_Returns404(t *testing.T) {
 	require.Equal(t, ErrorSchemaNotFound.Code, svcErr.Code)
 }
 
-func TestGetSchema_EntityTypeNotFound_Returns404(t *testing.T) {
+func TestGetSchema_UserTypeNotFound_Returns404(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return(
@@ -396,7 +396,7 @@ func TestListSchemas_IncludesExtensionSchemasForEachUserType(t *testing.T) {
 	require.Nil(t, svcErr)
 
 	schemas := resp.Resources
-	// User schema + Group schema + 1 entity-type extension = 3
+	// User schema + Group schema + 1 user-type extension = 3
 	require.Equal(t, 3, resp.TotalResults)
 	require.Len(t, schemas, 3)
 
@@ -492,7 +492,7 @@ func TestGetSchema_AuthErrorFromResolve_Returns404(t *testing.T) {
 	require.Equal(t, ErrorSchemaNotFound.Code, svcErr.Code)
 }
 
-func TestGetSchema_EntityTypeNameNotFoundAfterList_Returns404(t *testing.T) {
+func TestGetSchema_UserTypeNameNotFoundAfterList_Returns404(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return(
@@ -542,7 +542,7 @@ func TestGetSchema_AuthErrorFromGetEntityTypeByName_Returns404(t *testing.T) {
 	require.Equal(t, ErrorSchemaNotFound.Code, svcErr.Code)
 }
 
-func TestGetSchema_MalformedEntityTypeSchema_Returns500(t *testing.T) {
+func TestGetSchema_MalformedUserTypeSchema_Returns500(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return(
@@ -603,14 +603,14 @@ func TestListSchemas_GetEntityTypeByNameError_SkipsItem(t *testing.T) {
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
-	// User schema + Group schema (entity type skipped due to error)
+	// User schema + Group schema (user type skipped due to error)
 	require.Equal(t, 2, resp.TotalResults)
 	urns := []string{resp.Resources[0].ID, resp.Resources[1].ID}
 	require.Contains(t, urns, SCIMCoreUserSchemaURN)
 	require.Contains(t, urns, SCIMCoreGroupSchemaURN)
 }
 
-func TestListSchemas_MalformedEntityTypeSchema_SkipsItem(t *testing.T) {
+func TestListSchemas_MalformedUserTypeSchema_SkipsItem(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return(
@@ -630,7 +630,7 @@ func TestListSchemas_MalformedEntityTypeSchema_SkipsItem(t *testing.T) {
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
-	// User schema + Group schema (malformed entity type skipped)
+	// User schema + Group schema (malformed user type skipped)
 	require.Equal(t, 2, resp.TotalResults)
 	urns := []string{resp.Resources[0].ID, resp.Resources[1].ID}
 	require.Contains(t, urns, SCIMCoreUserSchemaURN)
@@ -671,15 +671,15 @@ func TestListSchemas_PaginationFetchesSecondPage(t *testing.T) {
 
 	resp, svcErr := svc.ListSchemas(context.Background(), testGenericBaseURL)
 	require.Nil(t, svcErr)
-	// User + Group static schemas + 2 entity-type extensions = 4
+	// User + Group static schemas + 2 user-type extensions = 4
 	require.Equal(t, 4, resp.TotalResults)
 }
 
 // =====================================================================
-// resolveEntityTypeNameForSchemaURN — branch coverage
+// resolveUserTypeNameForSchemaURN — branch coverage
 // =====================================================================
 
-func TestResolveEntityTypeName_AuthError_Returns404(t *testing.T) {
+func TestResolveUserTypeName_AuthError_Returns404(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	authErr := tidcommon.ErrorUnauthorized
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
@@ -696,7 +696,7 @@ func TestResolveEntityTypeName_AuthError_Returns404(t *testing.T) {
 	require.Equal(t, ErrorSchemaNotFound.Code, svcErr.Code)
 }
 
-func TestResolveEntityTypeName_NonAuthListError_Returns404(t *testing.T) {
+func TestResolveUserTypeName_NonAuthListError_Returns404(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return((*entitytype.EntityTypeListResponse)(nil), &tidcommon.ServiceError{Code: "ET-DB-ERR"})
@@ -752,7 +752,7 @@ func TestListResourceTypes_SchemasField(t *testing.T) {
 	require.Equal(t, 2, resp.ItemsPerPage)
 }
 
-func TestListResourceTypes_IncludesExtensionPerEntityType(t *testing.T) {
+func TestListResourceTypes_IncludesExtensionPerUserType(t *testing.T) {
 	mockET := entitytypemock.NewEntityTypeServiceInterfaceMock(t)
 	mockET.On("GetEntityTypeList", mock.Anything, entitytype.TypeCategoryUser, mock.Anything, mock.Anything, false).
 		Return(

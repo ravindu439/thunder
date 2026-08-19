@@ -170,16 +170,35 @@ func TestParseSCIMPagination(t *testing.T) {
 		require.Equal(t, 20, count)
 	})
 
-	t.Run("DefaultAndInvalidParams", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=invalid&count=-10", nil)
+	t.Run("MissingParamsUseDefaults", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?startIndex=invalid", nil)
 		start, count := parseSCIMPaginationQueryParams(req)
 		require.Equal(t, 1, start)
 		require.Equal(t, constants.DefaultPageSize, count)
 	})
 
+	t.Run("NegativeCountInterpretedAsZero", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?count=-10", nil)
+		_, count := parseSCIMPaginationQueryParams(req)
+		require.Equal(t, 0, count)
+	})
+
+	t.Run("ExplicitZeroCountPreserved", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/scim/v2/Users?count=0", nil)
+		_, count := parseSCIMPaginationQueryParams(req)
+		require.Equal(t, 0, count)
+	})
+
 	t.Run("ClampedCount", func(t *testing.T) {
-		start, count := normalizeSCIMPagination(0, 500)
+		count := 500
+		start, resolved := normalizeSCIMPagination(0, &count)
 		require.Equal(t, 1, start)
-		require.Equal(t, 100, count)
+		require.Equal(t, 100, resolved)
+	})
+
+	t.Run("NilCountUsesDefault", func(t *testing.T) {
+		start, count := normalizeSCIMPagination(0, nil)
+		require.Equal(t, 1, start)
+		require.Equal(t, constants.DefaultPageSize, count)
 	})
 }

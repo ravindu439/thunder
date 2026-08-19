@@ -141,7 +141,7 @@ func (h *scimUsersHandler) HandleUsersCreateRequest(w http.ResponseWriter, r *ht
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	payload, svcErr := validateSCIMUserRequest(body)
+	payload, svcErr := parseAndValidateSCIMUserRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -211,7 +211,7 @@ func (h *scimUsersHandler) HandleUsersReplaceRequest(w http.ResponseWriter, r *h
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	payload, svcErr := validateSCIMUserRequest(body)
+	payload, svcErr := parseAndValidateSCIMUserRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -223,7 +223,7 @@ func (h *scimUsersHandler) HandleUsersReplaceRequest(w http.ResponseWriter, r *h
 		return
 	}
 
-	replaced, svcErr := h.svc.ReplaceUser(ctx, userID, payload, r.Header.Get("If-Match"), h.baseURL)
+	replaced, svcErr := h.svc.ReplaceUser(ctx, userID, payload, r.Header.Get("If-Match"), h.baseURL, false)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -281,7 +281,7 @@ func (h *scimUsersHandler) HandleMeReplaceRequest(w http.ResponseWriter, r *http
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	payload, svcErr := validateSCIMUserRequest(body)
+	payload, svcErr := parseAndValidateSCIMUserRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -292,7 +292,7 @@ func (h *scimUsersHandler) HandleMeReplaceRequest(w http.ResponseWriter, r *http
 		handleSCIMError(w, r, svcErr)
 		return
 	}
-	replaced, svcErr := h.svc.ReplaceUser(ctx, userID, payload, r.Header.Get("If-Match"), h.baseURL)
+	replaced, svcErr := h.svc.ReplaceUser(ctx, userID, payload, r.Header.Get("If-Match"), h.baseURL, true)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return

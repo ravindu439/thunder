@@ -12,9 +12,9 @@ import (
 	"github.com/thunder-id/thunderid/internal/entitytype"
 )
 
-// mapEntityTypeToSCIMSchema converts a ThunderID EntityType into a SCIM Schema resource
+// mapUserTypeToSCIMSchema converts a ThunderID user type (EntityType) into a SCIM Schema resource
 // per RFC 7643 §7.
-func mapEntityTypeToSCIMSchema(et entitytype.EntityType, baseURL string) (SCIMSchema, error) {
+func mapUserTypeToSCIMSchema(et entitytype.EntityType, baseURL string) (SCIMSchema, error) {
 	schemaURN := buildSchemaURN(et.Name)
 	location := fmt.Sprintf("%s%s/Schemas/%s", baseURL, SCIMBasePath, schemaURN)
 	description := fmt.Sprintf("%s user type", et.Name)
@@ -23,7 +23,7 @@ func mapEntityTypeToSCIMSchema(et entitytype.EntityType, baseURL string) (SCIMSc
 	var rawProps map[string]rawPropertyDef
 	if err := json.Unmarshal(et.Schema, &rawProps); err != nil {
 		return SCIMSchema{}, fmt.Errorf(
-			"mapEntityTypeToSCIMSchema: failed to parse schema JSON for %q: %w",
+			"mapUserTypeToSCIMSchema: failed to parse schema JSON for %q: %w",
 			et.Name, err,
 		)
 	}
@@ -630,7 +630,7 @@ type rawPropertyDef struct {
 	Items       *rawPropertyDef           `json:"items"`      // for type=array
 }
 
-// parseSchemaRawProps unmarshals an entity-type JSON schema into a map of rawPropertyDef.
+// parseSchemaRawProps unmarshals a user-type JSON schema into a map of rawPropertyDef.
 // Returns hasSchema=false if schema is empty. Returns an error if the schema contains malformed JSON.
 func parseSchemaRawProps(schema json.RawMessage) (rawProps map[string]rawPropertyDef, hasSchema bool, err error) {
 	if len(schema) == 0 {
@@ -642,7 +642,7 @@ func parseSchemaRawProps(schema json.RawMessage) (rawProps map[string]rawPropert
 	return rawProps, true, nil
 }
 
-// missingRequiredAttrs returns the names of entity-type schema properties marked
+// missingRequiredAttrs returns the names of user-type schema properties marked
 // "required" that are absent from attrs, after core-attribute reverse-mapping has
 // already been merged in. This lets CreateUser/ReplaceUser reject a request with a
 // clear, per-user-type message instead of a generic schema-validation failure.
@@ -674,7 +674,7 @@ func missingRequiredAttrs(
 }
 
 // undeclaredAttrs returns the names of attributes present in extensionAttrs that are not
-// declared in the entity-type schema. Matching is case-insensitive per SCIM RFC 7643 §2.1.
+// declared in the user-type schema. Matching is case-insensitive per SCIM RFC 7643 §2.1.
 // This lets CreateUser/ReplaceUser reject a request with a clear, per-user-type message
 // instead of a generic failure. Core attributes are intentionally not checked: real SCIM
 // clients send standard envelope fields (active, displayName, externalId, groups, locale,

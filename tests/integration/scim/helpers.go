@@ -85,6 +85,20 @@ func scimRequestUnauthenticated(method, path string, headers map[string]string) 
 	return resp.StatusCode, respBody, nil
 }
 
+// extensionStringValue reads a string attribute out of a decoded SCIM user
+// response's extension object (the object keyed by the extension URN). This
+// is the raw, always-present attribute representation, distinct from the
+// mapped core fields (e.g. top-level "emails") which are only populated when
+// scim.core_attrs_on_get is enabled.
+func extensionStringValue(resp map[string]interface{}, extensionURN, attr string) (string, bool) {
+	ext, ok := resp[extensionURN].(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	v, ok := ext[attr].(string)
+	return v, ok
+}
+
 // discoverExtensionSchema finds the ThunderID SCIM extension schema for the
 // given entity type name via GET /Schemas — the same discovery step a real
 // SCIM client performs before provisioning into a given user type. Returns

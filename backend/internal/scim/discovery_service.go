@@ -39,10 +39,10 @@ type SCIMServiceInterface interface {
 const serviceLoggerComponentName = "SCIMService"
 
 // scimDiscoveryService coordinates SCIM discovery operations (ServiceProviderConfig,
-// Schemas, ResourceTypes), delegating entity type operations to existing ThunderID services.
+// Schemas, ResourceTypes), delegating user type operations to existing ThunderID services.
 type scimDiscoveryService struct {
-	entityTypeService entitytype.EntityTypeServiceInterface
-	cfg               scimconfig.SCIMConfig
+	userTypeService entitytype.EntityTypeServiceInterface
+	cfg             scimconfig.SCIMConfig
 
 	// configVersion is a short deterministic hash of the SCIM config used as the
 	// ETag value for ServiceProviderConfig. Computed once at startup and immutable
@@ -53,13 +53,13 @@ type scimDiscoveryService struct {
 
 // newSCIMDiscoveryService creates a new scimDiscoveryService instance.
 func newSCIMDiscoveryService(
-	entityTypeService entitytype.EntityTypeServiceInterface,
+	userTypeService entitytype.EntityTypeServiceInterface,
 	cfg scimconfig.SCIMConfig,
 ) *scimDiscoveryService {
 	return &scimDiscoveryService{
-		entityTypeService: entityTypeService,
-		cfg:               cfg,
-		configVersion:     computeSCIMConfigVersion(cfg),
+		userTypeService: userTypeService,
+		cfg:             cfg,
+		configVersion:   computeSCIMConfigVersion(cfg),
 	}
 }
 
@@ -168,8 +168,8 @@ func (s *scimDiscoveryService) ListSchemas(
 ) (SCIMSchemaListResponse, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 
-	// --- 1. Collect all entity type names (single shared paginator) ---
-	names, svcErr := s.listUserEntityTypeNames(ctx)
+	// --- 1. Collect all user type names (single shared paginator) ---
+	names, svcErr := s.listUserTypeNames(ctx)
 	if svcErr != nil {
 		return SCIMSchemaListResponse{}, svcErr
 	}
@@ -179,24 +179,24 @@ func (s *scimDiscoveryService) ListSchemas(
 	schemas = append(schemas, buildCoreUserSchema(baseURL))
 	schemas = append(schemas, buildCoreGroupSchema(baseURL))
 
-	// --- 3. One extension schema per entity type ---
+	// --- 3. One extension schema per user type ---
 	runtimeCtx := security.WithRuntimeContext(ctx)
 	for _, name := range names {
-		et, svcErr := s.entityTypeService.GetEntityTypeByName(
+		et, svcErr := s.userTypeService.GetEntityTypeByName(
 			runtimeCtx, entitytype.TypeCategoryUser, name,
 		)
 		if svcErr != nil {
-			logger.Warn(ctx, "Failed to load entity type for SCIM schema list, skipping",
-				log.String("entityTypeName", name),
+			logger.Warn(ctx, "Failed to load user type for SCIM schema list, skipping",
+				log.String("userTypeName", name),
 				log.Any("error", svcErr),
 			)
 			continue
 		}
 
-		scimSchema, err := mapEntityTypeToSCIMSchema(*et, baseURL)
+		scimSchema, err := mapUserTypeToSCIMSchema(*et, baseURL)
 		if err != nil {
-			logger.Warn(ctx, "Failed to map entity type to SCIM schema, skipping",
-				log.String("entityTypeName", name),
+			logger.Warn(ctx, "Failed to map user type to SCIM schema, skipping",
+				log.String("userTypeName", name),
 				log.Error(err),
 			)
 			continue
@@ -251,37 +251,37 @@ func (s *scimDiscoveryService) GetSchema(
 	}
 
 	runtimeCtx := security.WithRuntimeContext(ctx)
-	entityTypeName, svcErr := resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, userTypeName)
+	resolvedUserTypeName, svcErr := resolveUserTypeNameForSchemaURN(runtimeCtx, s.userTypeService, userTypeName)
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	if entityTypeName == "" {
-		logger.Debug(ctx, "Entity type not found for SCIM schema URN",
+	if resolvedUserTypeName == "" {
+		logger.Debug(ctx, "User type not found for SCIM schema URN",
 			log.String("urn", schemaURN),
 			log.String("resolvedUserTypeName", userTypeName),
 		)
 		return nil, &ErrorSchemaNotFound
 	}
 
-	et, svcErr := s.entityTypeService.GetEntityTypeByName(
-		runtimeCtx, entitytype.TypeCategoryUser, entityTypeName,
+	et, svcErr := s.userTypeService.GetEntityTypeByName(
+		runtimeCtx, entitytype.TypeCategoryUser, resolvedUserTypeName,
 	)
 	if svcErr != nil {
 		if svcErr.Type == tidcommon.ServerErrorType {
 			return nil, &ErrorInternalServer
 		}
-		// Entity type not found or any other non-auth error → schema not found.
-		logger.Debug(ctx, "Entity type not found for SCIM schema URN",
+		// User type not found or any other non-auth error → schema not found.
+		logger.Debug(ctx, "User type not found for SCIM schema URN",
 			log.String("urn", schemaURN),
-			log.String("resolvedUserTypeName", entityTypeName),
+			log.String("resolvedUserTypeName", resolvedUserTypeName),
 		)
 		return nil, &ErrorSchemaNotFound
 	}
 
-	scimSchema, err := mapEntityTypeToSCIMSchema(*et, baseURL)
+	scimSchema, err := mapUserTypeToSCIMSchema(*et, baseURL)
 	if err != nil {
-		logger.Error(ctx, "Failed to map entity type to SCIM schema",
-			log.String("entityTypeName", et.Name),
+		logger.Error(ctx, "Failed to map user type to SCIM schema",
+			log.String("userTypeName", et.Name),
 			log.Error(err),
 		)
 		return nil, &ErrorInternalServer
@@ -292,7 +292,7 @@ func (s *scimDiscoveryService) GetSchema(
 
 // ListResourceTypes returns all SCIM resource types supported by ThunderID.
 // ThunderID exposes "User" and "Group" resource types. The User schemaExtensions
-// array is built dynamically — one entry per registered user-type entity type.
+// array is built dynamically — one entry per registered user type.
 func (s *scimDiscoveryService) ListResourceTypes(
 	ctx context.Context, baseURL string,
 ) (SCIMResourceTypeListResponse, *tidcommon.ServiceError) {
@@ -337,21 +337,21 @@ func (s *scimDiscoveryService) GetResourceType(
 	}
 }
 
-// listUserEntityTypeNames paginates through all user-category entity types and
+// listUserTypeNames paginates through all user-category entity types and
 // returns a flat slice of their names.
-// This is the single authoritative pagination loop for entity type name discovery.
+// This is the single authoritative pagination loop for user type name discovery.
 // ListSchemas uses it to avoid duplicating pagination logic.
-func (s *scimDiscoveryService) listUserEntityTypeNames(ctx context.Context) ([]string, *tidcommon.ServiceError) {
+func (s *scimDiscoveryService) listUserTypeNames(ctx context.Context) ([]string, *tidcommon.ServiceError) {
 	runtimeCtx := security.WithRuntimeContext(ctx)
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, serviceLoggerComponentName))
 	names := make([]string, 0, 16)
 	offset := 0
 	for {
-		page, svcErr := s.entityTypeService.GetEntityTypeList(
+		page, svcErr := s.userTypeService.GetEntityTypeList(
 			runtimeCtx, entitytype.TypeCategoryUser, serverconst.MaxPageSize, offset, false,
 		)
 		if svcErr != nil {
-			logger.Error(runtimeCtx, "Failed to list entity types",
+			logger.Error(runtimeCtx, "Failed to list user types",
 				log.Int("offset", offset), log.Any("error", svcErr))
 			return nil, svcErr
 		}
@@ -371,7 +371,7 @@ func (s *scimDiscoveryService) listUserEntityTypeNames(ctx context.Context) ([]s
 
 // buildUserResourceType constructs the SCIM User ResourceType resource.
 // The schemaExtensions array is built dynamically from all registered
-// user-type entity type names.
+// user type names.
 // The core User schema URN is always the primary Schema field; each registered
 // user-type contributes one required=false extension entry.
 func (s *scimDiscoveryService) buildUserResourceType(
@@ -380,7 +380,7 @@ func (s *scimDiscoveryService) buildUserResourceType(
 	location := fmt.Sprintf("%s%s/ResourceTypes/%s", baseURL, SCIMBasePath, scimResourceTypeUserID)
 
 	// Reuse the shared paginator — no duplicated pagination logic here.
-	names, svcErr := s.listUserEntityTypeNames(ctx)
+	names, svcErr := s.listUserTypeNames(ctx)
 	if svcErr != nil {
 		return SCIMResourceType{}, svcErr
 	}
@@ -433,15 +433,15 @@ func buildGroupResourceType(baseURL string) SCIMResourceType {
 	}
 }
 
-// resolveEntityTypeNameForSchemaURN searches all user-type entity types for one
-// whose name matches userTypeName (case-insensitive). Returns the canonical name
-// and nil on success, or empty string and nil if no match is found.
-func resolveEntityTypeNameForSchemaURN(
-	ctx context.Context, entityTypeService entitytype.EntityTypeServiceInterface, userTypeName string,
+// resolveUserTypeNameForSchemaURN searches all user types for one
+// whose name matches userTypeName (case-insensitive). Returns the resolved,
+// correctly-cased name and nil on success, or empty string and nil if no match is found.
+func resolveUserTypeNameForSchemaURN(
+	ctx context.Context, userTypeService entitytype.EntityTypeServiceInterface, userTypeName string,
 ) (string, *tidcommon.ServiceError) {
 	offset := 0
 	for {
-		page, svcErr := entityTypeService.GetEntityTypeList(
+		page, svcErr := userTypeService.GetEntityTypeList(
 			ctx, entitytype.TypeCategoryUser, serverconst.MaxPageSize, offset, false,
 		)
 		if svcErr != nil {
@@ -464,14 +464,14 @@ func resolveEntityTypeNameForSchemaURN(
 	}
 }
 
-// resolveDefaultEntityTypeName returns the sole configured user entity type's
-// canonical name, for SCIM payloads that carry only core attributes and omit
+// resolveDefaultUserTypeName returns the sole configured user type's
+// resolved name, for SCIM payloads that carry only core attributes and omit
 // the ThunderID extension URN. Errors if zero or more than one user type is
 // configured, since the default type is then ambiguous.
-func resolveDefaultEntityTypeName(
-	ctx context.Context, entityTypeService entitytype.EntityTypeServiceInterface,
+func resolveDefaultUserTypeName(
+	ctx context.Context, userTypeService entitytype.EntityTypeServiceInterface,
 ) (string, *tidcommon.ServiceError) {
-	page, svcErr := entityTypeService.GetEntityTypeList(
+	page, svcErr := userTypeService.GetEntityTypeList(
 		ctx, entitytype.TypeCategoryUser, serverconst.MaxPageSize, 0, false)
 	if svcErr != nil {
 		if svcErr.Type == tidcommon.ServerErrorType {

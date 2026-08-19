@@ -158,20 +158,12 @@ func (ts *SCIMMeTestSuite) TestGetMe() {
 	ts.Require().NoError(json.Unmarshal(body, &me))
 	ts.Equal(ts.selfUserID, me["id"], "/Me must resolve to the caller's own user, not any other resource")
 
-	email, ok := firstEmailValue(me)
-	ts.Require().True(ok)
+	email, ok := extensionStringValue(me, ts.extensionURN, "email")
+	ts.Require().True(ok, "GET /Me response should include the custom-schema email attribute")
 	ts.Equal(ts.email, email)
 }
 
-// TestReplaceMe is skipped: PUT /Me needs only authentication, but
-// scim.ReplaceUser calls internal/user.UpdateUser, whose
-// validateOrganizationUnitForUserType check requires system:usertype:view
-// with no self-access bypass (unlike checkUserAccess just above it) — so it
-// 500s for any self-service caller. Fix belongs in internal/user/service.go,
-// out of scope here.
 func (ts *SCIMMeTestSuite) TestReplaceMe() {
-	ts.T().Skip("known bug: PUT /Me 500s for self-service callers, see internal/user.UpdateUser")
-
 	status, body := ts.doMe(http.MethodPut, ts.buildMeBody("Scimmy"), nil)
 	ts.Require().Equal(http.StatusOK, status, "PUT /Me failed: %s", body)
 

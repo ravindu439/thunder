@@ -20,7 +20,9 @@ import (
 // delegates every mutation to internal/user and internal/group, which own
 // the actual OU boundary check.
 //
-// Permission model exercised (see backend/internal/system/security/permissions.go):
+// The product ships only the root "system" scope by default. This suite creates a custom
+// resource server (mirroring backend/internal/system/security/permissions.go's naming) that
+// declares the fine-grained scopes actually exercised:
 //
 //	system:user            → create, replace, delete SCIM users
 //	system:user:view       → list, get SCIM users
@@ -59,7 +61,8 @@ type SCIMAuthzTestSuite struct {
 	deletableUserOU1ID string
 	targetUserOU2ID    string
 
-	roleID string
+	scopedRSID string
+	roleID     string
 
 	targetGroupOU1ID    string
 	deletableGroupOU1ID string
@@ -190,8 +193,14 @@ func (ts *SCIMAuthzTestSuite) SetupSuite() {
 	ts.Require().NoError(err, "create target group in OU2")
 	ts.targetGroupOU2ID = targetGroupOU2ID
 
-	systemRSID, err := testutils.GetResourceServerByName("System")
-	ts.Require().NoError(err, "look up system resource server")
+	// The product ships only the root "system" scope; this reproduces the fine-grained
+	// system:user/system:group/system:usertype:view scopes so the suite can verify
+	// resource-level enforcement when configured (see tests/integration/user's equivalent).
+	const scopedRSIdentifier = "https://authz-test.example.com/scim"
+	systemRSID, err := testutils.CreateSystemScopedResourceServer(
+		ts.ou1ID, "Authz Test RS (scim)", scopedRSIdentifier, "user", "usertype", "group")
+	ts.Require().NoError(err, "create scoped resource server")
+	ts.scopedRSID = systemRSID
 
 	roleID, err := testutils.CreateRole(testutils.Role{
 		Name: scimAuthzMgrRoleName,
@@ -219,6 +228,8 @@ func (ts *SCIMAuthzTestSuite) SetupSuite() {
 		scimAuthzMgrUsername,
 		scimAuthzMgrPassword,
 		true,
+		"",
+		scopedRSIdentifier,
 	)
 	ts.Require().NoError(err, "obtain scim-manager token")
 	ts.Require().NotEmpty(tokenResp.AccessToken, "scim-manager token must be non-empty")
@@ -234,6 +245,14 @@ func (ts *SCIMAuthzTestSuite) TearDownSuite() {
 	if ts.roleID != "" {
 		if err := testutils.DeleteRole(ts.roleID); err != nil {
 			ts.T().Logf("teardown: delete scim-manager role: %v", err)
+		}
+	}
+	if ts.scopedRSID != "" {
+		// The scoped resource server owns a nested resource tree, and a plain delete is refused with
+		// RES-1006 while those resources exist. Logging that failure left the tree behind in the
+		// shared database on every run.
+		if err := testutils.DeleteResourceServerWithChildren(ts.scopedRSID); err != nil {
+			ts.T().Errorf("teardown: delete scoped resource server: %v", err)
 		}
 	}
 	for _, id := range []string{ts.targetGroupOU1ID, ts.deletableGroupOU1ID, ts.targetGroupOU2ID} {

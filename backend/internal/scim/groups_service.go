@@ -51,15 +51,26 @@ func (s *scimGroupsService) ListGroups(ctx context.Context, startIndex, count in
 	if startIndex < 1 {
 		startIndex = 1
 	}
-	if count < 1 {
-		count = serverconst.DefaultPageSize
+	if count < 0 {
+		count = 0
+	}
+
+	// GetGroupList rejects a limit below 1, so a count of 0 (client wants only
+	// totalResults, no resources per RFC 7644 §3.4.2.4) fetches a single row
+	// and discards it below.
+	fetchLimit := count
+	if fetchLimit == 0 {
+		fetchLimit = 1
 	}
 
 	offset := startIndex - 1
-	listResp, svcErr := s.groupService.GetGroupList(ctx, count, offset, true)
+	listResp, svcErr := s.groupService.GetGroupList(ctx, fetchLimit, offset, true)
 	if svcErr != nil {
 		logger.Error(ctx, "SCIM ListGroups: failed to get group list", log.Any("error", svcErr))
 		return SCIMGroupListResponse{}, mapGroupServiceErrorToSCIM(svcErr)
+	}
+	if count == 0 {
+		return buildSCIMGroupListResponse(nil, listResp.TotalResults, startIndex, 0), nil
 	}
 	scimGroups := make([]SCIMGroup, 0, len(listResp.Groups))
 	for _, g := range listResp.Groups {

@@ -73,30 +73,31 @@ const (
 	PaginationMaxPageSize = serverconst.MaxPageSize
 )
 
-// ReturnMappedCoreAttrsOnGet controls whether GET responses (GetUser,
-// ListUsers) include core schema fields (userName, emails, name, etc.)
-// mapped from stored attributes, or only the custom extension schema.
-// Defaults to true so GET returns the full resource representation per
-// RFC 7644. A var rather than a const: intended to become
-// request-configurable once the frontend toggle for this is implemented.
-var ReturnMappedCoreAttrsOnGet = true
-
 // SCIMConfig holds the SCIM service configuration resolved from the
-// server runtime. All protocol capability flags are code-level constants
-// above; this struct carries only the server-identity fields that must be
-// read from the runtime environment.
+// server runtime. Protocol capability flags that are not operator-configurable
+// are the code-level constants above; this struct carries the fields that
+// are read from the runtime environment.
 type SCIMConfig struct {
 	// PublicURL is the externally reachable base URL of the server,
 	// used to construct SCIM resource location URIs.
 	PublicURL string
+
+	// ReturnMappedCoreAttrsOnGet controls whether GET responses (GetUser,
+	// ListUsers) include core schema fields (userName, emails, name, etc.)
+	// mapped from stored attributes, or only the custom extension schema.
+	// RFC 7644 expects the full resource representation on GET.
+	ReturnMappedCoreAttrsOnGet bool
 }
 
 // FromServerRuntime builds a SCIMConfig from the live server runtime.
-// No SCIM-specific fields are read from the system config; all capability
-// flags are defined as package-level constants above.
 func FromServerRuntime() SCIMConfig {
 	srv := config.GetServerRuntime().Config
+	var returnCoreAttrs bool
+	if srv.SCIM.ReturnMappedCoreAttrsOnGet != nil {
+		returnCoreAttrs = *srv.SCIM.ReturnMappedCoreAttrsOnGet
+	}
 	return SCIMConfig{
-		PublicURL: engineconfig.GetServerURL(&srv.Server),
+		PublicURL:                  engineconfig.GetServerURL(&srv.Server),
+		ReturnMappedCoreAttrsOnGet: returnCoreAttrs,
 	}
 }

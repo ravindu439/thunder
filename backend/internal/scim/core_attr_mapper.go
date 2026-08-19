@@ -450,7 +450,7 @@ func reverseLookupField(rule coreAttrRule) scimCoreField {
 	}
 }
 
-// findTargetAttrName finds the entity-type schema property matching candidate, case-insensitively.
+// findTargetAttrName finds the user-type schema property matching candidate, case-insensitively.
 func findTargetAttrName(rawProps map[string]rawPropertyDef, candidate string) string {
 	for propName := range rawProps {
 		if strings.EqualFold(propName, candidate) {
@@ -460,7 +460,7 @@ func findTargetAttrName(rawProps map[string]rawPropertyDef, candidate string) st
 	return ""
 }
 
-// reverseMapRuleValue converts a single core attribute value back into its entity-type
+// reverseMapRuleValue converts a single core attribute value back into its user-type
 // schema representation, per rule.kind. ok is false when there is nothing to map.
 func reverseMapRuleValue(rule coreAttrRule, coreVal json.RawMessage, propDef rawPropertyDef,
 ) (b json.RawMessage, ok bool) {
