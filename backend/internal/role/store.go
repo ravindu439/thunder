@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -26,7 +11,7 @@ import (
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/database/provider"
 	"github.com/thunder-id/thunderid/internal/system/log"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 const storeLoggerComponentName = "RoleStore"
@@ -58,7 +43,16 @@ type roleStoreInterface interface {
 	GetAuthorizedPermissionsByResourceServer(
 		ctx context.Context, entityID string, groupIDs []string, resourceServerID string,
 		requestedPermissions []string) ([]string, error)
+	// GetAllPermissionsForAssignees returns every permission the entity and/or groups hold through
+	// their assigned roles, grouped by resource server. It takes no filters: it enumerates.
+	GetAllPermissionsForAssignees(
+		ctx context.Context, entityID string, groupIDs []string) ([]ResourcePermissions, error)
 	GetUserRoles(ctx context.Context, entityID string, groupIDs []string) ([]string, error)
+	// GetReferencedPermissions returns the distinct permissions referenced by any role, grouped by
+	// resource server. Used to detect permissions left dangling by a resource deletion.
+	GetReferencedPermissions(ctx context.Context) ([]ResourcePermissions, error)
+	// DeleteRolePermission removes the given permission from every role that holds it.
+	DeleteRolePermission(ctx context.Context, resourceServerID, permission string) (int64, error)
 	// GetEntityRoleIDs returns the set of role IDs assigned to the entity directly or via
 	// group membership. Unlike GetUserRoles this does not require the role to exist in the
 	// underlying store; it returns raw assignee->role bindings. Used by the composite store
@@ -75,7 +69,7 @@ type roleStore struct {
 }
 
 // newRoleStore creates a new instance of roleStore.
-func newRoleStore() (roleStoreInterface, transaction.Transactioner, error) {
+func newRoleStore() (roleStoreInterface, providers.Transactioner, error) {
 	dbProvider := getDBProvider()
 	client, err := dbProvider.GetConfigDBClient()
 	if err != nil {
@@ -421,6 +415,51 @@ func (s *roleStore) DeleteAssignmentsByAssignee(
 	return rowsAffected, nil
 }
 
+// GetReferencedPermissions returns the distinct permissions referenced by any role, grouped by
+// resource server.
+func (s *roleStore) GetReferencedPermissions(ctx context.Context) ([]ResourcePermissions, error) {
+	dbClient, err := s.getConfigDBClient()
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := dbClient.QueryContext(ctx, queryGetReferencedPermissions, s.deploymentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get referenced permissions: %w", err)
+	}
+
+	byResourceServer := make(map[string][]string)
+	for _, row := range results {
+		resourceServerID, ok := row["resource_server_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse resource_server_id as string")
+		}
+		permission, ok := row["permission"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse permission as string")
+		}
+		byResourceServer[resourceServerID] = append(byResourceServer[resourceServerID], permission)
+	}
+
+	return resourcePermissionsFromMap(byResourceServer), nil
+}
+
+// DeleteRolePermission removes the given permission from every role that holds it.
+func (s *roleStore) DeleteRolePermission(
+	ctx context.Context, resourceServerID, permission string) (int64, error) {
+	dbClient, err := s.getConfigDBClient()
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := dbClient.ExecuteContext(
+		ctx, queryDeleteRolePermissionByValue, resourceServerID, permission, s.deploymentID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete role permission: %w", err)
+	}
+	return rowsAffected, nil
+}
+
 // AddAssignments adds assignments to a role.
 func (s *roleStore) AddAssignments(ctx context.Context, id string, assignments []RoleAssignment) error {
 	dbClient, err := s.getConfigDBClient()
@@ -600,6 +639,47 @@ func (s *roleStore) CheckRoleNameExistsExcludingID(
 
 // GetAuthorizedPermissionsByResourceServer retrieves the permissions that an entity is authorized for based on
 // their direct role assignments and group memberships, scoped to a resource server when provided.
+// GetAllPermissionsForAssignees returns every permission granted to the entity and/or groups by
+// their assigned database-backed roles, grouped by resource server.
+func (s *roleStore) GetAllPermissionsForAssignees(
+	ctx context.Context, entityID string, groupIDs []string,
+) ([]ResourcePermissions, error) {
+	if entityID == "" && len(groupIDs) == 0 {
+		return []ResourcePermissions{}, nil
+	}
+
+	dbClient, err := s.getConfigDBClient()
+	if err != nil {
+		return nil, err
+	}
+
+	if groupIDs == nil {
+		groupIDs = []string{}
+	}
+
+	query, args := buildAllPermissionsForAssigneesQuery(entityID, groupIDs, s.deploymentID)
+
+	results, err := dbClient.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all permissions for assignees: %w", err)
+	}
+
+	byResourceServer := make(map[string][]string)
+	for _, row := range results {
+		resourceServerID, ok := row["resource_server_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse resource_server_id as string")
+		}
+		permission, ok := row["permission"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse permission as string")
+		}
+		byResourceServer[resourceServerID] = append(byResourceServer[resourceServerID], permission)
+	}
+
+	return resourcePermissionsFromMap(byResourceServer), nil
+}
+
 func (s *roleStore) GetAuthorizedPermissionsByResourceServer(
 	ctx context.Context,
 	entityID string,

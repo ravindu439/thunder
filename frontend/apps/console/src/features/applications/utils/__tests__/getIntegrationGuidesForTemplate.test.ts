@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, expect, it, vi} from 'vitest';
 import type {IntegrationGuides} from '../../models/application-templates';
@@ -31,27 +16,10 @@ vi.mock('../../config/TechnologyBasedApplicationTemplateMetadata', () => ({
       template: {
         id: 'express',
         integrationGuides: {
-          INBUILT: {
+          REDIRECT_BASED: {
             llm_prompt: {
-              id: 'express-llm',
-              title: 'AI-Assisted Integration',
-              description: 'Express integration guide',
-              type: 'llm' as const,
-              icon: 'express',
-              content: 'LLM prompt content',
+              docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
             },
-            manual_steps: [
-              {
-                step: 1,
-                title: 'Step E1',
-                description: 'First step description',
-              },
-              {
-                step: 2,
-                title: 'Step E2',
-                description: 'Second step description',
-              },
-            ],
           },
         },
       },
@@ -60,44 +28,15 @@ vi.mock('../../config/TechnologyBasedApplicationTemplateMetadata', () => ({
       template: {
         id: 'react',
         integrationGuides: {
-          INBUILT: {
+          REDIRECT_BASED: {
             llm_prompt: {
-              id: 'react-llm',
-              title: 'AI-Assisted Integration',
-              description: 'React integration guide',
-              type: 'llm' as const,
-              icon: 'react',
-              content: 'LLM prompt content',
+              docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
             },
-            manual_steps: [
-              {
-                step: 1,
-                title: 'Step 1',
-                description: 'First step description',
-              },
-              {
-                step: 2,
-                title: 'Step 2',
-                description: 'Second step description',
-              },
-            ],
           },
           EMBEDDED: {
             llm_prompt: {
-              id: 'react-embedded-llm',
-              title: 'AI-Assisted Integration',
-              description: 'React embedded integration guide',
-              type: 'llm' as const,
-              icon: 'react',
-              content: 'Embedded LLM prompt content',
+              docsUrl: 'https://thunderid.dev/prompts/embedded.txt',
             },
-            manual_steps: [
-              {
-                step: 1,
-                title: 'Embedded Step 1',
-                description: 'First embedded step description',
-              },
-            ],
           },
         },
       },
@@ -106,27 +45,10 @@ vi.mock('../../config/TechnologyBasedApplicationTemplateMetadata', () => ({
       template: {
         id: 'nextjs',
         integrationGuides: {
-          INBUILT: {
+          REDIRECT_BASED: {
             llm_prompt: {
-              id: 'nextjs-llm',
-              title: 'AI-Assisted Integration',
-              description: 'Next.js integration guide',
-              type: 'llm' as const,
-              icon: 'nextjs',
-              content: 'LLM prompt content',
+              docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
             },
-            manual_steps: [
-              {
-                step: 1,
-                title: 'Step A',
-                description: 'First step description',
-              },
-              {
-                step: 2,
-                title: 'Step B',
-                description: 'Second step description',
-              },
-            ],
           },
         },
       },
@@ -145,27 +67,10 @@ vi.mock('../../config/PlatformBasedApplicationTemplateMetadata', () => ({
       template: {
         id: 'browser',
         integrationGuides: {
-          INBUILT: {
+          REDIRECT_BASED: {
             llm_prompt: {
-              id: 'browser-llm',
-              title: 'AI-Assisted Integration',
-              description: 'Browser integration guide',
-              type: 'llm' as const,
-              icon: 'browser',
-              content: 'LLM prompt content',
+              docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
             },
-            manual_steps: [
-              {
-                step: 1,
-                title: 'Step X',
-                description: 'First step description',
-              },
-              {
-                step: 2,
-                title: 'Step Y',
-                description: 'Second step description',
-              },
-            ],
           },
         },
       },
@@ -187,119 +92,39 @@ vi.mock('../normalizeTemplateId', () => ({
 
 // Test data - define after mocks
 const mockReactGuides: IntegrationGuides = {
-  INBUILT: {
+  REDIRECT_BASED: {
     llm_prompt: {
-      id: 'react-llm',
-      title: 'AI-Assisted Integration',
-      description: 'React integration guide',
-      type: 'llm' as const,
-      icon: 'react',
-      content: 'LLM prompt content',
+      docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
     },
-    manual_steps: [
-      {
-        step: 1,
-        title: 'Step 1',
-        description: 'First step description',
-      },
-      {
-        step: 2,
-        title: 'Step 2',
-        description: 'Second step description',
-      },
-    ],
   },
   EMBEDDED: {
     llm_prompt: {
-      id: 'react-embedded-llm',
-      title: 'AI-Assisted Integration',
-      description: 'React embedded integration guide',
-      type: 'llm' as const,
-      icon: 'react',
-      content: 'Embedded LLM prompt content',
+      docsUrl: 'https://thunderid.dev/prompts/embedded.txt',
     },
-    manual_steps: [
-      {
-        step: 1,
-        title: 'Embedded Step 1',
-        description: 'First embedded step description',
-      },
-    ],
   },
 };
 
 const mockExpressGuides: IntegrationGuides = {
-  INBUILT: {
+  REDIRECT_BASED: {
     llm_prompt: {
-      id: 'express-llm',
-      title: 'AI-Assisted Integration',
-      description: 'Express integration guide',
-      type: 'llm' as const,
-      icon: 'express',
-      content: 'LLM prompt content',
+      docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
     },
-    manual_steps: [
-      {
-        step: 1,
-        title: 'Step E1',
-        description: 'First step description',
-      },
-      {
-        step: 2,
-        title: 'Step E2',
-        description: 'Second step description',
-      },
-    ],
   },
 };
 
 const mockNextjsGuides: IntegrationGuides = {
-  INBUILT: {
+  REDIRECT_BASED: {
     llm_prompt: {
-      id: 'nextjs-llm',
-      title: 'AI-Assisted Integration',
-      description: 'Next.js integration guide',
-      type: 'llm' as const,
-      icon: 'nextjs',
-      content: 'LLM prompt content',
+      docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
     },
-    manual_steps: [
-      {
-        step: 1,
-        title: 'Step A',
-        description: 'First step description',
-      },
-      {
-        step: 2,
-        title: 'Step B',
-        description: 'Second step description',
-      },
-    ],
   },
 };
 
 const mockBrowserGuides: IntegrationGuides = {
-  INBUILT: {
+  REDIRECT_BASED: {
     llm_prompt: {
-      id: 'browser-llm',
-      title: 'AI-Assisted Integration',
-      description: 'Browser integration guide',
-      type: 'llm' as const,
-      icon: 'browser',
-      content: 'LLM prompt content',
+      docsUrl: 'https://thunderid.dev/prompts/redirect-based.txt',
     },
-    manual_steps: [
-      {
-        step: 1,
-        title: 'Step X',
-        description: 'First step description',
-      },
-      {
-        step: 2,
-        title: 'Step Y',
-        description: 'Second step description',
-      },
-    ],
   },
 };
 
@@ -380,35 +205,37 @@ describe('getIntegrationGuidesForTemplate', () => {
 });
 
 describe('getIntegrationGuideVariantKey', () => {
-  it('should resolve INBUILT for a template without the embedded suffix', () => {
-    expect(getIntegrationGuideVariantKey('react')).toBe('INBUILT');
+  it('should resolve REDIRECT_BASED for a template without the embedded suffix', () => {
+    expect(getIntegrationGuideVariantKey('react')).toBe('REDIRECT_BASED');
   });
 
   it('should resolve EMBEDDED for a template with the embedded suffix', () => {
     expect(getIntegrationGuideVariantKey('react-embedded')).toBe('EMBEDDED');
   });
 
-  it('should resolve INBUILT for undefined and null template IDs', () => {
-    expect(getIntegrationGuideVariantKey(undefined)).toBe('INBUILT');
-    expect(getIntegrationGuideVariantKey(null)).toBe('INBUILT');
+  it('should resolve REDIRECT_BASED for undefined and null template IDs', () => {
+    expect(getIntegrationGuideVariantKey(undefined)).toBe('REDIRECT_BASED');
+    expect(getIntegrationGuideVariantKey(null)).toBe('REDIRECT_BASED');
   });
 });
 
 describe('getIntegrationGuideForTemplate', () => {
-  it('should return the INBUILT guide for the react template', () => {
-    expect(getIntegrationGuideForTemplate('react')).toEqual(mockReactGuides.INBUILT);
+  it('should return the REDIRECT_BASED guide for the react template', () => {
+    expect(getIntegrationGuideForTemplate('react')).toEqual(mockReactGuides.REDIRECT_BASED);
   });
 
   it('should return the EMBEDDED guide for the react-embedded template', () => {
     expect(getIntegrationGuideForTemplate('react-embedded')).toEqual(mockReactGuides.EMBEDDED);
   });
 
-  it('should return the INBUILT guide for the express template', () => {
-    expect(getIntegrationGuideForTemplate('express')).toEqual(mockExpressGuides.INBUILT);
+  it('should return the REDIRECT_BASED guide for the express template', () => {
+    expect(getIntegrationGuideForTemplate('express')).toEqual(mockExpressGuides.REDIRECT_BASED);
   });
 
-  it('should return null for express-embedded since no EMBEDDED variant exists', () => {
-    expect(getIntegrationGuideForTemplate('express-embedded')).toBeNull();
+  it('should fall back to the REDIRECT_BASED guide for express-embedded since no EMBEDDED variant exists', () => {
+    // Every technology template should offer a coding-agent prompt regardless of sign-in
+    // approach, so a missing variant falls back to whichever one is authored.
+    expect(getIntegrationGuideForTemplate('express-embedded')).toEqual(mockExpressGuides.REDIRECT_BASED);
   });
 
   it('should return null for a template without any integration guides', () => {

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -97,7 +82,7 @@ var (
 	appToUpdate = Application{
 		Name:                      "Updated App",
 		Description:               "Updated Description",
-		IsRegistrationFlowEnabled: false,
+		IsRegistrationFlowEnabled: true,
 		Template:                  "mobile",
 		URL:                       "https://appToUpdate.example.com",
 		LogoURL:                   "https://appToUpdate.example.com/logo.png",
@@ -556,6 +541,9 @@ func retrieveAndValidateApplicationDetails(ts *ApplicationAPITestSuite, expected
 }
 
 func createApplication(app Application) (string, error) {
+	if app.Type == "" {
+		app.Type = "fullstack"
+	}
 	appJSON, err := json.Marshal(app)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal application: %w", err)
@@ -2035,7 +2023,13 @@ func (ts *ApplicationAPITestSuite) TestApplicationWithOnlyIDToken() {
 	ts.Assert().NotNil(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.Token)
 	ts.Assert().NotNil(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.Token.IDToken)
 	ts.Assert().Equal(int64(3600), retrievedApp.InboundAuthConfig[0].OAuthAppConfig.Token.IDToken.ValidityPeriod)
-	ts.Assert().Len(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims, 2)
+	// A mapping sent at creation is stored exactly as sent: standard scopes the app does not declare
+	// are not added to it, and openid needs no entry because it is always granted.
+	scopeClaims := retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims
+	ts.Assert().Len(scopeClaims, 2)
+	ts.Assert().Equal([]string{"name", "given_name", "family_name", "middle_name"}, scopeClaims["profile"])
+	ts.Assert().Equal([]string{"email", "email_verified"}, scopeClaims["email"])
+	ts.Assert().NotContains(scopeClaims, "openid")
 }
 
 // TestApplicationWithBothTokenTypes tests creating application with both AccessToken and IDToken.
@@ -2267,9 +2261,25 @@ func (ts *ApplicationAPITestSuite) TestApplicationWithComplexScopeClaims() {
 	retrievedApp, err := getApplicationByID(appID)
 	ts.Require().NoError(err)
 	ts.Assert().NotNil(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.Token.IDToken)
-	ts.Assert().Len(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims, 5)
-	ts.Assert().Contains(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims, "profile")
-	ts.Assert().GreaterOrEqual(len(retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims["profile"]), 10)
+	// The response returns the mapping exactly as sent: the four standard OIDC scopes the app
+	// declared plus its "custom" scope, with no defaults merged in.
+	scopeClaims := retrievedApp.InboundAuthConfig[0].OAuthAppConfig.ScopeClaims
+	ts.Assert().Equal(map[string][]string{
+		"profile": {
+			"name", "given_name", "family_name", "middle_name",
+			"nickname", "preferred_username", "profile", "picture",
+			"website", "gender", "birthdate", "zoneinfo", "locale",
+			"updated_at",
+		},
+		"email": {"email", "email_verified"},
+		"address": {
+			"address.formatted", "address.street_address",
+			"address.locality", "address.region",
+			"address.postal_code", "address.country",
+		},
+		"phone":  {"phone_number", "phone_number_verified"},
+		"custom": {"organization", "department", "employee_id"},
+	}, scopeClaims)
 }
 
 // TestApplicationCertificateRollbackOnOAuthFail tests certificate rollback when OAuth creation fails.
@@ -3623,17 +3633,16 @@ func (ts *ApplicationAPITestSuite) TestApplicationCreateWithDefaultAuthFlowID() 
 }
 
 // TestApplicationCreateWithoutRegistrationFlowID tests creating an application without a
-// RegistrationFlowID when its AuthFlowID transitively references a registration flow. The server
-// must auto-fill RegistrationFlowID with the reachable target and force IsRegistrationFlowEnabled
-// to false.
+// RegistrationFlowID when the caller left IsRegistrationFlowEnabled=false. The server must
+// persist the disabled binding (empty ID) even if the AuthFlowID transitively references a
+// registration flow.
 func (ts *ApplicationAPITestSuite) TestApplicationCreateWithoutRegistrationFlowID() {
 	app := Application{
-		OUID:                      testOUID,
-		Name:                      "No Registration Flow Test",
-		Description:               "Test that registration flow is auto-filled from the referenced auth flow",
-		IsRegistrationFlowEnabled: true,
-		AuthFlowID:                defaultAuthFlowID,
-		Certificate:               nil,
+		OUID:        testOUID,
+		Name:        "No Registration Flow Test",
+		Description: "Test that a disabled registration binding is not auto-filled from the auth flow",
+		AuthFlowID:  defaultAuthFlowID,
+		Certificate: nil,
 	}
 
 	appID, err := createApplication(app)
@@ -3643,10 +3652,9 @@ func (ts *ApplicationAPITestSuite) TestApplicationCreateWithoutRegistrationFlowI
 	retrievedApp, err := getApplicationByID(appID)
 	ts.Require().NoError(err)
 
-	ts.Assert().Equal(defaultRegistrationFlowID, retrievedApp.RegistrationFlowID,
-		"auto-fill must populate RegistrationFlowID from the auth flow's reachable target")
-	ts.Assert().False(retrievedApp.IsRegistrationFlowEnabled,
-		"auto-fill must force IsRegistrationFlowEnabled to false")
+	ts.Assert().Empty(retrievedApp.RegistrationFlowID,
+		"disabled registration binding must not be auto-filled from the auth flow's reachable target")
+	ts.Assert().False(retrievedApp.IsRegistrationFlowEnabled)
 }
 
 // TestApplicationCreateWithDuplicateClientID tests creating application with duplicate client ID
@@ -3979,6 +3987,7 @@ func (ts *ApplicationAPITestSuite) TestApplicationWithInvalidThemeAndLayoutID() 
 		OUID:        testOUID,
 		Name:        "App With Invalid Theme",
 		Description: "Application with invalid theme ID",
+		Type:        "fullstack",
 		ThemeID:     "00000000-0000-0000-0000-000000000000",
 		Certificate: nil,
 		InboundAuthConfig: []InboundAuthConfig{
@@ -4324,6 +4333,7 @@ func (ts *ApplicationAPITestSuite) TestApplicationWithInvalidAllowedUserTypes() 
 		OUID:                      testOUID,
 		Name:                      "App With Invalid User Types",
 		Description:               "Application with invalid user types",
+		Type:                      "fullstack",
 		IsRegistrationFlowEnabled: false,
 		AllowedUserTypes:          []string{"nonexistent_type_1", "nonexistent_type_2"},
 		Certificate:               nil,
@@ -4606,6 +4616,7 @@ func (ts *ApplicationAPITestSuite) TestApplicationWithPartialInvalidAllowedUserT
 		OUID:                      testOUID,
 		Name:                      "App With Partial Invalid User Types",
 		Description:               "Application with mix of valid and invalid user types",
+		Type:                      "fullstack",
 		IsRegistrationFlowEnabled: false,
 		AllowedUserTypes:          []string{"valid_user_type", "invalid_user_type"},
 		Certificate:               nil,

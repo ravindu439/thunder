@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useToast} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
+import {getErrorMessage} from '@thunderid/utils';
 import {Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography} from '@wso2/oxygen-ui';
-import type {JSX} from 'react';
+import {useCallback, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import useDeleteResourceServer from '../api/useDeleteResourceServer';
 import type {ResourceServer} from '../models/resource-server';
@@ -41,30 +27,43 @@ export default function ResourceServerDeleteDialog({
   const {showToast} = useToast();
   const logger = useLogger('ResourceServerDeleteDialog');
   const deleteResourceServer = useDeleteResourceServer();
+  const [error, setError] = useState<string | null>(null);
+
+  // Resolves an error through the `resourceServers` catalog. `t` defaults to the `common`
+  // namespace, so this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with
+  // `resourceServers:`, per getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string =>
+      t(key.includes(':') ? key : `resourceServers:${key}`, options),
+    [t],
+  );
+
+  const handleClose = (): void => {
+    if (deleteResourceServer.isPending) return;
+    setError(null);
+    onClose();
+  };
 
   const handleDelete = (): void => {
     if (!resourceServer) return;
 
     deleteResourceServer.mutate(resourceServer.id, {
       onSuccess: () => {
+        setError(null);
         showToast(t('resourceServers:delete.success', 'Resource server deleted successfully.'), 'success');
         onSuccess();
       },
       onError: (err: Error) => {
         logger.error('Failed to delete resource server', {error: err});
-        showToast(
-          t(
-            'resourceServers:delete.error',
-            'Failed to delete resource server. Make sure it has no resources or actions.',
-          ),
-          'error',
+        setError(
+          getErrorMessage(err, tForErrors, 'delete.error', 'Failed to delete resource server. Please try again.'),
         );
       },
     });
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
       <DialogTitle>{t('resourceServers:delete.title', 'Delete resource server')}</DialogTitle>
       <DialogContent>
         <Alert severity="warning" sx={{mb: 2}}>
@@ -74,9 +73,14 @@ export default function ResourceServerDeleteDialog({
           {t('resourceServers:delete.confirm', 'Are you sure you want to delete')}{' '}
           <strong>{resourceServer?.name}</strong>?
         </Typography>
+        {error && (
+          <Alert severity="error" sx={{mt: 2}}>
+            {error}
+          </Alert>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button variant="outlined" onClick={onClose} disabled={deleteResourceServer.isPending}>
+        <Button variant="outlined" onClick={handleClose} disabled={deleteResourceServer.isPending}>
           {t('common:cancel', 'Cancel')}
         </Button>
         <Button variant="contained" color="error" onClick={handleDelete} disabled={deleteResourceServer.isPending}>

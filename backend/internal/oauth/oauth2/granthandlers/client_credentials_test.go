@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -25,6 +10,7 @@ import (
 
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -36,7 +22,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
-	"github.com/thunder-id/thunderid/internal/resource"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/tests/mocks/actorprovidermock"
 	"github.com/thunder-id/thunderid/tests/mocks/authzmock"
@@ -44,7 +29,6 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/oauth/oauth2/tokenservicemock"
 	"github.com/thunder-id/thunderid/tests/mocks/oumock"
 	"github.com/thunder-id/thunderid/tests/mocks/resourcemock"
-	"github.com/thunder-id/thunderid/tests/mocks/serverconfigmock"
 )
 
 // nolint:gosec // Test token, not a real credential
@@ -64,7 +48,6 @@ type ClientCredentialsGrantHandlerTestSuite struct {
 	mockAuthzService    *authzmock.AuthorizationProviderMock
 	mockEntityProvider  *actorprovidermock.ActorProviderMock
 	mockResourceService *resourcemock.ResourceServiceInterfaceMock
-	mockServerConfig    *serverconfigmock.ServerConfigServiceMock
 	handler             *clientCredentialsGrantHandler
 	oauthApp            *providers.OAuthClient
 }
@@ -90,30 +73,27 @@ func (suite *ClientCredentialsGrantHandlerTestSuite) SetupTest() {
 	suite.mockAuthzService = authzmock.NewAuthorizationProviderMock(suite.T())
 	suite.mockEntityProvider = actorprovidermock.NewActorProviderMock(suite.T())
 	suite.mockResourceService = resourcemock.NewResourceServiceInterfaceMock(suite.T())
-	suite.mockServerConfig = serverconfigmock.NewServerConfigServiceMock(suite.T())
 
-	// Explicit resource: resolve the identifier to an RS whose ID and Identifier are the identifier.
+	// Explicit resource resolves to an RS whose ID and Identifier are the identifier; an empty
+	// identifier resolves to the configured default resource server, as the default-aware provider does.
 	suite.mockResourceService.On("GetResourceServerByIdentifier", mock.Anything, mock.Anything).
 		Return(func(_ context.Context, identifier string) *providers.ResourceServer {
+			if identifier == "" {
+				return &providers.ResourceServer{ID: defaultRSID, Identifier: defaultRSIdentifier}
+			}
 			return &providers.ResourceServer{ID: identifier, Identifier: identifier}
 		}, func(_ context.Context, _ string) *tidcommon.ServiceError {
 			return nil
 		}).Maybe()
-	// No resource: fall back to the configured default resource server.
-	suite.mockServerConfig.On("GetMergedConfig", mock.Anything, "defaultResourceServer").
-		Return(resource.DefaultResourceServerConfig{ResourceServerID: defaultRSID}, nil).Maybe()
-	suite.mockResourceService.On("GetResourceServer", mock.Anything, defaultRSID).
-		Return(&providers.ResourceServer{ID: defaultRSID, Identifier: defaultRSIdentifier}, nil).Maybe()
 	suite.mockResourceService.On("ValidatePermissions", mock.Anything, mock.Anything, mock.Anything).
 		Return([]string{}, nil).Maybe()
 
 	suite.handler = &clientCredentialsGrantHandler{
-		tokenBuilder:        suite.mockTokenBuilder,
-		ouService:           suite.mockOUService,
-		authzService:        suite.mockAuthzService,
-		actorProvider:       suite.mockEntityProvider,
-		resourceService:     suite.mockResourceService,
-		serverConfigService: suite.mockServerConfig,
+		tokenBuilder:    suite.mockTokenBuilder,
+		ouService:       suite.mockOUService,
+		authzService:    suite.mockAuthzService,
+		actorProvider:   suite.mockEntityProvider,
+		resourceService: suite.mockResourceService,
 	}
 	suite.mockEntityProvider.On("GetActorGroups", mock.Anything).
 		Return([]providers.EntityGroup{}, nil).Maybe()
@@ -171,7 +151,7 @@ func mockEvaluateAccessBatch(
 func (suite *ClientCredentialsGrantHandlerTestSuite) TestNewClientCredentialsGrantHandler() {
 	handler := newClientCredentialsGrantHandler(
 		suite.mockTokenBuilder, suite.mockOUService, suite.mockAuthzService,
-		suite.mockEntityProvider, suite.mockResourceService, suite.mockServerConfig)
+		suite.mockEntityProvider, suite.mockResourceService)
 	assert.NotNil(suite.T(), handler)
 	assert.Implements(suite.T(), (*GrantHandlerInterface)(nil), handler)
 }
@@ -293,6 +273,50 @@ func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_Success() {
 	}
 }
 
+// A scopeless request (not bound to a resource server) uses the app's configured default audience
+// for the aud claim instead of the client_id.
+func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_ScopelessUsesConfiguredDefaultAudience() {
+	suite.mockJWTService.Mock = mock.Mock{}
+	suite.oauthApp.Token = &providers.OAuthTokenConfig{
+		AccessToken: &providers.AccessTokenConfig{
+			DefaultAudience: "https://api.example.com/booking",
+		},
+	}
+
+	tokenRequest := &model.TokenRequest{
+		GrantType:    "client_credentials",
+		ClientID:     testClientID,
+		ClientSecret: "secret123",
+		Scope:        "",
+	}
+
+	expectedAudiences := []string{"https://api.example.com/booking"}
+	suite.mockTokenBuilder.On("BuildAccessToken",
+		mock.Anything,
+		mock.MatchedBy(func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return ctx.Subject == testEntityID &&
+				slices.Equal(ctx.Audiences, expectedAudiences) &&
+				ctx.ClientID == testClientID &&
+				len(ctx.Scopes) == 0
+		})).Return(&model.TokenDTO{
+		Token:     testJWTToken,
+		TokenType: constants.TokenTypeBearer,
+		IssuedAt:  int64(1234567890),
+		ExpiresIn: 3600,
+		Scopes:    []string{},
+		ClientID:  testClientID,
+		Subject:   testEntityID,
+		Audiences: expectedAudiences,
+	}, nil)
+
+	result, errResp := suite.handler.HandleGrant(context.Background(), tokenRequest, suite.oauthApp)
+
+	assert.Nil(suite.T(), errResp)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), expectedAudiences, result.AccessToken.Audiences)
+	suite.mockTokenBuilder.AssertExpectations(suite.T())
+}
+
 func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_JWTGenerationError() {
 	tokenRequest := &model.TokenRequest{
 		GrantType:    "client_credentials",
@@ -406,6 +430,11 @@ func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_ClientAttri
 		OUID:                    "ou-456",
 		GrantTypes:              []providers.GrantType{providers.GrantTypeClientCredentials},
 		TokenEndpointAuthMethod: providers.TokenEndpointAuthMethodClientSecretBasic,
+		Token: &providers.OAuthTokenConfig{
+			AccessToken: &providers.AccessTokenConfig{
+				ClientConfig: &providers.AccessTokenSubConfig{Attributes: []string{constants.ClaimOUID}},
+			},
+		},
 	}
 
 	mockEvaluateAccessBatch(suite.mockAuthzService, oauthAppWithOU.ID, defaultRSID, []string{"read"}, []string{"read"})
@@ -671,6 +700,101 @@ func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_AgentOwnAtt
 	assert.NotNil(suite.T(), result)
 }
 
+func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_AgentSystemAttributes_Embedded() {
+	tokenRequest := &model.TokenRequest{
+		GrantType:    "client_credentials",
+		ClientID:     testClientID,
+		ClientSecret: "secret123",
+		Scope:        "",
+	}
+
+	agentApp := &providers.OAuthClient{
+		ID:                      testEntityID,
+		ClientID:                testClientID,
+		EntityCategory:          providers.EntityCategoryAgent,
+		GrantTypes:              []providers.GrantType{providers.GrantTypeClientCredentials},
+		TokenEndpointAuthMethod: providers.TokenEndpointAuthMethodClientSecretBasic,
+		Token: &providers.OAuthTokenConfig{
+			AccessToken: &providers.AccessTokenConfig{
+				ClientConfig: &providers.AccessTokenSubConfig{Attributes: []string{"name", "owner"}},
+			},
+		},
+	}
+
+	suite.mockEntityProvider.On("GetActor", agentApp.ID).Return(&providers.Entity{
+		ID:               agentApp.ID,
+		Category:         providers.EntityCategoryAgent,
+		SystemAttributes: []byte(`{"name":"Ledger Agent","owner":"user-123","clientId":"cid"}`),
+	}, (*tidcommon.ServiceError)(nil))
+
+	suite.mockTokenBuilder.On("BuildAccessToken",
+		mock.Anything,
+		mock.MatchedBy(func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return ctx.SubjectAttributes["name"] == "Ledger Agent" &&
+				ctx.SubjectAttributes["owner"] == "user-123" &&
+				ctx.SubjectAttributes["clientId"] == nil
+		})).Return(&model.TokenDTO{
+		Token:     testJWTToken,
+		TokenType: constants.TokenTypeBearer,
+		IssuedAt:  int64(1234567890),
+		ExpiresIn: 3600,
+		Scopes:    []string{},
+		ClientID:  testClientID,
+	}, nil)
+
+	result, errResp := suite.handler.HandleGrant(context.Background(), tokenRequest, agentApp)
+
+	assert.Nil(suite.T(), errResp)
+	assert.NotNil(suite.T(), result)
+}
+
+func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_ApplicationSystemAttributes_NotEmbedded() {
+	tokenRequest := &model.TokenRequest{
+		GrantType:    "client_credentials",
+		ClientID:     testClientID,
+		ClientSecret: "secret123",
+		Scope:        "",
+	}
+
+	appApp := &providers.OAuthClient{
+		ID:                      testEntityID,
+		ClientID:                testClientID,
+		EntityCategory:          providers.EntityCategoryApp,
+		GrantTypes:              []providers.GrantType{providers.GrantTypeClientCredentials},
+		TokenEndpointAuthMethod: providers.TokenEndpointAuthMethodClientSecretBasic,
+		Token: &providers.OAuthTokenConfig{
+			AccessToken: &providers.AccessTokenConfig{
+				ClientConfig: &providers.AccessTokenSubConfig{Attributes: []string{"name", "owner"}},
+			},
+		},
+	}
+
+	// Applications store name in SystemAttributes too; the category gate must keep it out of the token.
+	suite.mockEntityProvider.On("GetActor", appApp.ID).Return(&providers.Entity{
+		ID:               appApp.ID,
+		Category:         providers.EntityCategoryApp,
+		SystemAttributes: []byte(`{"name":"My Application","clientId":"cid"}`),
+	}, (*tidcommon.ServiceError)(nil))
+
+	suite.mockTokenBuilder.On("BuildAccessToken",
+		mock.Anything,
+		mock.MatchedBy(func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return ctx.SubjectAttributes["name"] == nil && ctx.SubjectAttributes["owner"] == nil
+		})).Return(&model.TokenDTO{
+		Token:     testJWTToken,
+		TokenType: constants.TokenTypeBearer,
+		IssuedAt:  int64(1234567890),
+		ExpiresIn: 3600,
+		Scopes:    []string{},
+		ClientID:  testClientID,
+	}, nil)
+
+	result, errResp := suite.handler.HandleGrant(context.Background(), tokenRequest, appApp)
+
+	assert.Nil(suite.T(), errResp)
+	assert.NotNil(suite.T(), result)
+}
+
 // Single-audience token binding tests (RFC 8707 + single-RS resolution).
 
 // TestHandleGrant_ExplicitResource_PopulatesRSIDAndAudience verifies that an explicit resource
@@ -765,20 +889,19 @@ func (suite *ClientCredentialsGrantHandlerTestSuite) TestHandleGrant_NoResourceN
 	mockAuthzService := authzmock.NewAuthorizationProviderMock(suite.T())
 	mockResourceService := resourcemock.NewResourceServiceInterfaceMock(suite.T())
 	mockEntityProvider := actorprovidermock.NewActorProviderMock(suite.T())
-	mockServerConfig := serverconfigmock.NewServerConfigServiceMock(suite.T())
 
 	handler := &clientCredentialsGrantHandler{
-		tokenBuilder:        mockTokenBuilder,
-		ouService:           suite.mockOUService,
-		authzService:        mockAuthzService,
-		actorProvider:       mockEntityProvider,
-		resourceService:     mockResourceService,
-		serverConfigService: mockServerConfig,
+		tokenBuilder:    mockTokenBuilder,
+		ouService:       suite.mockOUService,
+		authzService:    mockAuthzService,
+		actorProvider:   mockEntityProvider,
+		resourceService: mockResourceService,
 	}
 
-	// No default resource server configured.
-	mockServerConfig.On("GetMergedConfig", mock.Anything, "defaultResourceServer").
-		Return(resource.DefaultResourceServerConfig{}, nil)
+	// No default resource server configured: the provider resolves the empty identifier to a client
+	// error, which HandleGrant maps to invalid_target.
+	mockResourceService.On("GetResourceServerByIdentifier", mock.Anything, "").
+		Return(nil, &tidcommon.ServiceError{Type: tidcommon.ClientErrorType, Code: "RES-1003"})
 
 	tokenRequest := &model.TokenRequest{
 		GrantType:    "client_credentials",

@@ -1,20 +1,7 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
+import type { APIRequestContext } from "@playwright/test";
 
 // Application ID of the native app used for E2E admin authentication.
 // Declared in tests/e2e/thunderid-config.yaml with a fixed UUID. Uses only the
@@ -29,7 +16,7 @@ const E2E_ADMIN_NATIVE_FLOW_SECRET = "e2e-admin-native-app-secret";
  * Obtain a short-lived admin bearer token via the flow execution API.
  * Reads SERVER_URL, ADMIN_USERNAME, and ADMIN_PASSWORD from environment variables.
  */
-export async function getAdminToken(request: import("@playwright/test").APIRequestContext): Promise<string> {
+export async function getAdminToken(request: APIRequestContext): Promise<string> {
   const serverUrl = process.env.SERVER_URL || "https://localhost:8090";
   const adminUsername = process.env.ADMIN_USERNAME || "admin";
   const adminPassword = process.env.ADMIN_PASSWORD || "admin";
@@ -47,7 +34,15 @@ export async function getAdminToken(request: import("@playwright/test").APIReque
     data: {
       executionId: flowData.executionId,
       ...(flowData.challengeToken && { challengeToken: flowData.challengeToken }),
-      inputs: { username: adminUsername, password: adminPassword, requested_permissions: "system" },
+      // resource_server_identifier scopes the permission evaluation to the System resource server
+      // (identifier from backend/cmd/server/bootstrap/01-default-resources.yaml). Direct /flow/execute
+      // calls do not pass through the OAuth layer, so the target resource server must be declared here.
+      inputs: {
+        username: adminUsername,
+        password: adminPassword,
+        requested_permissions: "system",
+        resource_server_identifier: "https://localhost:8090/mcp",
+      },
       action: "action_001",
     },
     ignoreHTTPSErrors: true,

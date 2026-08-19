@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authn
 
@@ -32,6 +17,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/thunder-id/thunderid/internal/authn/common"
+	authnprovidercm "github.com/thunder-id/thunderid/internal/authnprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/error/apierror"
 )
 
@@ -269,6 +255,20 @@ func (suite *AuthenticationHandlerTestSuite) TestHandleCredentialsAuthRequestSer
 			},
 			expectedStatusCode: http.StatusBadRequest,
 			expectedErrorCode:  "CUSTOM_ERROR",
+		},
+		{
+			name: "ReservedCredentialType",
+			authRequest: map[string]interface{}{
+				"identifiers": map[string]interface{}{
+					"username": "testuser",
+				},
+				"credentials": map[string]interface{}{
+					authnprovidercm.CredentialTypeProvisionedEntityID: "user123",
+				},
+			},
+			serviceError:       &ErrorReservedCredentialType,
+			expectedStatusCode: http.StatusBadRequest,
+			expectedErrorCode:  ErrorReservedCredentialType.Code,
 		},
 		{
 			name: "ServerError",
@@ -853,20 +853,21 @@ func (suite *AuthenticationHandlerTestSuite) TestHandlePasskeyRegisterFinishRequ
 				AttestationObject: "base64-attestation",
 			},
 		},
-		SessionToken:   testSessionTkn,
-		CredentialName: "My Passkey",
+		SessionToken: testSessionTkn,
 	}
-	regResponse := map[string]interface{}{
-		"credentialId":   "credential-id-123",
-		"credentialName": "My Passkey",
-		"createdAt":      "2025-01-01T00:00:00Z",
+	regResponse := &common.AuthenticationResponse{
+		ID:        testUserID,
+		Type:      "person",
+		OUID:      testOrgUnit,
+		Assertion: testJWTToken,
 	}
 
 	suite.mockService.On("FinishPasskeyRegistration",
 		mock.Anything,
 		regRequest.PublicKeyCredential,
 		testSessionTkn,
-		"My Passkey").Return(regResponse, nil)
+		false,
+		"").Return(regResponse, nil)
 
 	body, _ := json.Marshal(regRequest)
 	req := httptest.NewRequest(http.MethodPost, "/authenticate/passkey/register/finish", bytes.NewReader(body))
@@ -878,8 +879,8 @@ func (suite *AuthenticationHandlerTestSuite) TestHandlePasskeyRegisterFinishRequ
 	var response map[string]interface{}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	suite.NoError(err)
-	suite.Equal("credential-id-123", response["credentialId"])
-	suite.Equal("My Passkey", response["credentialName"])
+	suite.Equal(testUserID, response["id"])
+	suite.Equal(testJWTToken, response["assertion"])
 }
 
 func (suite *AuthenticationHandlerTestSuite) TestHandlePasskeyRegisterFinishRequestInvalidJSON() {
@@ -918,7 +919,7 @@ func (suite *AuthenticationHandlerTestSuite) TestHandlePasskeyRegisterFinishRequ
 	}
 
 	suite.mockService.On("FinishPasskeyRegistration",
-		mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, serviceError)
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, serviceError)
 
 	body, _ := json.Marshal(regRequest)
 	req := httptest.NewRequest(http.MethodPost, "/authenticate/passkey/register/finish", bytes.NewReader(body))

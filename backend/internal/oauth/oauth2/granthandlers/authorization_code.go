@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -33,18 +18,16 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/resourceindicators"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
 	oauth2utils "github.com/thunder-id/thunderid/internal/oauth/oauth2/utils"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // authorizationCodeGrantHandler handles the authorization code grant type.
 type authorizationCodeGrantHandler struct {
-	authzService        authz.AuthorizeServiceInterface
-	tokenBuilder        tokenservice.TokenBuilderInterface
-	attributeCache      attributecache.AttributeCacheServiceInterface
-	resourceService     providers.ResourceServerProvider
-	serverConfigService serverconfig.ServerConfigService
+	authzService    authz.AuthorizeServiceInterface
+	tokenBuilder    tokenservice.TokenBuilderInterface
+	attributeCache  attributecache.AttributeCacheServiceInterface
+	resourceService providers.ResourceServerProvider
 }
 
 // newAuthorizationCodeGrantHandler creates a new instance of AuthorizationCodeGrantHandler.
@@ -53,14 +36,12 @@ func newAuthorizationCodeGrantHandler(
 	tokenBuilder tokenservice.TokenBuilderInterface,
 	attributeCache attributecache.AttributeCacheServiceInterface,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
 ) GrantHandlerInterface {
 	return &authorizationCodeGrantHandler{
-		authzService:        authzService,
-		tokenBuilder:        tokenBuilder,
-		attributeCache:      attributeCache,
-		resourceService:     resourceService,
-		serverConfigService: serverConfigService,
+		authzService:    authzService,
+		tokenBuilder:    tokenBuilder,
+		attributeCache:  attributeCache,
+		resourceService: resourceService,
 	}
 }
 
@@ -145,7 +126,7 @@ func (h *authorizationCodeGrantHandler) HandleGrant(ctx context.Context, tokenRe
 	oidcScopes, nonOidcScopes := oauth2utils.SeparateOIDCAndNonOIDCScopes(
 		strings.Join(authorizedScopes, " "), oauthApp.ScopeClaims)
 	targetRS, errResp := resourceindicators.ResolveAudienceBinding(
-		ctx, h.resourceService, h.serverConfigService, effectiveResources, nonOidcScopes)
+		ctx, h.resourceService, effectiveResources, nonOidcScopes)
 	if errResp != nil {
 		return nil, errResp
 	}
@@ -153,8 +134,9 @@ func (h *authorizationCodeGrantHandler) HandleGrant(ctx context.Context, tokenRe
 	var accessTokenAudiences, accessTokenScopes []string
 	if targetRS == nil {
 		// OIDC-only (or scopeless) request with no resource: the token is not bound to a resource
-		// server, so its audience is the client_id and it carries only the OIDC scopes.
-		accessTokenAudiences = []string{tokenRequest.ClientID}
+		// server, so its audience is the app's configured default audiences (falling back to the
+		// client_id) and it carries only the OIDC scopes.
+		accessTokenAudiences = []string{oauthApp.ResolveDefaultAudience(tokenRequest.ClientID)}
 		accessTokenScopes = oidcScopes
 	} else {
 		downscopedNonOidc, dErr := resourceindicators.DownscopeToResourceServer(
@@ -183,6 +165,7 @@ func (h *authorizationCodeGrantHandler) HandleGrant(ctx context.Context, tokenRe
 		ClaimsLocales:     authCode.ClaimsLocales,
 		ValidityPeriod:    userSubConfig.ValidityPeriodOrZero(),
 		DPoPJkt:           dpop.GetJkt(ctx),
+		TokenFamilyID:     authCode.TokenFamilyID,
 	}
 	if oauthApp.ShouldAppendActorClaim() {
 		accessTokenCtx.ActorClaims = &tokenservice.SubjectTokenClaims{Sub: oauthApp.ID}
@@ -253,7 +236,7 @@ func (h *authorizationCodeGrantHandler) retrieveAndValidateAuthCode(
 	if oauthApp.RequiresPKCE() || authCode.CodeChallenge != "" {
 		if tokenRequest.CodeVerifier == "" {
 			return nil, &model.ErrorResponse{
-				Error:            constants.ErrorInvalidRequest,
+				Error:            constants.ErrorInvalidGrant,
 				ErrorDescription: "code_verifier is required",
 			}
 		}

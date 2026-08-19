@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -49,7 +34,7 @@ func TestEngineTestSuite(t *testing.T) {
 
 func newAuthenticatedAuthUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -557,7 +542,7 @@ func (s *EngineTestSuite) TestUpdateContextWithNodeResponse_ReplacesAuthUserWhen
 
 	var newAuthUser providers.AuthUser
 	err := newAuthUser.UnmarshalJSON([]byte(
-		`{"entityReference":{"entityId":"user-456"},"attributes":{}}`))
+		`{"default":{"entityReference":{"entityId":"user-456"},"attributes":{}}}`))
 	s.NoError(err)
 
 	nodeResp := &common.NodeResponse{
@@ -624,6 +609,150 @@ func (s *EngineTestSuite) TestResolveStepForRedirection_AppendsInputs() {
 
 	s.NoError(err)
 	s.Len(flowStep.Data.Inputs, 2)
+}
+
+func (s *EngineTestSuite) TestReplayPromptInputs_RestoresInputsForPausedPrompt() {
+	t := s.T()
+	mockCurrentNode := coremock.NewNodeInterfaceMock(t)
+	mockCurrentNode.On("GetID").Return("prompt-attrs").Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	ctx := &EngineContext{
+		Context:             context.Background(),
+		CurrentNode:         mockCurrentNode,
+		CurrentPromptNodeID: "prompt-attrs",
+		CurrentPromptInputs: []providers.Input{{Identifier: "given_name", Required: true}},
+	}
+
+	fe.replayPromptInputs(ctx)
+
+	replayed, ok := ctx.ForwardedData[common.ForwardedDataKeyInputs].([]providers.Input)
+	s.True(ok)
+	s.Len(replayed, 1)
+	s.Equal("given_name", replayed[0].Identifier)
+}
+
+func (s *EngineTestSuite) TestReplayPromptInputs_SkipsDifferentNode() {
+	t := s.T()
+	mockCurrentNode := coremock.NewNodeInterfaceMock(t)
+	mockCurrentNode.On("GetID").Return("some-other-node").Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	ctx := &EngineContext{
+		Context:             context.Background(),
+		CurrentNode:         mockCurrentNode,
+		CurrentPromptNodeID: "prompt-attrs",
+		CurrentPromptInputs: []providers.Input{{Identifier: "given_name", Required: true}},
+	}
+
+	fe.replayPromptInputs(ctx)
+
+	s.Nil(ctx.ForwardedData)
+}
+
+func (s *EngineTestSuite) TestReplayPromptInputs_SkipsWhenActionSelected() {
+	t := s.T()
+	mockCurrentNode := coremock.NewNodeInterfaceMock(t)
+	mockCurrentNode.On("GetID").Return("prompt-attrs").Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	ctx := &EngineContext{
+		Context:             context.Background(),
+		CurrentNode:         mockCurrentNode,
+		CurrentAction:       "action_google",
+		CurrentPromptNodeID: "prompt-attrs",
+		CurrentPromptInputs: []providers.Input{{Identifier: "username", Required: true}},
+	}
+
+	fe.replayPromptInputs(ctx)
+
+	// Selecting an action advances the flow: the prompt must evaluate against that action's own
+	// inputs, so an action declaring none must not be blocked by the previous rendering.
+	s.Nil(ctx.ForwardedData)
+}
+
+func (s *EngineTestSuite) TestReplayPromptInputs_KeepsFreshForwardedInputs() {
+	t := s.T()
+	mockCurrentNode := coremock.NewNodeInterfaceMock(t)
+	mockCurrentNode.On("GetID").Return("prompt-attrs").Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	fresh := []providers.Input{{Identifier: "family_name", Required: true}}
+	ctx := &EngineContext{
+		Context:             context.Background(),
+		CurrentNode:         mockCurrentNode,
+		CurrentPromptNodeID: "prompt-attrs",
+		CurrentPromptInputs: []providers.Input{{Identifier: "given_name", Required: true}},
+		ForwardedData:       map[string]interface{}{common.ForwardedDataKeyInputs: fresh},
+	}
+
+	fe.replayPromptInputs(ctx)
+
+	// An upstream executor ran in this traversal, so its inputs win over the recorded ones.
+	replayed, ok := ctx.ForwardedData[common.ForwardedDataKeyInputs].([]providers.Input)
+	s.True(ok)
+	s.Len(replayed, 1)
+	s.Equal("family_name", replayed[0].Identifier)
+}
+
+func (s *EngineTestSuite) TestSwitchContextToCallee_DropsCallerPausedPrompt() {
+	t := s.T()
+	mockCallNode := coremock.NewNodeInterfaceMock(t)
+	mockCallNode.On("GetID").Return("call_mfa").Maybe()
+
+	// The callee's first prompt reuses the caller's prompt ID: node IDs are graph-local, so
+	// conventional names collide across flows.
+	mockStartNode := coremock.NewNodeInterfaceMock(t)
+	mockStartNode.On("GetID").Return("prompt_credentials").Maybe()
+
+	mockCalleeGraph := coremock.NewGraphInterfaceMock(t)
+	mockCalleeGraph.On("GetType").Return(providers.FlowTypeAuthentication).Maybe()
+	mockCalleeGraph.On("GetStartNode").Return(mockStartNode, nil).Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	ctx := &EngineContext{
+		Context:             context.Background(),
+		CurrentNode:         mockCallNode,
+		CurrentPromptNodeID: "prompt_credentials",
+		CurrentPromptInputs: []providers.Input{{Identifier: "given_name", Required: true}},
+	}
+
+	_, svcErr := fe.switchContextToCallee(ctx, &common.NodeResponse{}, mockCalleeGraph, log.GetLogger())
+	s.Nil(svcErr)
+
+	s.Empty(ctx.CurrentPromptNodeID)
+	s.Nil(ctx.CurrentPromptInputs)
+
+	// The callee's colliding prompt must not inherit the caller's inputs.
+	ctx.CurrentNode = mockStartNode
+	fe.replayPromptInputs(ctx)
+	s.Nil(ctx.ForwardedData)
+}
+
+func (s *EngineTestSuite) TestPopFrame_DropsCalleePausedPrompt() {
+	t := s.T()
+	mockCallerNode := coremock.NewNodeInterfaceMock(t)
+	mockCallerNode.On("GetID").Return("prompt_credentials").Maybe()
+
+	fe := &flowEngine{logger: log.GetLogger()}
+	ctx := &EngineContext{
+		Context:     context.Background(),
+		CurrentNode: mockCallerNode,
+	}
+	ctx.pushFrame("call_mfa")
+
+	// The callee paused on a prompt whose ID collides with a node in the caller graph.
+	ctx.CurrentPromptNodeID = "prompt_credentials"
+	ctx.CurrentPromptInputs = []providers.Input{{Identifier: "given_name", Required: true}}
+
+	s.NotNil(ctx.popFrame())
+
+	s.Empty(ctx.CurrentPromptNodeID)
+	s.Nil(ctx.CurrentPromptInputs)
+
+	// Back in the caller, the callee's record must not replay into the colliding node.
+	fe.replayPromptInputs(ctx)
+	s.Nil(ctx.ForwardedData)
 }
 
 func (s *EngineTestSuite) TestResolveStepDetailsForPrompt_WithMeta() {
@@ -2300,9 +2429,13 @@ func (s *EngineTestSuite) TestHandleIncompleteResponse_ViewType() {
 		Type:   common.NodeResponseTypeView,
 		Inputs: []providers.Input{{Identifier: "username", Required: true}},
 	}
+	mockCurrentNode.On("GetID").Return("prompt-node").Maybe()
+
 	err := fe.handleIncompleteResponse(ctx, nodeResp, flowStep, log.GetLogger())
 	s.Nil(err)
 	s.Equal(providers.FlowStatusIncomplete, flowStep.Status)
+	s.Equal("prompt-node", ctx.CurrentPromptNodeID)
+	s.Len(ctx.CurrentPromptInputs, 1)
 }
 
 func (s *EngineTestSuite) TestHandleIncompleteResponse_RedirectionError() {
@@ -3944,6 +4077,52 @@ func (s *EngineTestSuite) TestHandleCallResponse_Success() {
 	s.Equal(mockCalleeGraph, ctx.Graph)
 	s.Equal(providers.FlowTypeRegistration, ctx.FlowType)
 	s.Equal(mockStartNode, ctx.CurrentNode)
+}
+
+func (s *EngineTestSuite) TestSharedRuntimeDataSurvivesAdministrationFlowCallAndReturn() {
+	t := s.T()
+	callerGraph := coremock.NewGraphInterfaceMock(t)
+	callNode := coremock.NewCallNodeInterfaceMock(t)
+	deleteNode := coremock.NewNodeInterfaceMock(t)
+	calleeGraph := coremock.NewGraphInterfaceMock(t)
+	calleeStart := coremock.NewNodeInterfaceMock(t)
+	flowProvider := NewFlowProviderMock(t)
+	graphBuilder := NewGraphBuilderInterfaceMock(t)
+
+	callNode.On("GetID").Return("revoke-call")
+	callerGraph.On("GetNode", "revoke-call").Return(callNode, true)
+	callNode.On("GetOnSuccess").Return("delete-user")
+	callerGraph.On("GetNode", "delete-user").Return(deleteNode, true)
+	flow := &providers.CompleteFlowDefinition{ID: "revocation-flow", FlowType: providers.FlowTypeAdministration}
+	flowProvider.On("GetFlow", mock.Anything, "revocation-flow").Return(flow, nil)
+	graphBuilder.On("GetGraph", mock.Anything, flow).Return(calleeGraph, nil)
+	calleeGraph.On("GetType").Return(providers.FlowTypeAdministration)
+	calleeGraph.On("GetStartNode").Return(calleeStart, nil)
+
+	engine := &flowEngine{
+		logger: log.GetLogger(), flowProvider: flowProvider, graphBuilder: graphBuilder,
+	}
+	ctx := &EngineContext{
+		Context: context.Background(), Graph: callerGraph, CurrentNode: callNode,
+		FlowType: providers.FlowTypeAdministration,
+	}
+	engine.updateContextWithNodeResponse(ctx, &common.NodeResponse{
+		SharedRuntimeData: map[string]string{"revocation.plan": `{"criteria":[{"type":"subject","value":"user-123"}]}`},
+	})
+
+	_, svcErr := engine.handleCallResponse(ctx, &common.NodeResponse{
+		Status: common.NodeStatusCall, CallTargetFlowID: "revocation-flow",
+	}, log.GetLogger())
+	s.Nil(svcErr)
+	s.Equal(`{"criteria":[{"type":"subject","value":"user-123"}]}`,
+		ctx.sharedRuntimeData["revocation.plan"])
+
+	ctx.CurrentNode = calleeStart
+	next, svcErr := engine.handleCalleeReturn(ctx, log.GetLogger())
+	s.Nil(svcErr)
+	s.Equal(deleteNode, next)
+	s.Equal(`{"criteria":[{"type":"subject","value":"user-123"}]}`,
+		ctx.sharedRuntimeData["revocation.plan"])
 }
 
 // --- handleCalleeReturn ---

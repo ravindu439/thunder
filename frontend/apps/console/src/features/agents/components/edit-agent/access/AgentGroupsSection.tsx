@@ -1,26 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard} from '@thunderid/components';
-import {Alert, Autocomplete, CircularProgress, FormControl, FormLabel, TextField} from '@wso2/oxygen-ui';
-import {type JSX} from 'react';
+import {QueryErrorNotice, SettingsCard} from '@thunderid/components';
+import {Autocomplete, CircularProgress, FormControl, FormLabel, TextField} from '@wso2/oxygen-ui';
+import {useCallback, type JSX} from 'react';
 import {Trans, useTranslation} from 'react-i18next';
 import {Link} from 'react-router';
+import RouteConfig from '../../../../../configs/RouteConfig';
 import useGetAgentGroups from '../../../api/useGetAgentGroups';
 
 interface AgentGroupsSectionProps {
@@ -29,8 +15,16 @@ interface AgentGroupsSectionProps {
 
 export default function AgentGroupsSection({agentId}: AgentGroupsSectionProps): JSX.Element {
   const {t} = useTranslation();
-  const {data, isLoading, isError} = useGetAgentGroups(agentId, {limit: 100, offset: 0});
+  const {data, isLoading, error, refetch} = useGetAgentGroups(agentId, {limit: 100, offset: 0});
   const groups = data?.groups ?? [];
+
+  // Resolves an error through the `agents` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agents:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `agents:${key}`, options),
+    [t],
+  );
 
   return (
     <SettingsCard
@@ -39,14 +33,21 @@ export default function AgentGroupsSection({agentId}: AgentGroupsSectionProps): 
         <Trans
           i18nKey="agents:edit.access.groups.description"
           defaults="Groups this agent belongs to. Manage membership from the <manageLink>Groups page</manageLink>."
-          components={{manageLink: <Link to="/groups" />}}
+          components={{manageLink: <Link to={RouteConfig.groups.list()} />}}
         />
       }
     >
       {isLoading ? (
         <CircularProgress size={20} />
-      ) : isError ? (
-        <Alert severity="error">{t('agents:edit.access.groups.error', 'Failed to load groups for this agent.')}</Alert>
+      ) : error ? (
+        <QueryErrorNotice
+          error={error}
+          t={tForErrors}
+          variant="inline"
+          fallbackKey="agents:edit.access.groups.error"
+          fallbackDefaultValue="Failed to load groups for this agent."
+          onRetry={() => void refetch()}
+        />
       ) : (
         <FormControl fullWidth>
           <FormLabel htmlFor="agent-groups">{t('agents:edit.access.groups.label', 'Groups')}</FormLabel>

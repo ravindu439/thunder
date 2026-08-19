@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package dbstore
 
@@ -114,6 +99,75 @@ func (s *DBStoreTestSuite) TestPut_ExecuteError() {
 	err := s.store.Put(s.ctx, testNamespace, testKey, testValue, 60)
 
 	s.Error(err)
+	s.Contains(err.Error(), "failed to store in database")
+}
+
+// PutIfNotExists
+
+func (s *DBStoreTestSuite) TestPutIfNotExists_Claimed() {
+	const ttlSeconds int64 = 60
+	before := time.Now().UTC()
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("QueryContext", mock.Anything, queryPutIfNotExistsRuntimeStore,
+		testDeploymentID, string(testNamespace), testKey, testValue,
+		mock.MatchedBy(func(t time.Time) bool {
+			expected := before.Add(time.Duration(ttlSeconds) * time.Second)
+			diff := t.Sub(expected)
+			return diff >= -time.Second && diff <= time.Second
+		}), mock.Anything,
+	).Return([]map[string]interface{}{{"key": testKey}}, nil)
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, testValue, ttlSeconds)
+
+	s.NoError(err)
+	s.True(ok)
+}
+
+// TestPutIfNotExists_Blocked also covers the case where a concurrent claim wins the race: the
+// conditional upsert leaves the existing, unexpired row untouched and returns no rows.
+func (s *DBStoreTestSuite) TestPutIfNotExists_Blocked() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("QueryContext", mock.Anything, queryPutIfNotExistsRuntimeStore,
+		testDeploymentID, string(testNamespace), testKey, testValue, mock.Anything, mock.Anything,
+	).Return([]map[string]interface{}{}, nil)
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, testValue, 60)
+
+	s.NoError(err)
+	s.False(ok)
+}
+
+func (s *DBStoreTestSuite) TestPutIfNotExists_NoTTL_StoresNilExpiry() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("QueryContext", mock.Anything, queryPutIfNotExistsRuntimeStore,
+		testDeploymentID, string(testNamespace), testKey, testValue, nil, mock.Anything,
+	).Return([]map[string]interface{}{{"key": testKey}}, nil)
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, testValue, 0)
+
+	s.NoError(err)
+	s.True(ok)
+}
+
+func (s *DBStoreTestSuite) TestPutIfNotExists_DBClientError() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(nil, errors.New("db client error"))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, testValue, 60)
+
+	s.Error(err)
+	s.False(ok)
+}
+
+func (s *DBStoreTestSuite) TestPutIfNotExists_QueryError() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("QueryContext", mock.Anything, queryPutIfNotExistsRuntimeStore,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	).Return(nil, errors.New("insert failed"))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, testValue, 60)
+
+	s.Error(err)
+	s.False(ok)
 	s.Contains(err.Error(), "failed to store in database")
 }
 
@@ -389,4 +443,54 @@ func (s *DBStoreTestSuite) TestExtendTTL_NotFound_ReturnsError() {
 	err := s.store.ExtendTTL(s.ctx, testNamespace, testKey, 60)
 
 	s.ErrorIs(err, providers.ErrRuntimeStoreKeyNotFound)
+}
+
+// CompareFieldAndSwap
+
+func (s *DBStoreTestSuite) TestCompareFieldAndSwap_Swapped() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("ExecuteContext", mock.Anything, queryCompareFieldAndSwapRuntimeStore,
+		testDeploymentID, string(testNamespace), testKey, testValue, mock.Anything, "State", "PENDING",
+	).Return(int64(1), nil)
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING", testValue)
+
+	s.NoError(err)
+	s.True(swapped)
+}
+
+// TestCompareFieldAndSwap_NoMatch covers a differing field, a missing key, and an expired key alike:
+// the guarded UPDATE affects zero rows in every case.
+func (s *DBStoreTestSuite) TestCompareFieldAndSwap_NoMatch() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("ExecuteContext", mock.Anything, queryCompareFieldAndSwapRuntimeStore,
+		testDeploymentID, string(testNamespace), testKey, testValue, mock.Anything, "State", "PENDING",
+	).Return(int64(0), nil)
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING", testValue)
+
+	s.NoError(err)
+	s.False(swapped)
+}
+
+func (s *DBStoreTestSuite) TestCompareFieldAndSwap_DBClientError() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(nil, errors.New("db client error"))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING", testValue)
+
+	s.Error(err)
+	s.False(swapped)
+}
+
+func (s *DBStoreTestSuite) TestCompareFieldAndSwap_ExecuteError() {
+	s.mockDBProvider.On("GetRuntimeTransientDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("ExecuteContext", mock.Anything, queryCompareFieldAndSwapRuntimeStore,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything,
+	).Return(int64(0), errors.New("update failed"))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING", testValue)
+
+	s.Error(err)
+	s.False(swapped)
+	s.Contains(err.Error(), "failed to compare-and-swap in database")
 }

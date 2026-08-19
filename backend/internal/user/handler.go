@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package user
 
@@ -434,6 +419,31 @@ func (uh *userHandler) HandleSelfUserPutRequest(w http.ResponseWriter, r *http.R
 	sysutils.WriteSuccessResponse(ctx, w, http.StatusOK, updatedUser)
 
 	logger.Debug(ctx, "Self user PUT response sent", log.MaskedString(log.LoggerKeyUserID, userID))
+}
+
+// HandleSelfUserMetadataGetRequest handles the self user metadata retrieval.
+func (uh *userHandler) HandleSelfUserMetadataGetRequest(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, handlerLoggerComponentName))
+
+	userID := security.GetSubject(ctx)
+	if strings.TrimSpace(userID) == "" {
+		handleError(ctx, w, &ErrorAuthenticationFailed)
+		return
+	}
+
+	userMetadata, svcErr := uh.userService.GetUserMetadata(ctx, userID)
+	if svcErr != nil {
+		handleError(ctx, w, svcErr)
+		return
+	}
+
+	response := map[string]interface{}{
+		"schema": userMetadata.Schema,
+	}
+	sysutils.WriteSuccessResponse(ctx, w, http.StatusOK, response)
+
+	logger.Debug(ctx, "Self user metadata GET response sent", log.MaskedString(log.LoggerKeyUserID, userID))
 }
 
 // HandleSelfUserCredentialUpdateRequest handles the credential update for the authenticated user.

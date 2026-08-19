@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, userEvent, waitFor} from '@thunderid/test-utils';
 import {afterEach, describe, it, expect, vi, beforeEach} from 'vitest';
@@ -42,8 +27,9 @@ const mockUseGetApplications = vi.fn<(params: unknown) => MockUseGetApplications
 let mockDiscovery: {wellKnown?: {end_session_endpoint?: string}} | undefined;
 let mockIsTrustedIssuerGenericOidc = false;
 
-vi.mock('../../features/applications/api/useGetApplications', () => ({
-  default: (params: unknown) => mockUseGetApplications(params),
+vi.mock('@thunderid/configure-applications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-applications')>()),
+  useGetApplications: (params: unknown) => mockUseGetApplications(params),
 }));
 
 // Mock ThunderID
@@ -203,6 +189,21 @@ describe('DashboardLayout', () => {
       expect(mockSignOut).toHaveBeenCalled();
       expect(mockLoggerError).toHaveBeenCalledWith('Sign out failed', {error: signOutError});
     });
+  });
+
+  it('renders the user profile picture in the account menu when available', () => {
+    mockUserData.mockReturnValue({
+      name: 'Test User',
+      email: 'test@example.com',
+      picture: 'https://example.com/avatar.png',
+    });
+
+    render(<DashboardLayout />);
+
+    const avatarImages = screen
+      .getAllByRole<HTMLImageElement>('img')
+      .filter((img) => img.src === 'https://example.com/avatar.png');
+    expect(avatarImages.length).toBeGreaterThan(0);
   });
 
   it('renders with fallback values when user data is missing', () => {

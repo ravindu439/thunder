@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {BuilderLayout, BuilderPanelHeader} from '@thunderid/components';
 import {
@@ -85,6 +70,10 @@ export interface ResourcePanelPropsInterface extends HTMLAttributes<HTMLDivEleme
    * Optional right-hand side panel content rendered via BuilderLayout.
    */
   rightPanel?: ReactNode;
+  /**
+   * Optional content rendered at the bottom of the panel, below the resource sections.
+   */
+  footer?: ReactNode;
 }
 
 interface ResourcePanelSection {
@@ -113,6 +102,7 @@ function ResourcePanel({
   flowHandle = '',
   onFlowTitleChange = undefined,
   rightPanel = undefined,
+  footer = undefined,
   ...rest
 }: ResourcePanelPropsInterface): ReactElement {
   const {t} = useTranslation();
@@ -230,76 +220,107 @@ function ResourcePanel({
           />
         </Box>
 
-        {visibleSections.map((section: ResourcePanelSection) => (
-          <Accordion
-            key={`${section.id}-${isSearching}`}
-            defaultExpanded={isSearching}
-            square
-            disableGutters
-            sx={{
-              backgroundColor: 'transparent',
-              '&:before': {
-                display: 'none',
-              },
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}
-          >
-            <AccordionSummary
-              expandIcon={<ChevronDownIcon size={14} />}
-              aria-controls={`panel-${section.id}-content`}
-              id={`panel-${section.id}-header`}
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 1,
+            mx: -2,
+            px: 2,
+          }}
+        >
+          {visibleSections.map((section: ResourcePanelSection) => (
+            <Accordion
+              key={`${section.id}-${isSearching}`}
+              defaultExpanded={isSearching}
+              square
+              disableGutters
               sx={{
-                minHeight: 48,
-                '&.Mui-expanded': {
-                  minHeight: 48,
+                backgroundColor: 'transparent',
+                '&:before': {
+                  display: 'none',
                 },
-                '& .MuiAccordionSummary-content': {
-                  margin: '12px 0',
-                  gap: 1,
-                },
-              }}
-              slotProps={{
-                content: {
-                  sx: {alignItems: 'center'},
-                },
+                overflow: 'hidden',
+                flexShrink: 0,
               }}
             >
-              <Box component="span" display="inline-flex" alignItems="center" sx={{flexShrink: 0}}>
-                {section.icon}
-              </Box>
-              <Stack direction="column">
-                <Typography variant="subtitle2" fontWeight={600}>
-                  {t(section.titleKey, section.titleFallback)}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{lineHeight: 1.3}}>
-                  {t(section.descriptionKey, section.descriptionFallback)}
-                </Typography>
-              </Stack>
-            </AccordionSummary>
-            <AccordionDetails sx={{pt: 0, pb: 2, px: 2}}>
-              <Stack direction="column" spacing={1}>
-                {section.items.map(({id, resource}: ResourcePanelListItem) => (
-                  <ResourcePanelDraggable id={id} key={id} resource={resource} onAdd={onAdd} disabled={disabled} />
-                ))}
-              </Stack>
-            </AccordionDetails>
-          </Accordion>
-        ))}
+              <AccordionSummary
+                expandIcon={<ChevronDownIcon size={14} />}
+                aria-controls={`panel-${section.id}-content`}
+                id={`panel-${section.id}-header`}
+                sx={{
+                  minHeight: 48,
+                  '&.Mui-expanded': {
+                    minHeight: 48,
+                  },
+                  '& .MuiAccordionSummary-content': {
+                    margin: '12px 0',
+                    gap: 1,
+                  },
+                }}
+                slotProps={{
+                  content: {
+                    sx: {alignItems: 'center'},
+                  },
+                }}
+              >
+                <Box component="span" display="inline-flex" alignItems="center" sx={{flexShrink: 0}}>
+                  {section.icon}
+                </Box>
+                <Stack direction="column">
+                  <Typography variant="subtitle2" fontWeight={600}>
+                    {t(section.titleKey, section.titleFallback)}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{lineHeight: 1.3}}>
+                    {t(section.descriptionKey, section.descriptionFallback)}
+                  </Typography>
+                </Stack>
+              </AccordionSummary>
+              <AccordionDetails sx={{pt: 0, pb: 2, px: 2}}>
+                <Stack direction="column" spacing={1}>
+                  {section.items.map(({id, resource}: ResourcePanelListItem) => (
+                    <ResourcePanelDraggable id={id} key={id} resource={resource} onAdd={onAdd} disabled={disabled} />
+                  ))}
+                </Stack>
+              </AccordionDetails>
+            </Accordion>
+          ))}
 
-        {isSearching && visibleSections.length === 0 && (
-          <Stack alignItems="center" spacing={1} sx={{px: 2, py: 4, color: 'text.secondary'}}>
-            <SearchXIcon size={24} />
-            <Typography variant="body2">
-              {t('flows:core.resourcePanel.search.noResults', 'No matching resources')}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" textAlign="center">
-              {t(
-                'flows:core.resourcePanel.search.noResultsHint',
-                'Try a different keyword, such as "OTP", "Google", or "passkey"',
-              )}
-            </Typography>
-          </Stack>
+          {isSearching && visibleSections.length === 0 && (
+            <Stack alignItems="center" spacing={1} sx={{px: 2, py: 4, color: 'text.secondary'}}>
+              <SearchXIcon size={24} />
+              <Typography variant="body2">
+                {t('flows:core.resourcePanel.search.noResults', 'No matching resources')}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" textAlign="center">
+                {t(
+                  'flows:core.resourcePanel.search.noResultsHint',
+                  'Try a different keyword, such as "OTP", "Google", or "passkey"',
+                )}
+              </Typography>
+            </Stack>
+          )}
+        </Box>
+
+        {footer && (
+          <Box
+            sx={{
+              flexShrink: 0,
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              // Bleed through the drawer paper's padding so the band spans the
+              // full panel width and sits flush with the bottom edge.
+              mx: -2,
+              mb: -2,
+              px: 2,
+              py: 1.5,
+            }}
+          >
+            {footer}
+          </Box>
         )}
       </>
     ),
@@ -313,6 +334,7 @@ function ResourcePanel({
       handleTogglePanel,
       onAdd,
       disabled,
+      footer,
       t,
     ],
   );
@@ -324,7 +346,9 @@ function ResourcePanel({
       expandTooltip={t('flows:core.resourcePanel.showResources')}
       panelContent={panelContent}
       panelPaperSx={{
-        overflow: 'hidden auto',
+        // The section list scrolls in its own container so the header, search
+        // field, and footer stay fixed.
+        overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
         borderRight: '1px solid',

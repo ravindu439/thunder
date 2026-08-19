@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package attestation verifies the binary identity of a mobile client through platform-native
 // attestation mechanisms (currently Google Play Integrity for Android).
@@ -26,7 +11,6 @@ import (
 	"time"
 
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
@@ -48,14 +32,14 @@ const (
 // playIntegrityVerifier verifies Google Play Integrity tokens for Android clients.
 type playIntegrityVerifier struct {
 	decoder   integrityTokenDecoder
-	cryptoSvc kmprovider.RuntimeCryptoProvider
+	cryptoSvc providers.RuntimeCryptoProvider
 	logger    *log.Logger
 }
 
 // newPlayIntegrityVerifier creates a platform attestation verifier backed by the given token
 // decoder.
 func newPlayIntegrityVerifier(decoder integrityTokenDecoder,
-	cryptoSvc kmprovider.RuntimeCryptoProvider) providers.AttestationProvider {
+	cryptoSvc providers.RuntimeCryptoProvider) providers.AttestationProvider {
 	return &playIntegrityVerifier{
 		decoder:   decoder,
 		cryptoSvc: cryptoSvc,
@@ -119,8 +103,8 @@ func (v *playIntegrityVerifier) decryptConfig(ctx context.Context, cfg *provider
 		return &android, nil
 	}
 
-	params := cryptolib.AlgorithmParams{Algorithm: cryptolib.AlgorithmAESGCM}
-	plaintext, err := v.cryptoSvc.Decrypt(ctx, nil, params, []byte(android.ServiceAccountCredentials))
+	plaintext, err := v.cryptoSvc.Decrypt(ctx, nil, string(cryptolib.AlgorithmAESGCM),
+		nil, []byte(android.ServiceAccountCredentials))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt attestation credentials: %w", err)
 	}

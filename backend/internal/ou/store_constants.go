@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ou
 
@@ -179,18 +164,16 @@ var (
 	queryCreateOrganizationUnit = dbmodel.DBQuery{
 		ID: "OUQ-OU_MGT-03",
 		Query: `INSERT INTO "ORGANIZATION_UNIT" (
-			OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, THEME_ID, LAYOUT_ID,
-			METADATA, DEPLOYMENT_ID, CREATED_AT, UPDATED_AT
+			OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, METADATA, DEPLOYMENT_ID, CREATED_AT, UPDATED_AT
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9
 		)`,
 	}
 
 	// queryGetOrganizationUnitByID is the query to get an organization unit by id.
 	queryGetOrganizationUnitByID = dbmodel.DBQuery{
 		ID: "OUQ-OU_MGT-04",
-		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, THEME_ID, LAYOUT_ID,
-		METADATA, CREATED_AT, UPDATED_AT
+		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, METADATA, CREATED_AT, UPDATED_AT
 		FROM "ORGANIZATION_UNIT"
 		WHERE OU_ID = $1 AND DEPLOYMENT_ID = $2`,
 	}
@@ -198,8 +181,7 @@ var (
 	// queryGetRootOrganizationUnitByHandle is the query to get a root organization unit by handle.
 	queryGetRootOrganizationUnitByHandle = dbmodel.DBQuery{
 		ID: "OUQ-OU_MGT-05",
-		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, THEME_ID, LAYOUT_ID,
-		METADATA, CREATED_AT, UPDATED_AT
+		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, METADATA, CREATED_AT, UPDATED_AT
 		FROM "ORGANIZATION_UNIT"
 		WHERE HANDLE = $1 AND PARENT_ID IS NULL AND DEPLOYMENT_ID = $2`,
 	}
@@ -207,8 +189,7 @@ var (
 	// queryGetOrganizationUnitByHandle is the query to get an organization unit by handle and parent.
 	queryGetOrganizationUnitByHandle = dbmodel.DBQuery{
 		ID: "OUQ-OU_MGT-06",
-		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, THEME_ID, LAYOUT_ID,
-		METADATA, CREATED_AT, UPDATED_AT
+		Query: `SELECT OU_ID, PARENT_ID, HANDLE, NAME, DESCRIPTION, METADATA, CREATED_AT, UPDATED_AT
 		FROM "ORGANIZATION_UNIT"
 		WHERE HANDLE = $1 AND PARENT_ID = $2 AND DEPLOYMENT_ID = $3`,
 	}
@@ -223,7 +204,8 @@ var (
 	queryUpdateOrganizationUnit = dbmodel.DBQuery{
 		ID: "OUQ-OU_MGT-08",
 		Query: `UPDATE "ORGANIZATION_UNIT" SET PARENT_ID = $2, HANDLE = $3, NAME = $4, DESCRIPTION = $5, ` +
-			`THEME_ID = $6, LAYOUT_ID = $7, METADATA = $8, UPDATED_AT = $9 WHERE OU_ID = $1 AND DEPLOYMENT_ID = $10`,
+			`METADATA = $6, UPDATED_AT = $7 ` +
+			`WHERE OU_ID = $1 AND DEPLOYMENT_ID = $8`,
 	}
 
 	// queryDeleteOrganizationUnit is the query to delete an organization unit.

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -219,7 +204,7 @@ describe('Call', () => {
       renderCall({flow: {ref: 'flow-a'}});
       fireEvent.click(screen.getByTestId('call-open-referenced-flow'));
       fireEvent.click(screen.getByRole('button', {name: /continue/i}));
-      expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-a');
+      expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-a');
     });
 
     it('navigates to the referenced REGISTRATION flow after confirmation', () => {
@@ -231,7 +216,7 @@ describe('Call', () => {
       renderCall({flow: {ref: 'flow-r'}});
       fireEvent.click(screen.getByTestId('call-open-referenced-flow'));
       fireEvent.click(screen.getByRole('button', {name: /continue/i}));
-      expect(mockNavigate).toHaveBeenCalledWith('/flows/registration/flow-r');
+      expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-r');
     });
 
     it('navigates to the referenced RECOVERY flow after confirmation', () => {
@@ -243,18 +228,19 @@ describe('Call', () => {
       renderCall({flow: {ref: 'flow-rec'}});
       fireEvent.click(screen.getByTestId('call-open-referenced-flow'));
       fireEvent.click(screen.getByRole('button', {name: /continue/i}));
-      expect(mockNavigate).toHaveBeenCalledWith('/flows/recovery/flow-rec');
+      expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-rec');
     });
 
-    it('does not offer opening a referenced SIGNOUT flow', () => {
-      // Sign-out flows cannot be call targets, so there is no route to open one.
+    it('opens a referenced SIGNOUT flow', () => {
       mockUseGetFlows.mockReturnValue({
         data: {flows: [{id: 'flow-so', name: 'Sign Out', flowType: 'SIGNOUT'}]},
         isLoading: false,
         error: null,
       });
       renderCall({flow: {ref: 'flow-so'}});
-      expect(screen.getByTestId('call-open-referenced-flow')).toBeDisabled();
+      fireEvent.click(screen.getByTestId('call-open-referenced-flow'));
+      fireEvent.click(screen.getByRole('button', {name: /continue/i}));
+      expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-so');
     });
 
     it('does not navigate when the user cancels the confirmation dialog', () => {

@@ -132,7 +132,7 @@ func (_c *PARServiceInterfaceMock_HandlePushedAuthorizationRequest_Call) RunAndR
 }
 
 // ResolvePushedAuthorizationRequest provides a mock function for the type PARServiceInterfaceMock
-func (_mock *PARServiceInterfaceMock) ResolvePushedAuthorizationRequest(ctx context.Context, requestURI string, clientID string) (*model.OAuthParameters, error) {
+func (_mock *PARServiceInterfaceMock) ResolvePushedAuthorizationRequest(ctx context.Context, requestURI string, clientID string) (*model.OAuthParameters, *providers.InitiatorRequest, error) {
 	ret := _mock.Called(ctx, requestURI, clientID)
 
 	if len(ret) == 0 {
@@ -140,8 +140,9 @@ func (_mock *PARServiceInterfaceMock) ResolvePushedAuthorizationRequest(ctx cont
 	}
 
 	var r0 *model.OAuthParameters
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (*model.OAuthParameters, error)); ok {
+	var r1 *providers.InitiatorRequest
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (*model.OAuthParameters, *providers.InitiatorRequest, error)); ok {
 		return returnFunc(ctx, requestURI, clientID)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) *model.OAuthParameters); ok {
@@ -151,12 +152,19 @@ func (_mock *PARServiceInterfaceMock) ResolvePushedAuthorizationRequest(ctx cont
 			r0 = ret.Get(0).(*model.OAuthParameters)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) *providers.InitiatorRequest); ok {
 		r1 = returnFunc(ctx, requestURI, clientID)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*providers.InitiatorRequest)
+		}
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
+		r2 = returnFunc(ctx, requestURI, clientID)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolvePushedAuthorizationRequest'
@@ -195,12 +203,12 @@ func (_c *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call) Run(ru
 	return _c
 }
 
-func (_c *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call) Return(oAuthParameters *model.OAuthParameters, err error) *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call {
-	_c.Call.Return(oAuthParameters, err)
+func (_c *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call) Return(oAuthParameters *model.OAuthParameters, initiatorRequest *providers.InitiatorRequest, err error) *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call {
+	_c.Call.Return(oAuthParameters, initiatorRequest, err)
 	return _c
 }
 
-func (_c *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call) RunAndReturn(run func(ctx context.Context, requestURI string, clientID string) (*model.OAuthParameters, error)) *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call {
+func (_c *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call) RunAndReturn(run func(ctx context.Context, requestURI string, clientID string) (*model.OAuthParameters, *providers.InitiatorRequest, error)) *PARServiceInterfaceMock_ResolvePushedAuthorizationRequest_Call {
 	_c.Call.Return(run)
 	return _c
 }

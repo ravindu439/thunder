@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /*
 Composite Mode Integration Test Suite
@@ -28,6 +13,7 @@ Runtime resources can be freely modified.
 package composite
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,14 +28,21 @@ import (
 
 type CompositeModeSuite struct {
 	suite.Suite
-	createdResources map[string][]string
+	createdResources  map[string][]string
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
 }
 
 func (suite *CompositeModeSuite) SetupSuite() {
 	suite.createdResources = make(map[string][]string)
 
+	// The "default" agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at the declarative OU, so teardown can put it back.
+	snapshot, err := testutils.SnapshotAgentType()
+	suite.Require().NoError(err, "Failed to snapshot the default agent type")
+	suite.agentTypeSnapshot = snapshot
+
 	// Ensure the singleton "default" agent type exists so composite agent tests can create runtime agents.
-	_, err := testutils.CreateAgentType(testutils.UserType{
+	_, err = testutils.CreateAgentType(testutils.UserType{
 		Name:   "default",
 		OUID:   "decl-ou-1",
 		Schema: map[string]interface{}{"description": map[string]interface{}{"type": "string"}},
@@ -58,6 +51,13 @@ func (suite *CompositeModeSuite) SetupSuite() {
 }
 
 func (suite *CompositeModeSuite) TearDownSuite() {
+	// Restore the shared agent type before deleting any runtime resources it may reference.
+	if suite.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(suite.agentTypeSnapshot); err != nil {
+			suite.T().Errorf("teardown: failed to restore the default agent type: %v", err)
+		}
+	}
+
 	// Delete only runtime resources (not declarative)
 	for module, ids := range suite.createdResources {
 		for _, id := range ids {
@@ -298,6 +298,201 @@ func (suite *CompositeModeSuite) TestIdentityProviderDeclarativeVisibility() {
 		"/connections?category=identity-provider", "connections", "decl-idp-1", "identity_provider")
 }
 
+// AD4: a declarative connection's attributeConfiguration survives the file store and is returned by
+// both the vendor GET and the merged listing, and a database-backed connection created at runtime in the
+// same composite deployment returns its own. This is also the first test to execute
+// idpStore.GetIdentityProviderListCount, which the composite store calls from GetIdentityProviderList
+// and which no test had reached against a real database.
+func (suite *CompositeModeSuite) TestConnectionAttributeConfigurationInCompositeMode() {
+	client := testutils.GetHTTPClient()
+
+	resp, err := client.Get(fmt.Sprintf("%s/connections/google/decl-idp-1", testutils.TestServerURL))
+	suite.Require().NoError(err)
+	defer resp.Body.Close()
+	suite.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var declarative map[string]interface{}
+	suite.Require().NoError(json.NewDecoder(resp.Body).Decode(&declarative))
+
+	config, ok := declarative["attributeConfiguration"].(map[string]interface{})
+	suite.Require().True(ok, "declarative connection should return its attributeConfiguration: %v", declarative)
+
+	// The response is camelCase even though the YAML source is snake_case, because the wire format is
+	// driven by the json tags while the file is parsed with the yaml ones. See G13.
+	resolution, ok := config["userTypeResolution"].(map[string]interface{})
+	suite.Require().True(ok, "expected userTypeResolution in %v", config)
+	suite.Equal("Declarative Test Schema", resolution["default"])
+
+	linking, ok := config["accountLinking"].(map[string]interface{})
+	suite.Require().True(ok, "expected accountLinking in %v", config)
+	suite.Equal([]interface{}{"email"}, linking["attributes"])
+
+	mappings, ok := config["userTypeAttributeMappings"].([]interface{})
+	suite.Require().True(ok, "expected userTypeAttributeMappings in %v", config)
+	suite.Require().Len(mappings, 1)
+	entry, ok := mappings[0].(map[string]interface{})
+	suite.Require().True(ok)
+	suite.Equal("Declarative Test Schema", entry["userType"])
+	suite.Len(entry["attributes"], 2)
+
+	// A runtime, database-backed connection in the same deployment carries its own configuration.
+	runtimeID := suite.createRuntimeConnectionWithAttributeConfiguration()
+	defer suite.deleteRuntimeConnection(runtimeID)
+
+	resp, err = client.Get(fmt.Sprintf("%s/connections/google/%s", testutils.TestServerURL, runtimeID))
+	suite.Require().NoError(err)
+	defer resp.Body.Close()
+	suite.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var runtime map[string]interface{}
+	suite.Require().NoError(json.NewDecoder(resp.Body).Decode(&runtime))
+	runtimeConfig, ok := runtime["attributeConfiguration"].(map[string]interface{})
+	suite.Require().True(ok, "database-backed connection should return its attributeConfiguration")
+	runtimeLinking, ok := runtimeConfig["accountLinking"].(map[string]interface{})
+	suite.Require().True(ok)
+	suite.Equal([]interface{}{"email"}, runtimeLinking["attributes"])
+
+	// Both appear in the merged listing, which is the path that spans the two stores and therefore the
+	// one that exercises the composite count query. assertMergedCollectionContainsIDs is deliberately not
+	// used here: it asserts against suite-tracked runtime resources, and tracking this connection would
+	// leave a dangling ID for later tests once the deferred delete removes it.
+	items := suite.getCollectionItems("/connections?category=identity-provider", "connections")
+	collectionIDs := suite.extractCollectionIDs(items)
+	suite.Contains(collectionIDs, "decl-idp-1", "merged listing should include the declarative connection")
+	suite.Contains(collectionIDs, runtimeID, "merged listing should include the runtime connection")
+}
+
+// createRuntimeConnectionWithAttributeConfiguration creates a database-backed Google connection carrying
+// an explicit configuration and returns its ID.
+func (suite *CompositeModeSuite) createRuntimeConnectionWithAttributeConfiguration() string {
+	suite.T().Helper()
+	body := map[string]interface{}{
+		"name":         fmt.Sprintf("Composite Runtime IDP %d", time.Now().UnixNano()),
+		"clientId":     "composite-runtime-client",
+		"clientSecret": "composite-runtime-secret",
+		"redirectUri":  "https://localhost:8095/callback",
+		"scopes":       []string{"openid", "email", "profile"},
+		"attributeConfiguration": map[string]interface{}{
+			"userTypeResolution": map[string]interface{}{"default": "Declarative Test Schema"},
+			"userTypeAttributeMappings": []interface{}{
+				map[string]interface{}{
+					"userType": "Declarative Test Schema",
+					"attributes": []interface{}{
+						map[string]interface{}{"externalAttribute": "given_name", "localAttribute": "username"},
+					},
+				},
+			},
+			"accountLinking": map[string]interface{}{"attributes": []string{"email"}},
+		},
+	}
+	payload, err := json.Marshal(body)
+	suite.Require().NoError(err)
+
+	req, err := http.NewRequest("POST", testutils.TestServerURL+"/connections/google", bytes.NewReader(payload))
+	suite.Require().NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := testutils.GetHTTPClient().Do(req)
+	suite.Require().NoError(err)
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	suite.Require().NoError(err)
+	suite.Require().Equal(http.StatusCreated, resp.StatusCode, "create runtime connection: %s", string(respBody))
+
+	var created map[string]interface{}
+	suite.Require().NoError(json.Unmarshal(respBody, &created))
+	id, ok := created["id"].(string)
+	suite.Require().True(ok, "created connection should carry an id")
+	return id
+}
+
+func (suite *CompositeModeSuite) deleteRuntimeConnection(id string) {
+	suite.T().Helper()
+	req, err := http.NewRequest("DELETE",
+		fmt.Sprintf("%s/connections/google/%s", testutils.TestServerURL, id), nil)
+	suite.Require().NoError(err)
+	resp, err := testutils.GetHTTPClient().Do(req)
+	if err != nil {
+		suite.T().Logf("cleanup: failed to delete runtime connection %s: %v", id, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		suite.T().Logf("cleanup: failed to delete runtime connection %s: status %d", id, resp.StatusCode)
+	}
+}
+
+// AD5: an attributeConfiguration on a declarative connection does not make it mutable. The read-only
+// rejection is unchanged whether the update body carries a configuration or not.
+func (suite *CompositeModeSuite) TestDeclarativeConnectionWithAttributeConfigurationStaysReadOnly() {
+	payload := map[string]interface{}{
+		"name":         "Updated",
+		"clientId":     "test-client-id",
+		"clientSecret": "test-client-secret",
+		"redirectUri":  "https://localhost:8095/callback",
+		"attributeConfiguration": map[string]interface{}{
+			"userTypeResolution": map[string]interface{}{"default": "Declarative Test Schema"},
+			"accountLinking":     map[string]interface{}{"attributes": []string{"email"}},
+		},
+	}
+	jsonPayload, err := json.Marshal(payload)
+	suite.Require().NoError(err)
+
+	req, err := http.NewRequest("PUT",
+		fmt.Sprintf("%s/connections/google/decl-idp-1", testutils.TestServerURL),
+		strings.NewReader(string(jsonPayload)))
+	suite.Require().NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := testutils.GetHTTPClient().Do(req)
+	suite.Require().NoError(err)
+	suite.Equal(http.StatusBadRequest, resp.StatusCode,
+		"a declarative connection stays read-only regardless of the configuration in the request")
+	suite.Equal("IDP-1010", suite.extractErrorCode(resp))
+}
+
+// AD6: secret masking must not disturb the configuration. The masked clientSecret and the intact
+// attributeConfiguration come from the same response, so a mapper that rebuilt the response while
+// masking would surface here.
+func (suite *CompositeModeSuite) TestSecretMaskingLeavesAttributeConfigurationIntact() {
+	client := testutils.GetHTTPClient()
+	resp, err := client.Get(fmt.Sprintf("%s/connections/google/decl-idp-1", testutils.TestServerURL))
+	suite.Require().NoError(err)
+	defer resp.Body.Close()
+	suite.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var body map[string]interface{}
+	suite.Require().NoError(json.NewDecoder(resp.Body).Decode(&body))
+
+	suite.Equal("******", body["clientSecret"], "the declarative secret should be masked")
+	config, ok := body["attributeConfiguration"].(map[string]interface{})
+	suite.Require().True(ok, "masking must not drop the attributeConfiguration")
+
+	// Presence alone would still pass if masking emptied or rewrote the sections, so the values are
+	// compared against what the fixture declares.
+	resolution, ok := config["userTypeResolution"].(map[string]interface{})
+	suite.Require().True(ok, "expected userTypeResolution in %v", config)
+	suite.Equal("Declarative Test Schema", resolution["default"])
+
+	linking, ok := config["accountLinking"].(map[string]interface{})
+	suite.Require().True(ok, "expected accountLinking in %v", config)
+	suite.Equal([]interface{}{"email"}, linking["attributes"])
+
+	mappings, ok := config["userTypeAttributeMappings"].([]interface{})
+	suite.Require().True(ok, "expected userTypeAttributeMappings in %v", config)
+	suite.Require().Len(mappings, 1)
+	entry, ok := mappings[0].(map[string]interface{})
+	suite.Require().True(ok)
+	suite.Equal("Declarative Test Schema", entry["userType"])
+	attributes, ok := entry["attributes"].([]interface{})
+	suite.Require().True(ok)
+	suite.Require().Len(attributes, 2)
+	first, ok := attributes[0].(map[string]interface{})
+	suite.Require().True(ok)
+	suite.Equal("given_name", first["externalAttribute"])
+	suite.Equal("username", first["localAttribute"])
+}
+
 func (suite *CompositeModeSuite) TestResourceServerDeclarativeVisibility() {
 	client := testutils.GetHTTPClient()
 	resp, err := client.Get(fmt.Sprintf("%s/resource-servers/decl-rs-1", testutils.TestServerURL))
@@ -361,6 +556,7 @@ func (suite *CompositeModeSuite) TestApplicationCreate() {
 	app := map[string]interface{}{
 		"name":     "Test Runtime Application",
 		"ouId":     "decl-ou-1",
+		"type":     "fullstack",
 		"template": "web",
 		"url":      "https://test.example.com",
 	}
@@ -924,6 +1120,24 @@ func (suite *CompositeModeSuite) TestAgentDeclarativeUpdateReject() {
 
 	errCode := suite.extractErrorCode(resp)
 	suite.Equal("AGT-1027", errCode, "error code should be AGT-1027 for immutable agent")
+
+	// The rejection must leave nothing behind. The payload above renames the agent and omits
+	// attributes, and omitting attributes on a successful update clears them, so a partially
+	// applied write would show up either as the new name or as emptied attributes.
+	getResp, err := client.Get(fmt.Sprintf("%s/agents/decl-agent-1", testutils.TestServerURL))
+	suite.Require().NoError(err)
+	defer getResp.Body.Close()
+	suite.Require().Equal(http.StatusOK, getResp.StatusCode, "declarative agent should still be readable")
+
+	var stored map[string]interface{}
+	suite.Require().NoError(json.NewDecoder(getResp.Body).Decode(&stored))
+
+	suite.Equal("Declarative Test Agent", stored["name"], "rejected update must not rename the agent")
+
+	attributes, ok := stored["attributes"].(map[string]interface{})
+	suite.Require().True(ok, "declarative agent should still carry its attributes: %v", stored)
+	suite.Equal("engineering", attributes["department"],
+		"rejected update must not clear attributes the payload omitted")
 }
 
 func (suite *CompositeModeSuite) TestAgentDeclarativeDeleteReject() {

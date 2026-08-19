@@ -1,9 +1,30 @@
 {
   "id": "mobile",
+  "type": "mobile",
   "displayName": "Mobile",
   "description": "Native mobile application",
+  "previewDevice": "mobile",
+  "quickstarts": [
+    {
+      "label": "iOS",
+      "docsUrl": "{{applications.templates.ios.docs}}"
+    },
+    {
+      "label": "Android",
+      "docsUrl": "{{applications.templates.android.docs}}"
+    },
+    {
+      "label": "Flutter",
+      "docsUrl": "{{applications.templates.flutter.docs}}"
+    }
+  ],
+  "creationFlow": {
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "SECURITY", "DESIGN", "CONFIGURE", "COMPLETE"],
+    "previewSteps": ["DETAILS", "SECURITY", "DESIGN"]
+  },
   "defaults": {
     "name": "Mobile Application",
+    "signInApproach": "EMBEDDED",
     "inboundAuthConfig": [
       {
         "type": "oauth2",

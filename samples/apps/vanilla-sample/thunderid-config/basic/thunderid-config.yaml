@@ -1,0 +1,77 @@
+resource_type: user_type
+id: 019e3a5c-04ea-7d18-8ae6-f828b1f3d60f
+category: user
+name: Customer
+ouHandle: default
+allowSelfRegistration: true
+systemAttributes:
+  display: username
+schema: {
+    "username": {
+      "type": "string",
+      "displayName": "Username",
+      "required": true,
+      "unique": true
+    },
+    "password": {
+      "type": "string",
+      "displayName": "Password",
+      "required": false,
+      "credential": true
+    },
+    "email": {
+      "type": "string",
+      "displayName": "Email",
+      "required": true,
+      "unique": true,
+      "regex": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    },
+    "given_name": {
+      "type": "string",
+      "displayName": "First Name",
+      "required": false
+    },
+    "family_name": {
+      "type": "string",
+      "displayName": "Last Name",
+      "required": false
+    },
+    "name": {
+      "type": "string",
+      "displayName": "Full Name",
+      "required": false
+    },
+    "mobile_number": {
+      "type": "string",
+      "displayName": "Mobile Number",
+      "required": false
+    }
+  }
+
+---
+resource_type: application
+id: 019e3a5c-0500-7f3e-a66e-66fc7918c3a7
+ouHandle: default
+name: Sample App
+description: Sample application for testing
+type: fullstack
+url: https://localhost:3000
+logoUrl: emoji:🎁
+tosUri: https://localhost:3000/terms
+policyUri: https://localhost:3000/privacy
+contacts:
+  - admin@example.com
+  - support@example.com
+authFlowHandle: default-flow
+registrationFlowHandle: default-flow
+isRegistrationFlowEnabled: true
+isRecoveryFlowEnabled: false
+assertion:
+  validityPeriod: 3600
+loginConsent:
+  validityPeriod: 0
+allowedUserTypes:
+  - Customer
+# Presented as the `Flow-Secret` header when this server initiates a flow. Kept in server-side env
+# only (see .env.example), never bundled into client-side JavaScript.
+flowSecret: {{.SAMPLE_APP_FLOW_SECRET}}

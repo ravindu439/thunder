@@ -646,3 +646,8 @@
   stroke-linejoin: round;
 }
 
+/* MCP quickstart architecture — narrower than the use-case diagrams */
+.uc-mcp-qs-arch .uc-agent-wayfinder-arch__svg {
+  max-width: 780px;
+}
+

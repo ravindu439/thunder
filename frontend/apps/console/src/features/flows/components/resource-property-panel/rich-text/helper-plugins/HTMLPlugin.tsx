@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {$generateHtmlFromNodes, $generateNodesFromDOM} from '@lexical/html';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
@@ -53,12 +38,113 @@ const CLASS_NAME_PLACEHOLDER = '{{className}}';
 const ADDITIONAL_CLASSES = `class="${CLASS_NAME_PLACEHOLDER}"`;
 const EMPTY_CONTENT = '<p class="rich-text-paragraph"><br></p>';
 
+/** Identifies an anchor across an editor round trip by what the author sees and clicks. */
+function anchorIdentity(anchor: HTMLAnchorElement): string {
+  return `${anchor.getAttribute('href') ?? ''}|${anchor.textContent?.trim() ?? ''}`;
+}
+
+/**
+ * Restores the `data-component-ref` and `data-action-ref` sentinels that Lexical drops.
+ *
+ * Lexical only round-trips the attributes its registered node classes declare, so both
+ * sentinels are lost on every export. Both carry behaviour: the renderer hides a link whose
+ * component ref is disabled for the application, and dispatches only the anchor whose action
+ * ref matches the component's `action.ref`.
+ *
+ * Anchors are matched on href plus text so a link keeps its own ref when surrounding content is
+ * edited, including when another link is inserted ahead of it. Position is the fallback, used
+ * only when the identity is ambiguous or the link itself was edited, and then only while the
+ * anchor count is unchanged — a shifted index would move the ref onto the wrong link.
+ *
+ * TODO(#4658): drop once the editor node classes declare these attributes.
+ *
+ * @param html - The exported HTML.
+ * @param sourceLabel - The label the editor was seeded with.
+ * @returns The HTML with its sentinels restored.
+ */
+function restoreActionSentinels(html: string, sourceLabel: string): string {
+  if (!sourceLabel.includes('data-component-ref') && !sourceLabel.includes('data-action-ref')) {
+    return html;
+  }
+
+  const parser: DOMParser = new DOMParser();
+  const source: Document = parser.parseFromString(sourceLabel, 'text/html');
+  const target: Document = parser.parseFromString(html, 'text/html');
+
+  const componentRef: string | null =
+    source.body.querySelector('[data-component-ref]')?.getAttribute('data-component-ref') ?? null;
+  const firstBlock: globalThis.Element | null = target.body.firstElementChild;
+
+  if (componentRef && firstBlock && !firstBlock.hasAttribute('data-component-ref')) {
+    firstBlock.setAttribute('data-component-ref', componentRef);
+  }
+
+  const sourceAnchors: HTMLAnchorElement[] = Array.from(source.body.querySelectorAll('a'));
+  const targetAnchors: HTMLAnchorElement[] = Array.from(target.body.querySelectorAll('a'));
+  const countsMatch: boolean = sourceAnchors.length === targetAnchors.length;
+
+  // Identities shared by more than one source anchor are mapped to null: neither ref can be
+  // attributed with confidence, so those fall through to the positional pass. Anchors carrying
+  // no ref are recorded too, otherwise a wired anchor twinned with an unwired one would read as
+  // unambiguous and its ref would be copied onto both.
+  const refsByIdentity: Map<string, string | null> = new Map<string, string | null>();
+
+  sourceAnchors.forEach((anchor: HTMLAnchorElement) => {
+    const attribute: string | null = anchor.getAttribute('data-action-ref');
+    const actionRef: string | null = attribute !== null && attribute !== '' ? attribute : null;
+    const identity: string = anchorIdentity(anchor);
+
+    refsByIdentity.set(identity, refsByIdentity.has(identity) ? null : actionRef);
+  });
+
+  const claimedIdentities: Set<string> = new Set<string>();
+
+  targetAnchors.forEach((anchor: HTMLAnchorElement, index: number) => {
+    if (anchor.hasAttribute('data-action-ref')) {
+      // An anchor that kept its ref still owns its identity, so a duplicate of it below
+      // cannot be handed the same ref.
+      if (anchor.getAttribute('data-action-ref')) {
+        claimedIdentities.add(anchorIdentity(anchor));
+      }
+
+      return;
+    }
+
+    const identity: string = anchorIdentity(anchor);
+    const identityRef: string | null = claimedIdentities.has(identity) ? null : (refsByIdentity.get(identity) ?? null);
+
+    if (identityRef) {
+      anchor.setAttribute('data-action-ref', identityRef);
+      claimedIdentities.add(identity);
+
+      return;
+    }
+
+    const positionalRef: string | null = countsMatch
+      ? (sourceAnchors[index]?.getAttribute('data-action-ref') ?? null)
+      : null;
+
+    if (positionalRef) {
+      anchor.setAttribute('data-action-ref', positionalRef);
+    }
+  });
+
+  return target.body.innerHTML;
+}
+
 /**
  * Convert nodes tree to HTML string.
  */
 function HTMLPlugin({onChange, resource, disabled = false}: HTMLPluginProps): ReactElement | null {
   const [editor] = useLexicalComposerContext();
   const updateType = useRef<UpdateType>(UPDATE_TYPES.NONE);
+  // The label the editor currently holds, read at export time to restore the sentinels Lexical
+  // drops. Kept in a ref so the update listener does not re-register on every resource identity.
+  const sourceLabelRef = useRef<string>('');
+
+  useEffect(() => {
+    sourceLabelRef.current = (resource as Resource & {label?: string})?.label ?? '';
+  }, [resource]);
 
   /**
    * Pre-process the HTML string to add additional classes and styles.
@@ -179,7 +265,7 @@ function HTMLPlugin({onChange, resource, disabled = false}: HTMLPluginProps): Re
 
         const processedHTML: string = preProcessHTML(htmlString);
 
-        onChange(processedHTML === EMPTY_CONTENT ? '' : processedHTML);
+        onChange(processedHTML === EMPTY_CONTENT ? '' : restoreActionSentinels(processedHTML, sourceLabelRef.current));
       });
     });
   }, [editor, onChange, preProcessHTML]);

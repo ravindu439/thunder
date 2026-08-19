@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package credential
 
@@ -577,4 +562,61 @@ func (s *ConfigurationServiceTestSuite) TestCreateResolvesAndValidatesOU() {
 	s.Require().Nil(err)
 	s.Equal("ou-1", got.OUID)
 	s.Equal("default", got.OUHandle)
+}
+
+func (s *ConfigurationServiceTestSuite) TestCreateRejectsDuplicateClaimName() {
+	svc := s.newService()
+	dto := s.validDTO()
+	dto.Claims = []ClaimMapping{
+		{Name: "full_name", DisplayName: "Full Name"},
+		{Name: "tier", DisplayName: "Tier"},
+		{Name: "full_name", DisplayName: "Full Name Again"},
+	}
+
+	_, err := svc.CreateCredentialConfiguration(context.Background(), dto)
+	s.Require().NotNil(err)
+	s.Equal(ErrorConfigurationDuplicateClaim.Code, err.Code)
+	s.Equal("full_name", err.ErrorDescription.Params["claim"])
+}
+
+func (s *ConfigurationServiceTestSuite) TestCreateRejectsReservedClaimName() {
+	reserved := []string{
+		"iss", "nbf", "exp", "cnf", "vct", "status",
+		"_sd", "_sd_alg", "...",
+		"sub", "iat",
+	}
+	for _, name := range reserved {
+		svc := s.newService()
+		dto := s.validDTO()
+		dto.Claims = []ClaimMapping{{Name: name, DisplayName: "Reserved"}}
+
+		_, err := svc.CreateCredentialConfiguration(context.Background(), dto)
+		s.Require().NotNil(err, "claim %q must be rejected", name)
+		s.Equal(ErrorConfigurationReservedClaim.Code, err.Code)
+		s.Equal(name, err.ErrorDescription.Params["claim"])
+	}
+}
+
+func (s *ConfigurationServiceTestSuite) TestCreateRejectsEmptyClaimName() {
+	svc := s.newService()
+	dto := s.validDTO()
+	dto.Claims = []ClaimMapping{{Name: "   ", DisplayName: "Blank"}}
+
+	_, err := svc.CreateCredentialConfiguration(context.Background(), dto)
+	s.Require().NotNil(err)
+	s.Equal(ErrorConfigurationEmptyClaimName.Code, err.Code)
+}
+
+func (s *ConfigurationServiceTestSuite) TestCreateAcceptsDistinctClaimNames() {
+	svc := s.newService()
+	dto := s.validDTO()
+	dto.Claims = []ClaimMapping{
+		{Name: "full_name", DisplayName: "Full Name"},
+		{Name: "Full_Name", DisplayName: "Case Differs"},
+		{Name: "tier", DisplayName: "Tier"},
+	}
+
+	created, err := svc.CreateCredentialConfiguration(context.Background(), dto)
+	s.Require().Nil(err)
+	s.Len(created.Claims, 3)
 }

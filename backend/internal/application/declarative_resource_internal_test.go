@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -25,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/thunder-id/thunderid/internal/application/model"
@@ -74,6 +60,9 @@ certificate:
 allowedUserTypes:
   - internal
   - external
+passkeyAllowedOrigins:
+  - https://app.example.com
+  - https://login.example.com
 `
 
 	appDTO, err := parseToApplicationDTO([]byte(yamlData))
@@ -99,6 +88,7 @@ allowedUserTypes:
 	assert.NotNil(s.T(), appDTO.Assertion)
 	assert.Equal(s.T(), int64(3600), appDTO.Assertion.ValidityPeriod)
 	assert.Equal(s.T(), 2, len(appDTO.AllowedUserTypes))
+	assert.Equal(s.T(), []string{"https://app.example.com", "https://login.example.com"}, appDTO.PasskeyAllowedOrigins)
 }
 
 func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_MinimalFields() {
@@ -504,6 +494,26 @@ inboundAuthConfig:
 	assert.Equal(s.T(), "oauth-client-secret", sysCreds[fieldClientSecret])
 }
 
+func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_AttestationParsed() {
+	yamlData := []byte(`
+id: attested-app
+name: Attested Application
+attestation:
+  android:
+    packageName: com.example.app
+    certificateSha256Digests:
+      - AA:BB:CC
+`)
+
+	appDTO, err := parseToApplicationDTO(yamlData)
+
+	require.NoError(s.T(), err)
+	require.NotNil(s.T(), appDTO.Attestation)
+	require.NotNil(s.T(), appDTO.Attestation.Android)
+	assert.Equal(s.T(), "com.example.app", appDTO.Attestation.Android.PackageName)
+	assert.Contains(s.T(), appDTO.Attestation.Android.CertificateSha256Digests, "AA:BB:CC")
+}
+
 func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_OUHandlePassedThrough() {
 	yamlData := []byte("id: app-1\nname: My App\nouHandle: default\n")
 
@@ -512,4 +522,28 @@ func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_OUHandlePasse
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "default", appDTO.OUHandle)
 	assert.Empty(s.T(), appDTO.OUID)
+}
+
+func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_PasskeyAllowedOriginsParsed() {
+	yamlData := []byte(`
+id: passkey-app
+name: Passkey Application
+passkeyAllowedOrigins:
+  - https://app.example.com
+  - https://login.example.com
+`)
+
+	appDTO, err := parseToApplicationDTO(yamlData)
+
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), []string{"https://app.example.com", "https://login.example.com"}, appDTO.PasskeyAllowedOrigins)
+}
+
+func (s *ParseToApplicationDTOTestSuite) TestParseToApplicationDTO_PasskeyAllowedOriginsAbsent() {
+	yamlData := []byte("id: no-passkey-app\nname: No Passkey App\n")
+
+	appDTO, err := parseToApplicationDTO(yamlData)
+
+	assert.NoError(s.T(), err)
+	assert.Nil(s.T(), appDTO.PasskeyAllowedOrigins)
 }

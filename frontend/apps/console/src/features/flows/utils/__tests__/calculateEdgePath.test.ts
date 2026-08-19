@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Position, type Node} from '@xyflow/react';
 import {describe, expect, it} from 'vitest';
@@ -480,6 +465,35 @@ describe('calculateAllEdgePaths', () => {
       const result = calculateAllEdgePaths(edges, nodes);
 
       expect(result.size).toBe(2);
+    });
+
+    it('should never offset the terminal segments away from the handles', () => {
+      // Both edges are a single straight segment; that segment touches both
+      // handles, so no separation may be applied to it at all.
+      const edges: EdgeInput[] = [createEdgeInput('e1', 0, 100, 200, 100), createEdgeInput('e2', 0, 100, 200, 100)];
+
+      const result = calculateAllEdgePaths(edges, [], 'step');
+
+      expect(result.get('e1')?.path).toBe('M 0,100 L 200,100');
+      expect(result.get('e2')?.path).toBe('M 0,100 L 200,100');
+    });
+
+    it('should separate interior segments while keeping paths anchored to the handles', () => {
+      // Identical Z-shaped routes: the shared interior vertical segment must be
+      // offset apart, but both paths must still start and end exactly on the
+      // source and target handles.
+      const edges: EdgeInput[] = [createEdgeInput('e1', 0, 0, 300, 200), createEdgeInput('e2', 0, 0, 300, 200)];
+
+      const result = calculateAllEdgePaths(edges, [], 'step');
+      const path1 = result.get('e1')!.path;
+      const path2 = result.get('e2')!.path;
+
+      expect(path1.startsWith('M 0,0 ')).toBe(true);
+      expect(path2.startsWith('M 0,0 ')).toBe(true);
+      expect(path1.endsWith('L 300,200')).toBe(true);
+      expect(path2.endsWith('L 300,200')).toBe(true);
+      // The interior corridor is separated, so the full paths differ.
+      expect(path1).not.toBe(path2);
     });
 
     it('should handle edges with different paths (no overlap)', () => {

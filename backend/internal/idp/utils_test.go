@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package idp
 
@@ -80,6 +65,22 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OAuth_WithOptional() {
 	s.Nil(err)
 	s.NotNil(result)
 	s.Len(result, 7)
+}
+
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OAuth_WithoutUserInfoEndpoint() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+	prop4, _ := cmodels.NewProperty(PropAuthorizationEndpoint, "http://idp/auth", false)
+	prop5, _ := cmodels.NewProperty(PropTokenEndpoint, "http://idp/token", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4, *prop5}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeOAuth, properties, s.logger)
+
+	s.Nil(err)
+	s.NotNil(result)
+	s.Len(result, 5)
 }
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OAuth_MissingRequired() {
@@ -194,7 +195,7 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_Google_WithDefaults() {
 	s.Equal(googleTokenEndpoint, foundProperties[PropTokenEndpoint])
 	s.Equal(googleUserInfoEndpoint, foundProperties[PropUserInfoEndpoint])
 	s.Equal(googleJwksEndpoint, foundProperties[PropJwksEndpoint])
-	s.Contains(foundProperties[PropScopes], "openid")
+	s.Equal("openid,email,profile", foundProperties[PropScopes])
 }
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_Google_WithCustomEndpoints() {
@@ -265,6 +266,138 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_WithCustomEndpoints
 
 	s.Equal("http://custom/token", foundProperties[PropTokenEndpoint])
 	s.Equal(gitHubAuthorizationEndpoint, foundProperties[PropAuthorizationEndpoint])
+}
+
+// GitHub returns no email at all without an email scope, so a connection created without scopes gets one.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_DefaultsScopes() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeGitHub, properties, s.logger)
+
+	s.Nil(err)
+	s.Equal(defaultGitHubScopes, GetPropertyValue(result, PropScopes))
+}
+
+// A deliberately narrow scope list is a choice, not an omission, even when it cannot yield an email.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_PreservesExplicitScopes() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+	prop4, _ := cmodels.NewProperty(PropScopes, "read:user", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeGitHub, properties, s.logger)
+
+	s.Nil(err)
+	s.Equal("read:user", GetPropertyValue(result, PropScopes))
+}
+
+// An explicitly empty scope string is rejected by the generic empty-value check that applies to every
+// property, so it never reaches scope defaulting.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_EmptyScopesRejected() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+	prop4, _ := cmodels.NewProperty(PropScopes, "", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeGitHub, properties, s.logger)
+
+	s.NotNil(err)
+	s.Nil(result)
+	s.Equal(ErrorInvalidIDPProperty.Code, err.Code)
+}
+
+// A scope value that survives the empty-value check but parses to no scopes still defaults.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_BlankScopeListDefaults() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+	prop4, _ := cmodels.NewProperty(PropScopes, ",", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeGitHub, properties, s.logger)
+
+	s.Nil(err)
+	s.Equal(defaultGitHubScopes, GetPropertyValue(result, PropScopes))
+}
+
+// An empty value reaches the defaulting step as a present-but-blank property, not a missing one.
+func (s *IDPUtilsTestSuite) TestEnsureGitHubScopes_EmptyScopesValue() {
+	prop, _ := cmodels.NewProperty(PropScopes, "", false)
+	propertyMap := map[string]cmodels.Property{
+		PropScopes: *prop,
+	}
+
+	err := ensureDefaultGitHubScopes(context.Background(), propertyMap, s.logger)
+
+	s.Nil(err)
+
+	scopesProp := propertyMap[PropScopes]
+	value, _ := scopesProp.GetValue()
+	s.Equal(defaultGitHubScopes, value)
+}
+
+// The property is created, not just populated, when the connection omits scopes entirely.
+func (s *IDPUtilsTestSuite) TestEnsureGitHubScopes_NoExistingScopes() {
+	propertyMap := map[string]cmodels.Property{}
+
+	err := ensureDefaultGitHubScopes(context.Background(), propertyMap, s.logger)
+
+	s.Nil(err)
+
+	scopesProp := propertyMap[PropScopes]
+	value, _ := scopesProp.GetValue()
+	s.Equal(defaultGitHubScopes, value)
+}
+
+// The scope default must not travel through resolveEndpointDefaults: that rewrites each value's
+// scheme and host, and "user:email" parses as a URL with scheme "user", so a base URL override would
+// corrupt it.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_GitHub_ScopesSurviveBaseURLOverride() {
+	config.ResetServerRuntime()
+	_ = config.InitializeServerRuntime("/tmp/test", &config.Config{
+		IdentityProvider: config.IdentityProviderConfig{
+			GitHubBaseURL: "http://localhost:8092",
+		},
+	})
+	defer config.ResetServerRuntime()
+
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeGitHub, properties, s.logger)
+
+	s.Nil(err)
+	s.Equal(defaultGitHubScopes, GetPropertyValue(result, PropScopes))
+	s.Contains(GetPropertyValue(result, PropAuthorizationEndpoint), "localhost:8092")
+}
+
+// Generic OAuth has no known email scope to guess, so it keeps no scopes rather than inheriting one.
+func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OAuth_NoScopeDefault() {
+	prop1, _ := cmodels.NewProperty(PropClientID, "test-client", false)
+	prop2, _ := cmodels.NewProperty(PropClientSecret, "test-secret", false)
+	prop3, _ := cmodels.NewProperty(PropRedirectURI, "http://localhost/callback", false)
+	prop4, _ := cmodels.NewProperty(PropAuthorizationEndpoint, "http://idp/auth", false)
+	prop5, _ := cmodels.NewProperty(PropTokenEndpoint, "http://idp/token", false)
+	prop6, _ := cmodels.NewProperty(PropUserInfoEndpoint, "http://idp/userinfo", false)
+
+	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4, *prop5, *prop6}
+
+	result, err := validateIDPProperties(context.Background(), providers.IDPTypeOAuth, properties, s.logger)
+
+	s.Nil(err)
+	s.Empty(GetPropertyValue(result, PropScopes))
 }
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_EmptyPropertyName() {
@@ -352,7 +485,7 @@ func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_NoExistingScopes() {
 
 	scopesProp := propertyMap[PropScopes]
 	value, _ := scopesProp.GetValue()
-	s.Equal("openid", value)
+	s.Equal("openid,email,profile", value)
 }
 
 func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_WithExistingScopes() {
@@ -400,7 +533,7 @@ func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_EmptyScopesValue() {
 
 	scopesProp := propertyMap[PropScopes]
 	value, _ := scopesProp.GetValue()
-	s.Equal("openid", value)
+	s.Equal("openid,email,profile", value)
 }
 
 func (s *IDPUtilsTestSuite) TestValidateIDP_ValidOAuth() {
@@ -566,7 +699,7 @@ func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_WithWhitespaceScopes() {
 
 	scopesProp := propertyMap[PropScopes]
 	value, _ := scopesProp.GetValue()
-	s.Equal("openid", value)
+	s.Equal("openid,email,profile", value)
 }
 
 func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_CommaSeparatedScopes() {
@@ -612,8 +745,8 @@ func (s *IDPUtilsTestSuite) TestEnsureOpenIDScope_WithEmptyStringInScopes() {
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeOnly_OIDC_Succeeds() {
 	// OIDC IDP with only the token-exchange required props and token_exchange_enabled=true should succeed.
 	// client_id is no longer required for token exchange; issuer and jwks_endpoint are sufficient.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "true", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
@@ -642,7 +775,7 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeAudience_OIDC
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_MissingIssuer_Fails() {
 	// OIDC IDP with token_exchange_enabled=true but missing issuer should fail.
 	prop1, _ := cmodels.NewProperty(PropClientID, "your_client_id", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "true", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
@@ -659,7 +792,7 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_Missi
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_MissingJWKS_Fails() {
 	// OIDC IDP with token_exchange_enabled=true but missing jwks_endpoint should fail.
 	prop1, _ := cmodels.NewProperty(PropClientID, "your_client_id", false)
-	prop2, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
 	prop3, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "true", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
@@ -676,8 +809,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_Missi
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OIDCWithoutTokenExchange_StillRequiresRedirectProps() {
 	// OIDC IDP without token_exchange_enabled must still require all 5 redirect-flow props.
 	prop1, _ := cmodels.NewProperty(PropClientID, "your_client_id", false)
-	prop2, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop3, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop2, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop3, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
 
@@ -693,9 +826,9 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OIDCWithoutTokenExchange_M
 	// OIDC IDP without token_exchange_enabled must fail when client_secret is missing.
 	prop1, _ := cmodels.NewProperty(PropClientID, "your_client_id", false)
 	prop2, _ := cmodels.NewProperty(PropRedirectURI, "https://thunder.example.com/callback", false)
-	prop3, _ := cmodels.NewProperty(PropAuthorizationEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/authorize",
+	prop3, _ := cmodels.NewProperty(PropAuthorizationEndpoint, "https://idp.example.com/oauth2/authorize",
 		false)
-	prop4, _ := cmodels.NewProperty(PropTokenEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
+	prop4, _ := cmodels.NewProperty(PropTokenEndpoint, "https://idp.example.com/oauth2/token", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3, *prop4}
 
@@ -711,8 +844,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_OIDCWithoutTokenExchange_M
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabledTrue_OIDC_Succeeds() {
 	// OIDC IDP with id_jag_enabled=true and no client credentials should succeed;
 	// issuer and jwks_endpoint alone are sufficient for trust-only connections.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropIDJagEnabled, "true", false)
 	prop4, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "false", false)
 
@@ -727,8 +860,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabledTrue_OIDC_Succ
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabledFalse_OIDC_Succeeds() {
 	// OIDC IDP with id_jag_enabled=false (still present) should succeed without client credentials,
 	// since the mere presence of id_jag_enabled identifies a trust-only connection.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropIDJagEnabled, "false", false)
 	prop4, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "false", false)
 
@@ -742,7 +875,7 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabledFalse_OIDC_Suc
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_MissingIssuer_Fails() {
 	// OIDC IDP with id_jag_enabled present but missing issuer should fail.
-	prop1, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop2, _ := cmodels.NewProperty(PropIDJagEnabled, "true", false)
 
 	properties := []cmodels.Property{*prop1, *prop2}
@@ -758,7 +891,7 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_MissingIssuer
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_MissingJWKS_Fails() {
 	// OIDC IDP with id_jag_enabled present but missing jwks_endpoint should fail.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
 	prop2, _ := cmodels.NewProperty(PropIDJagEnabled, "true", false)
 
 	properties := []cmodels.Property{*prop1, *prop2}
@@ -774,8 +907,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_MissingJWKS_F
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_NonBooleanValue_Fails() {
 	// OIDC IDP with id_jag_enabled set to a non-boolean value should fail validation.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropIDJagEnabled, "x", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
@@ -790,8 +923,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_IDJagEnabled_NonBooleanVal
 
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_NonBooleanValue_Fails() {
 	// OIDC IDP with token_exchange_enabled set to a non-boolean value should fail validation.
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 	prop3, _ := cmodels.NewProperty(PropTokenExchangeEnabled, "yes", false)
 
 	properties := []cmodels.Property{*prop1, *prop2, *prop3}
@@ -807,8 +940,8 @@ func (s *IDPUtilsTestSuite) TestValidateIDPProperties_TokenExchangeEnabled_NonBo
 func (s *IDPUtilsTestSuite) TestValidateIDPProperties_PlainOIDCWithoutIDJagOrTokenExchange_StillFails() {
 	// Plain OIDC IDP without id_jag_enabled or token_exchange_enabled and without client
 	// credentials must still fail (regression guard for the full required set).
-	prop1, _ := cmodels.NewProperty(PropIssuer, "https://api.asgardeo.io/t/myorg/oauth2/token", false)
-	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://api.asgardeo.io/t/myorg/oauth2/jwks", false)
+	prop1, _ := cmodels.NewProperty(PropIssuer, "https://idp.example.com/oauth2/token", false)
+	prop2, _ := cmodels.NewProperty(PropJwksEndpoint, "https://idp.example.com/oauth2/jwks", false)
 
 	properties := []cmodels.Property{*prop1, *prop2}
 
@@ -1008,7 +1141,8 @@ func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_EmptyMappings_NoOp() {
 	s.Equal(attrs, result)
 }
 
-func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_RenamesMappedClaim() {
+// Mappings copy rather than rename, so the source claim survives alongside the local attribute.
+func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_PublishesMappedClaimAndKeepsSource() {
 	attrs := map[string]interface{}{
 		"http://schemas.example.com/emailaddress": "user@example.com",
 	}
@@ -1016,8 +1150,19 @@ func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_RenamesMappedClaim() {
 		{ExternalAttribute: "http://schemas.example.com/emailaddress", LocalAttribute: "email"},
 	})
 	s.Equal("user@example.com", result["email"])
-	_, present := result["http://schemas.example.com/emailaddress"]
-	s.False(present)
+	s.Equal("user@example.com", result["http://schemas.example.com/emailaddress"])
+}
+
+// The case the copy semantics exist for: mapping an email onto a required username must not leave the
+// identity without an email.
+func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_EmailSurvivesAUsernameMapping() {
+	attrs := map[string]interface{}{"email": "user@example.com", "sub": "user-123"}
+	result := ApplyAttributeMappings(attrs, []providers.AttributeMapping{
+		{ExternalAttribute: "email", LocalAttribute: "username"},
+	})
+	s.Equal("user@example.com", result["username"])
+	s.Equal("user@example.com", result["email"])
+	s.Equal("user-123", result["sub"])
 }
 
 func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_OneSourceToMultipleTargets() {
@@ -1039,8 +1184,7 @@ func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_UnmappedPassesThrough() {
 		attrs, []providers.AttributeMapping{{ExternalAttribute: "given_name", LocalAttribute: "firstName"}})
 	s.Equal("Jane", result["firstName"])
 	s.Equal("engineering", result["department"])
-	_, present := result["given_name"]
-	s.False(present)
+	s.Equal("Jane", result["given_name"])
 }
 
 func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_MappedValueOverridesCollision() {
@@ -1099,7 +1243,9 @@ func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_SubPreservedWhenMappedToM
 	s.Equal("user-123", result["email"])
 }
 
-func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_SubPreservedAlongsideOtherRenamedSources() {
+// sub needed a carve-out under rename semantics; under copy semantics every source is preserved and
+// it is no longer a special case.
+func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_AllSourcesPreserved() {
 	attrs := map[string]interface{}{
 		"sub":        "user-123",
 		"given_name": "Jane",
@@ -1111,9 +1257,7 @@ func (s *IDPUtilsTestSuite) TestApplyAttributeMappings_SubPreservedAlongsideOthe
 	s.Equal("user-123", result["sub"])
 	s.Equal("user-123", result["picture"])
 	s.Equal("Jane", result["firstName"])
-	// Non-sub sources are still consumed by the mapping.
-	_, present := result["given_name"]
-	s.False(present)
+	s.Equal("Jane", result["given_name"])
 }
 
 func (s *IDPUtilsTestSuite) TestGetAttributeMappings_NilIDP() {

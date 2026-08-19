@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import userEvent from '@testing-library/user-event';
 import {screen, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import type {User} from '@thunderid/types';
 import {useTranslation} from 'react-i18next';
@@ -140,6 +126,37 @@ describe('ManageUsersSection', () => {
     renderWithProviders(<ManageUsersSection organizationUnitId="ou-123" />);
 
     expect(screen.getByRole('grid')).toBeInTheDocument();
+  });
+
+  it('should render an inline read error state instead of the grid when the query fails', () => {
+    mockUseGetOrganizationUnitUsers.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+    });
+
+    renderWithProviders(<ManageUsersSection organizationUnitId="ou-123" />);
+
+    expect(screen.getByText('Failed to load users')).toBeInTheDocument();
+    expect(screen.queryByRole('grid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  it('should refetch when the retry action is clicked', async () => {
+    const mockRefetch = vi.fn();
+    mockUseGetOrganizationUnitUsers.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetch,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<ManageUsersSection organizationUnitId="ou-123" />);
+
+    await user.click(screen.getByText('Refresh'));
+
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
   });
 
   it('should call useGetOrganizationUnitUsers with correct ID', () => {

@@ -38,16 +38,16 @@ func (_m *attributeCacheStoreInterfaceMock) EXPECT() *attributeCacheStoreInterfa
 }
 
 // CreateAttributeCache provides a mock function for the type attributeCacheStoreInterfaceMock
-func (_mock *attributeCacheStoreInterfaceMock) CreateAttributeCache(ctx context.Context, cache AttributeCache) error {
-	ret := _mock.Called(ctx, cache)
+func (_mock *attributeCacheStoreInterfaceMock) CreateAttributeCache(ctx context.Context, id string, data []byte, ttlSeconds int64) error {
+	ret := _mock.Called(ctx, id, data, ttlSeconds)
 
 	if len(ret) == 0 {
 		panic("no return value specified for CreateAttributeCache")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, AttributeCache) error); ok {
-		r0 = returnFunc(ctx, cache)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, int64) error); ok {
+		r0 = returnFunc(ctx, id, data, ttlSeconds)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -61,24 +61,36 @@ type attributeCacheStoreInterfaceMock_CreateAttributeCache_Call struct {
 
 // CreateAttributeCache is a helper method to define mock.On call
 //   - ctx context.Context
-//   - cache AttributeCache
-func (_e *attributeCacheStoreInterfaceMock_Expecter) CreateAttributeCache(ctx interface{}, cache interface{}) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
-	return &attributeCacheStoreInterfaceMock_CreateAttributeCache_Call{Call: _e.mock.On("CreateAttributeCache", ctx, cache)}
+//   - id string
+//   - data []byte
+//   - ttlSeconds int64
+func (_e *attributeCacheStoreInterfaceMock_Expecter) CreateAttributeCache(ctx interface{}, id interface{}, data interface{}, ttlSeconds interface{}) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
+	return &attributeCacheStoreInterfaceMock_CreateAttributeCache_Call{Call: _e.mock.On("CreateAttributeCache", ctx, id, data, ttlSeconds)}
 }
 
-func (_c *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call) Run(run func(ctx context.Context, cache AttributeCache)) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
+func (_c *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call) Run(run func(ctx context.Context, id string, data []byte, ttlSeconds int64)) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 AttributeCache
+		var arg1 string
 		if args[1] != nil {
-			arg1 = args[1].(AttributeCache)
+			arg1 = args[1].(string)
+		}
+		var arg2 []byte
+		if args[2] != nil {
+			arg2 = args[2].([]byte)
+		}
+		var arg3 int64
+		if args[3] != nil {
+			arg3 = args[3].(int64)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -89,7 +101,7 @@ func (_c *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call) Return(err
 	return _c
 }
 
-func (_c *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call) RunAndReturn(run func(ctx context.Context, cache AttributeCache) error) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
+func (_c *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call) RunAndReturn(run func(ctx context.Context, id string, data []byte, ttlSeconds int64) error) *attributeCacheStoreInterfaceMock_CreateAttributeCache_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -215,22 +227,24 @@ func (_c *attributeCacheStoreInterfaceMock_ExtendAttributeCacheTTL_Call) RunAndR
 }
 
 // GetAttributeCache provides a mock function for the type attributeCacheStoreInterfaceMock
-func (_mock *attributeCacheStoreInterfaceMock) GetAttributeCache(ctx context.Context, id string) (AttributeCache, error) {
+func (_mock *attributeCacheStoreInterfaceMock) GetAttributeCache(ctx context.Context, id string) ([]byte, error) {
 	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetAttributeCache")
 	}
 
-	var r0 AttributeCache
+	var r0 []byte
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (AttributeCache, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]byte, error)); ok {
 		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) AttributeCache); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
 		r0 = returnFunc(ctx, id)
 	} else {
-		r0 = ret.Get(0).(AttributeCache)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
 		r1 = returnFunc(ctx, id)
@@ -270,12 +284,12 @@ func (_c *attributeCacheStoreInterfaceMock_GetAttributeCache_Call) Run(run func(
 	return _c
 }
 
-func (_c *attributeCacheStoreInterfaceMock_GetAttributeCache_Call) Return(attributeCache AttributeCache, err error) *attributeCacheStoreInterfaceMock_GetAttributeCache_Call {
-	_c.Call.Return(attributeCache, err)
+func (_c *attributeCacheStoreInterfaceMock_GetAttributeCache_Call) Return(bytes []byte, err error) *attributeCacheStoreInterfaceMock_GetAttributeCache_Call {
+	_c.Call.Return(bytes, err)
 	return _c
 }
 
-func (_c *attributeCacheStoreInterfaceMock_GetAttributeCache_Call) RunAndReturn(run func(ctx context.Context, id string) (AttributeCache, error)) *attributeCacheStoreInterfaceMock_GetAttributeCache_Call {
+func (_c *attributeCacheStoreInterfaceMock_GetAttributeCache_Call) RunAndReturn(run func(ctx context.Context, id string) ([]byte, error)) *attributeCacheStoreInterfaceMock_GetAttributeCache_Call {
 	_c.Call.Return(run)
 	return _c
 }

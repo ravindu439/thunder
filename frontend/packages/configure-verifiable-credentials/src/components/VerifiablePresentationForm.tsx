@@ -1,0 +1,560 @@
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
+
+import {QueryErrorNotice, SettingsCard, UnsavedChangesBar} from '@thunderid/components';
+import {OrganizationUnitTreePicker, useHasMultipleOUs} from '@thunderid/configure-organization-units';
+import {
+  Autocomplete,
+  Box,
+  Button,
+  Chip,
+  FormControl,
+  FormControlLabel,
+  FormHelperText,
+  FormLabel,
+  IconButton,
+  InputAdornment,
+  ListItemText,
+  MenuItem,
+  Select,
+  Stack,
+  Switch,
+  Tab,
+  Tabs,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@wso2/oxygen-ui';
+import {Check, Copy} from '@wso2/oxygen-ui-icons-react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type JSX,
+  type ReactNode,
+  type SyntheticEvent,
+} from 'react';
+import {useTranslation} from 'react-i18next';
+import ClaimsEditor from './PresentationClaimsEditor';
+import useGetTrustAnchors from '../api/useGetTrustAnchors';
+import {
+  claimRowsToRequest,
+  definitionToClaimRows,
+  findDuplicateClaimNames,
+  type ClaimRow,
+} from '../models/presentation-claims';
+import type {CreateVerifiablePresentationRequest} from '../models/presentation-requests';
+import type {TrustAnchor, VerifiablePresentation} from '../models/vp';
+
+export interface VerifiablePresentationFormProps {
+  initial?: VerifiablePresentation;
+  /** Name, edited inline in the page header rather than in this form. */
+  name: string;
+  /** Description, edited inline in the page header rather than in this form. */
+  description: string;
+  onNameChange: (name: string) => void;
+  onDescriptionChange: (description: string) => void;
+  submitting: boolean;
+  submitLabel: string;
+  onSubmit: (data: CreateVerifiablePresentationRequest) => void;
+  /** When provided (edit mode), renders a Danger Zone delete action in the Advanced tab. */
+  onDelete?: () => void;
+  /** Inline error to show above the save/reset actions when the last save attempt failed. */
+  error?: string;
+  /** Called whenever a field changes, so a stale save error can be cleared. */
+  onErrorClear?: () => void;
+}
+
+interface TabPanelProps {
+  children: ReactNode;
+  value: number;
+  index: number;
+}
+
+function TabPanel({children, value, index}: TabPanelProps): JSX.Element {
+  return (
+    <div role="tabpanel" hidden={value !== index}>
+      {value === index && <Box sx={{pb: 3}}>{children}</Box>}
+    </div>
+  );
+}
+
+/**
+ * Tabbed create/edit form for an OpenID4VP presentation definition: a General
+ * tab (identity + credential type) and a Claims tab (the unified claim editor).
+ */
+export default function VerifiablePresentationForm({
+  initial = undefined,
+  name,
+  description,
+  onNameChange,
+  onDescriptionChange,
+  submitting,
+  submitLabel,
+  onSubmit,
+  onDelete = undefined,
+  error = undefined,
+  onErrorClear = undefined,
+}: VerifiablePresentationFormProps): JSX.Element {
+  const {t} = useTranslation('verifiable-presentations');
+
+  const {hasMultipleOUs, ouList} = useHasMultipleOUs();
+
+  const [tab, setTab] = useState<number>(0);
+  const [handle, setHandle] = useState<string>(initial?.handle ?? '');
+  const [ouId, setOuId] = useState<string>(initial?.ouId ?? '');
+  const [vct, setVct] = useState<string>(initial?.vct ?? '');
+  const [format, setFormat] = useState<string>(initial?.format ?? 'dc+sd-jwt');
+  const [claims, setClaims] = useState<ClaimRow[]>(definitionToClaimRows(initial));
+  const [enforceTrustedIssuer, setEnforceTrustedIssuer] = useState<boolean>(initial?.enforceTrustedIssuer ?? false);
+  const [trustedAuthorities, setTrustedAuthorities] = useState<string[]>(initial?.trustedAuthorities ?? []);
+
+  const {
+    data: trustAnchors = [],
+    isLoading: trustAnchorsLoading,
+    error: trustAnchorsError,
+    refetch: refetchTrustAnchors,
+  } = useGetTrustAnchors();
+
+  // Issuer-trust enforcement is only meaningful when trust anchors exist; without
+  // any, the verifier rejects every presentation, so the toggle is disabled. Guard
+  // only once the anchors have loaded, so an existing enforce=true value is not
+  // spuriously cleared during the initial fetch.
+  const noTrustAnchors = !trustAnchorsLoading && trustAnchors.length === 0;
+
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    },
+    [],
+  );
+  const handleCopy = useCallback(async (value: string, field: string): Promise<void> => {
+    await navigator.clipboard.writeText(value);
+    setCopiedField(field);
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+    }
+    copyTimeoutRef.current = setTimeout(() => setCopiedField(null), 2000);
+  }, []);
+
+  const definitionId = initial?.id;
+
+  // In a single-OU deployment the sole OU is used implicitly; otherwise the picker drives ouId.
+  const effectiveOuId = ouId !== '' ? ouId : !hasMultipleOUs && ouList.length === 1 ? ouList[0].id : '';
+
+  const duplicateClaimNames = findDuplicateClaimNames(claims);
+
+  const valid =
+    handle.trim() !== '' && vct.trim() !== '' && effectiveOuId !== '' && Object.keys(duplicateClaimNames).length === 0;
+
+  const snapshot = (
+    h: string,
+    o: string,
+    n: string,
+    d: string,
+    v: string,
+    f: string,
+    cl: ClaimRow[],
+    enforce: boolean,
+    authorities: string[],
+  ): string =>
+    JSON.stringify({
+      handle: h.trim(),
+      ouId: o,
+      name: n.trim(),
+      description: d.trim(),
+      vct: v.trim(),
+      format: f.trim(),
+      ...claimRowsToRequest(cl),
+      enforceTrustedIssuer: enforce,
+      trustedAuthorities: authorities,
+    });
+  const initialSnapshot = useMemo(
+    () =>
+      snapshot(
+        initial?.handle ?? '',
+        initial?.ouId ?? '',
+        initial?.name ?? '',
+        initial?.description ?? '',
+        initial?.vct ?? '',
+        initial?.format ?? 'dc+sd-jwt',
+        definitionToClaimRows(initial),
+        initial?.enforceTrustedIssuer ?? false,
+        initial?.trustedAuthorities ?? [],
+      ),
+    [initial],
+  );
+  // Never enforce issuer trust when no anchors exist (it would reject everything).
+  const effectiveEnforce = enforceTrustedIssuer && !noTrustAnchors;
+  const dirty =
+    snapshot(handle, effectiveOuId, name, description, vct, format, claims, effectiveEnforce, trustedAuthorities) !==
+    initialSnapshot;
+
+  const handleSubmit = (): void => {
+    onSubmit({
+      handle: handle.trim(),
+      ouId: effectiveOuId,
+      name: name.trim() || undefined,
+      description: description.trim() || undefined,
+      vct: vct.trim(),
+      format: format.trim() || undefined,
+      ...claimRowsToRequest(claims),
+      enforceTrustedIssuer: effectiveEnforce,
+      trustedAuthorities: trustedAuthorities.length > 0 ? trustedAuthorities : undefined,
+    });
+  };
+
+  const handleReset = (): void => {
+    setHandle(initial?.handle ?? '');
+    setOuId(initial?.ouId ?? '');
+    onNameChange(initial?.name ?? '');
+    onDescriptionChange(initial?.description ?? '');
+    setVct(initial?.vct ?? '');
+    setFormat(initial?.format ?? 'dc+sd-jwt');
+    setClaims(definitionToClaimRows(initial));
+    setEnforceTrustedIssuer(initial?.enforceTrustedIssuer ?? false);
+    setTrustedAuthorities(initial?.trustedAuthorities ?? []);
+    onErrorClear?.();
+  };
+
+  const text = (
+    id: string,
+    label: string,
+    value: string,
+    setValue: (v: string) => void,
+    placeholder?: string,
+    required?: boolean,
+    helperText?: string,
+  ): JSX.Element => (
+    <FormControl fullWidth required={required}>
+      <FormLabel htmlFor={id}>{label}</FormLabel>
+      <TextField
+        fullWidth
+        id={id}
+        value={value}
+        placeholder={placeholder}
+        helperText={helperText}
+        onChange={(e: ChangeEvent<HTMLInputElement>): void => {
+          onErrorClear?.();
+          setValue(e.target.value);
+        }}
+      />
+    </FormControl>
+  );
+
+  return (
+    <Stack spacing={3}>
+      <Tabs
+        value={tab}
+        onChange={(_e: SyntheticEvent, v: number): void => setTab(v)}
+        aria-label="presentation definition"
+      >
+        <Tab label={t('form.tabs.general')} />
+        <Tab label={t('form.tabs.protocolSettings')} />
+        <Tab label={t('form.tabs.claims')} />
+        <Tab label={t('form.tabs.issuerTrust')} />
+        {definitionId && onDelete && <Tab label={t('form.tabs.advanced', 'Advanced')} />}
+      </Tabs>
+
+      <TabPanel value={tab} index={0}>
+        <Stack spacing={3}>
+          {definitionId && (
+            <SettingsCard title={t('form.quickCopy.title')} description={t('form.quickCopy.description')}>
+              <Stack spacing={3}>
+                <FormControl fullWidth>
+                  <FormLabel htmlFor="vp-id">{t('form.id.label')}</FormLabel>
+                  <TextField
+                    fullWidth
+                    id="vp-id"
+                    value={definitionId}
+                    InputProps={{
+                      readOnly: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Tooltip title={copiedField === 'id' ? t('common:actions.copied') : t('form.copyId')}>
+                            <IconButton
+                              aria-label={t('form.copyId')}
+                              edge="end"
+                              onClick={(): void => {
+                                handleCopy(definitionId, 'id').catch(() => null);
+                              }}
+                            >
+                              {copiedField === 'id' ? <Check size={16} /> : <Copy size={16} />}
+                            </IconButton>
+                          </Tooltip>
+                        </InputAdornment>
+                      ),
+                    }}
+                    helperText={t('form.quickCopy.idHint')}
+                    sx={{'& input': {fontFamily: 'monospace', fontSize: '0.875rem'}}}
+                  />
+                </FormControl>
+                <FormControl fullWidth>
+                  <FormLabel htmlFor="vp-handle">{t('form.handle.label')}</FormLabel>
+                  <TextField
+                    fullWidth
+                    id="vp-handle"
+                    value={handle}
+                    InputProps={{
+                      readOnly: true,
+                      endAdornment: (
+                        <InputAdornment position="end">
+                          <Tooltip
+                            title={copiedField === 'handle' ? t('common:actions.copied') : t('common:actions.copy')}
+                          >
+                            <IconButton
+                              aria-label={t('common:actions.copy')}
+                              edge="end"
+                              onClick={(): void => {
+                                handleCopy(handle, 'handle').catch(() => null);
+                              }}
+                            >
+                              {copiedField === 'handle' ? <Check size={16} /> : <Copy size={16} />}
+                            </IconButton>
+                          </Tooltip>
+                        </InputAdornment>
+                      ),
+                    }}
+                    helperText={t('form.handle.hint')}
+                    sx={{'& input': {fontFamily: 'monospace', fontSize: '0.875rem'}}}
+                  />
+                </FormControl>
+              </Stack>
+            </SettingsCard>
+          )}
+
+          <SettingsCard title={t('form.organizationUnit.title')} description={t('form.organizationUnit.description')}>
+            <Stack spacing={3}>
+              {!definitionId && hasMultipleOUs && (
+                <FormControl fullWidth required>
+                  <FormLabel>{t('form.organizationUnit.label')}</FormLabel>
+                  <OrganizationUnitTreePicker
+                    id="vp-ou-picker"
+                    value={effectiveOuId}
+                    onChange={(value: string): void => {
+                      onErrorClear?.();
+                      setOuId(value);
+                    }}
+                    maxHeight={320}
+                    helperText={t('form.organizationUnit.pickerHint')}
+                  />
+                </FormControl>
+              )}
+              {definitionId && (
+                <>
+                  <FormControl fullWidth>
+                    <FormLabel htmlFor="vp-ou-handle">{t('form.organizationUnit.handleLabel')}</FormLabel>
+                    <TextField
+                      id="vp-ou-handle"
+                      fullWidth
+                      size="small"
+                      value={initial?.ouHandle ?? '-'}
+                      InputProps={{
+                        readOnly: true,
+                        endAdornment: initial?.ouHandle ? (
+                          <InputAdornment position="end">
+                            <Tooltip
+                              title={copiedField === 'ouHandle' ? t('common:actions.copied') : t('common:actions.copy')}
+                            >
+                              <IconButton
+                                aria-label={t('common:actions.copy')}
+                                edge="end"
+                                onClick={(): void => {
+                                  handleCopy(initial.ouHandle!, 'ouHandle').catch(() => null);
+                                }}
+                              >
+                                {copiedField === 'ouHandle' ? <Check size={16} /> : <Copy size={16} />}
+                              </IconButton>
+                            </Tooltip>
+                          </InputAdornment>
+                        ) : undefined,
+                      }}
+                      helperText={t('form.organizationUnit.handleHint')}
+                      sx={{'& input': {fontFamily: 'monospace', fontSize: '0.875rem'}}}
+                    />
+                  </FormControl>
+                  <FormControl fullWidth>
+                    <FormLabel htmlFor="vp-ou-id">{t('form.organizationUnit.idLabel')}</FormLabel>
+                    <TextField
+                      id="vp-ou-id"
+                      fullWidth
+                      size="small"
+                      value={initial?.ouId ?? ''}
+                      InputProps={{
+                        readOnly: true,
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <Tooltip
+                              title={copiedField === 'ouId' ? t('common:actions.copied') : t('common:actions.copy')}
+                            >
+                              <IconButton
+                                aria-label={t('common:actions.copy')}
+                                edge="end"
+                                onClick={(): void => {
+                                  handleCopy(initial?.ouId ?? '', 'ouId').catch(() => null);
+                                }}
+                              >
+                                {copiedField === 'ouId' ? <Check size={16} /> : <Copy size={16} />}
+                              </IconButton>
+                            </Tooltip>
+                          </InputAdornment>
+                        ),
+                      }}
+                      helperText={t('form.organizationUnit.idHint')}
+                      sx={{'& input': {fontFamily: 'monospace', fontSize: '0.875rem'}}}
+                    />
+                  </FormControl>
+                </>
+              )}
+            </Stack>
+          </SettingsCard>
+        </Stack>
+      </TabPanel>
+
+      <TabPanel value={tab} index={1}>
+        <SettingsCard title={t('form.protocol.title')} description={t('form.protocol.description')}>
+          <Stack spacing={3}>
+            {text('vp-vct', t('form.vct.label'), vct, setVct, 'urn:eudi:pid:de:1', true, t('form.vct.hint'))}
+            <FormControl fullWidth>
+              <FormLabel htmlFor="vp-format">{t('form.format.label')}</FormLabel>
+              <Select
+                id="vp-format"
+                value={format}
+                onChange={(e): void => {
+                  onErrorClear?.();
+                  setFormat(e.target.value);
+                }}
+              >
+                <MenuItem value="dc+sd-jwt">{t('form.format.sdJwt')}</MenuItem>
+              </Select>
+              <FormHelperText>{t('form.format.hint')}</FormHelperText>
+            </FormControl>
+          </Stack>
+        </SettingsCard>
+      </TabPanel>
+
+      <TabPanel value={tab} index={2}>
+        <ClaimsEditor
+          duplicateNames={duplicateClaimNames}
+          claims={claims}
+          onChange={(rows: ClaimRow[]): void => {
+            onErrorClear?.();
+            setClaims(rows);
+          }}
+        />
+      </TabPanel>
+
+      <TabPanel value={tab} index={3}>
+        <SettingsCard title={t('form.issuerTrust.title')} description={t('form.issuerTrust.description')}>
+          <Stack spacing={3}>
+            {trustAnchorsError && (
+              <QueryErrorNotice
+                error={trustAnchorsError}
+                t={t}
+                variant="inline"
+                onRetry={() => void refetchTrustAnchors()}
+              />
+            )}
+            <Box>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={effectiveEnforce}
+                    disabled={trustAnchorsLoading || noTrustAnchors}
+                    onChange={(e: ChangeEvent<HTMLInputElement>): void => {
+                      onErrorClear?.();
+                      setEnforceTrustedIssuer(e.target.checked);
+                    }}
+                  />
+                }
+                label={t('form.issuerTrust.enforce.label')}
+              />
+              <FormHelperText>
+                {noTrustAnchors ? t('form.issuerTrust.enforce.noAnchorsHint') : t('form.issuerTrust.enforce.hint')}
+              </FormHelperText>
+            </Box>
+            <FormControl fullWidth>
+              <FormLabel htmlFor="vp-trusted-authorities">{t('form.issuerTrust.authorities.label')}</FormLabel>
+              <Autocomplete<TrustAnchor, true, false, false>
+                multiple
+                fullWidth
+                disabled={!enforceTrustedIssuer}
+                loading={trustAnchorsLoading}
+                options={trustAnchors}
+                value={trustAnchors.filter((anchor: TrustAnchor): boolean => trustedAuthorities.includes(anchor.name))}
+                isOptionEqualToValue={(option: TrustAnchor, val: TrustAnchor): boolean => option.name === val.name}
+                getOptionLabel={(option: TrustAnchor): string => option.name}
+                onChange={(_event: SyntheticEvent, newValue: TrustAnchor[]): void => {
+                  onErrorClear?.();
+                  setTrustedAuthorities(newValue.map((anchor: TrustAnchor): string => anchor.name));
+                }}
+                renderOption={(props, option: TrustAnchor) => (
+                  <li {...props} key={option.name}>
+                    <ListItemText
+                      primary={option.name}
+                      secondary={t('form.issuerTrust.authorities.optionSecondary', {
+                        subject: option.subject,
+                        notAfter: option.not_after,
+                      })}
+                    />
+                  </li>
+                )}
+                renderTags={(value: TrustAnchor[], getTagProps) =>
+                  value.map((option: TrustAnchor, index: number) => {
+                    const {key, ...tagProps} = getTagProps({index});
+
+                    return <Chip key={key} label={option.name} {...tagProps} />;
+                  })
+                }
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    id="vp-trusted-authorities"
+                    helperText={t('form.issuerTrust.authorities.hint')}
+                  />
+                )}
+              />
+            </FormControl>
+          </Stack>
+        </SettingsCard>
+      </TabPanel>
+
+      {definitionId && onDelete && (
+        <TabPanel value={tab} index={4}>
+          <SettingsCard title={t('form.dangerZone.title')} description={t('form.dangerZone.description')}>
+            <Typography variant="h6" gutterBottom color="error">
+              {t('form.dangerZone.delete')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
+              {t('form.dangerZone.deleteDescription')}
+            </Typography>
+            <Button variant="contained" color="error" onClick={onDelete}>
+              {t('common:actions.delete')}
+            </Button>
+          </SettingsCard>
+        </TabPanel>
+      )}
+
+      {dirty && (
+        <UnsavedChangesBar
+          message={t('form.unsavedChanges')}
+          resetLabel={t('common:actions.reset')}
+          saveLabel={submitLabel}
+          savingLabel={t('common:status.saving')}
+          isSaving={submitting}
+          saveDisabled={!valid}
+          error={error}
+          onReset={handleReset}
+          onSave={handleSubmit}
+        />
+      )}
+    </Stack>
+  );
+}

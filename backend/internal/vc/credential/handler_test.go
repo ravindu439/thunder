@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package credential
 
@@ -218,7 +203,7 @@ func (s *ConfigurationHandlerTestSuite) TestRequestToDTOSanitizes() {
 		VCT:         " v ",
 		Claims: []ClaimMapping{
 			{Name: "  given_name  ", DisplayName: "  Given Name  "},
-			{Name: "   ", DisplayName: "dropped"},
+			{Name: "   ", DisplayName: "  unnamed  "},
 		},
 		Display:         &CredentialDisplay{Locale: " en-US ", LogoURI: " uri "},
 		ValiditySeconds: &validity,
@@ -232,17 +217,25 @@ func (s *ConfigurationHandlerTestSuite) TestRequestToDTOSanitizes() {
 	s.Equal("A PID credential", dto.Description)
 	s.Equal("dc+sd-jwt", dto.Format)
 	s.Equal("v", dto.VCT)
-	s.Require().Len(dto.Claims, 1)
+	s.Require().Len(dto.Claims, 2)
 	s.Equal("given_name", dto.Claims[0].Name)
 	s.Equal("Given Name", dto.Claims[0].DisplayName)
+	// The unnamed claim is trimmed but retained, so validation can reject it.
+	s.Equal("", dto.Claims[1].Name)
+	s.Equal("unnamed", dto.Claims[1].DisplayName)
 	s.Require().NotNil(dto.Display)
 	s.Equal("en-US", dto.Display.Locale)
 	s.Equal(120, *dto.ValiditySeconds)
 }
 
-func (s *ConfigurationHandlerTestSuite) TestSanitizeClaimsAllEmpty() {
+func (s *ConfigurationHandlerTestSuite) TestSanitizeClaimsKeepsUnnamedForValidation() {
 	out := sanitizeClaims([]ClaimMapping{{Name: "   "}})
-	s.Nil(out)
+	s.Require().Len(out, 1)
+	s.Equal("", out[0].Name)
+}
+
+func (s *ConfigurationHandlerTestSuite) TestSanitizeClaimsNilWhenAbsent() {
+	s.Nil(sanitizeClaims(nil))
 }
 
 func (s *ConfigurationHandlerTestSuite) TestSanitizeDisplayNil() {

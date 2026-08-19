@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import '@testing-library/jest-dom/vitest';
 import {cleanup} from '@testing-library/react';
@@ -28,23 +13,13 @@ beforeAll(async () => {
   await i18n.use(initReactI18next).init({
     resources: {
       'en-US': {
-        common: enUS.common,
-        navigation: enUS.navigation,
-        users: enUS.users,
-        userTypes: enUS.userTypes,
-        connections: enUS.connections,
-        applications: enUS.applications,
-        groups: enUS.groups,
-        auth: enUS.auth,
-        mfa: enUS.mfa,
-        social: enUS.social,
-        consent: enUS.consent,
-        errors: enUS.errors,
+        ...enUS,
       },
     },
     lng: 'en-US',
     fallbackLng: 'en-US',
     defaultNS: 'common',
+    keySeparator: false,
     interpolation: {
       escapeValue: false,
     },
@@ -161,6 +136,22 @@ vi.mock('@thunderid/react', async (importOriginal) => {
       isLoading: false,
     })),
     ThunderIDProvider: ({children}: {children: React.ReactNode}) => children,
+    InviteUser: ({children}: {children: (props: unknown) => React.ReactNode}) =>
+      children({
+        components: [],
+        values: {},
+        fieldErrors: {},
+        touched: {},
+        error: null,
+        isLoading: false,
+        handleInputChange: vi.fn(),
+        handleInputBlur: vi.fn(),
+        handleSubmit: vi.fn().mockResolvedValue(undefined),
+        resetFlow: vi.fn(),
+        isValid: false,
+        meta: null,
+        additionalData: undefined,
+      }),
   };
 });
 

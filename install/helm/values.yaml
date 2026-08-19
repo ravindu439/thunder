@@ -1,18 +1,5 @@
-# Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
-#
-# WSO2 LLC. licenses this file to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file except
-# in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations
-# under the License.
+# Copyright 2025-2026 The ThunderID Authors
+# SPDX-License-Identifier: Apache-2.0
 
 deployment:
   replicaCount: 2
@@ -21,7 +8,7 @@ deployment:
       maxSurge: 1
       maxUnavailable: 0
   securityContext:
-    readOnlyRootFilesystem: true # This must be false if sqlite is used as the database
+    readOnlyRootFilesystem: true
     enableRunAsUser: true
     runAsUser: 10001
     enableRunAsGroup: true
@@ -62,7 +49,7 @@ deployment:
       cpu: 100m
       memory: 50Mi
   # Additional environment variables with plain values.
-  # The log level is configured via deployment.yaml (log.level), not an environment variable.
+  # The log level is configured via configuration.log.level, not an environment variable.
   # Example:
   # env:
   #   - name: EXTERNAL_API_BASE_URL
@@ -150,6 +137,9 @@ configuration:
   server:
     port: 8090
     httpOnly: false
+    # Logical deployment identifier. Every record is scoped to it, so give each
+    # deployment sharing a database its own value. Defaults to "default-deployment".
+    identifier: ""
     # The URL where users reach ThunderID in their browser.
     # ThunderID uses it to build the login and error redirect links.
     publicUrl: "https://thunderid.local"
@@ -201,7 +191,7 @@ configuration:
   consoleClient:
     path: "/console"
     clientId: "CONSOLE"
-    scopes: "['openid', 'profile', 'email', 'ou', 'system', 'system:user', 'system:group', 'system:ou:view', 'system:usertype:view']"
+    scopes: "['openid', 'profile', 'email', 'group', 'ou', 'system']"
     # Resource indicator (audience) the console sends on token requests. Must match the
     # identifier of the System resource server seeded by the bootstrap defaults, which is
     # "<server.publicUrl>/mcp". Leave empty to derive it from server.publicUrl (default);
@@ -216,7 +206,7 @@ configuration:
     #   httpOnly: false
     #   publicUrl: "https://cp.example.com"
     #   clientId: "FEDERATED_CONSOLE"
-    #   scopes: "['openid', 'profile', 'email', 'group', 'ou', 'system', 'system:user', 'system:group', 'system:ou:view', 'system:usertype:view']"
+    #   scopes: "['openid', 'profile', 'email', 'group', 'ou', 'system']"
     #   # Type of external authorization server. Set to `generic` when the trusted
     #   # issuer is a generic OIDC provider. When `generic`, the console skips
     #   # ThunderID-specific bootstrap calls (flow metadata, branding preferences)
@@ -258,6 +248,11 @@ configuration:
         certFile: "config/certs/ecdsa-signing.cert"
         keyFile: "config/certs/ecdsa-signing.key"
 
+  # Attribute cache configuration
+  attributeCache:
+    encryption:
+      enabled: false
+
   # Database configuration
   database:
     config:
@@ -281,7 +276,7 @@ configuration:
         max_retry_backoff_ms: 2000
       sqlite:
         path: "database/configdb.db"
-        options: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
         max_open_conns: 500
         max_idle_conns: 100
         conn_max_lifetime: 3600
@@ -310,7 +305,7 @@ configuration:
         max_retry_backoff_ms: 2000
       sqlite:
         path: "database/runtime_transient.db"
-        options: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
         max_open_conns: 500
         max_idle_conns: 100
         conn_max_lifetime: 3600
@@ -347,7 +342,7 @@ configuration:
         max_retry_backoff_ms: 2000
       sqlite:
         path: "database/entitydb.db"
-        options: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
         max_open_conns: 500
         max_idle_conns: 100
         conn_max_lifetime: 3600
@@ -376,7 +371,7 @@ configuration:
         max_retry_backoff_ms: 2000
       sqlite:
         path: "database/runtime_persistent.db"
-        options: "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)"
+        options: "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
         max_open_conns: 500
         max_idle_conns: 100
         conn_max_lifetime: 3600
@@ -410,25 +405,49 @@ configuration:
   # OAuth configuration
   oauth:
     refreshToken:
-      renewOnGrant: false
+      renewOnGrant: true
       revokePreviousOnRenew: true
       validityPeriod: 86400
     authorizationCode:
       validityPeriod: 600
+    authorizationRequest:
+      validityPeriod: 3600
     dcr:
+      enabled: true
       insecure: false
+    # Report an authentication flow failure that maps to the OAuth server_error code to the client.
+    sendServerErrorsToClient: false
+    # Client token endpoint auth methods allowed during registration.
+    allowedAuthMethods:
+      - "client_secret_basic"
+      - "client_secret_post"
+      - "private_key_jwt"
+      - "none"
+    # OAuth response types allowed during client registration.
+    allowedResponseTypes:
+      - "code"
+    # OAuth grant types allowed during client registration.
+    allowedGrantTypes:
+      - "client_credentials"
+      - "authorization_code"
+      - "refresh_token"
+      - "urn:ietf:params:oauth:grant-type:token-exchange"
+      - "urn:openid:params:grant-type:ciba"
+      - "urn:ietf:params:oauth:grant-type:jwt-bearer"
 
   # Flow configuration
   flow:
-    defaultAuthFlowHandle: "default-flow"
     maxVersionHistory: 3
-    autoInferRegistration: true
+    autoInferRegistration: false
     # Optional whitelist of built-in executor names to register at startup.
     # Leave empty to register all built-in executors.
     executors: []
     # Optional whitelist of built-in interceptor names to register at startup.
     # Leave empty to register all built-in interceptors.
     interceptors: []
+    # Storage mode for flows: "mutable", "declarative", or "composite".
+    # Leave empty to inherit the global declarativeResources.enabled setting.
+    store: ""
 
   # Passkey configuration
   passkey:
@@ -463,6 +482,9 @@ configuration:
     # Trusted issuer anchors (root CAs) used to validate credential issuer chains.
     # Each entry: { name, certFile }.
     trustedAnchors: []
+    # Storage mode for presentation definitions: "mutable", "declarative", or "composite".
+    # Leave empty to inherit the global declarativeResources.enabled setting.
+    store: ""
 
   # OpenID4VCI (verifiable credential issuance / issuer) configuration.
   # Leave signingKeyId empty to keep the issuer engine disabled.
@@ -475,6 +497,77 @@ configuration:
     batchSize: 5
     # Require the credential_configuration_id scope on the issuance token.
     enforceScope: false
+    # Storage mode for credential configurations: "mutable", "declarative", or "composite".
+    # Leave empty to inherit the global declarativeResources.enabled setting.
+    store: ""
+
+  # SMTP server used to deliver emails (email OTP, magic link, verification).
+  # Leave host empty to omit the section, in which case no email can be sent.
+  # port and fromAddress are required once host is set. enableStartTls and
+  # enableAuthentication both default to true when omitted.
+  email:
+    smtp:
+      host: ""
+      port: 587
+      fromAddress: ""
+      username: ""
+      enableStartTls: true
+      enableAuthentication: true
+      # Inline SMTP password. Stored in the "<release>-db-credentials" Secret and
+      # injected as the SMTP_PASSWORD environment variable.
+      password: ""
+      # Source the SMTP password from an existing Kubernetes Secret. When both
+      # name and key are set, it takes precedence over the inline password above.
+      passwordRef:
+        name: ""
+        key: ""
+
+  # Logging configuration. Logs go to the console (stdout) so a log collector can pick
+  # them up from the pod, which is the expected setup on Kubernetes. Everything below
+  # console output is optional; omitted keys keep the server defaults.
+  log:
+    level: "info"
+    output:
+      console:
+        enabled: true
+      # format sets the log line format for every output, including the console, so
+      # set it to "json" on its own to emit JSON to stdout for a log collector.
+      # file:
+      #   format: "json"
+      # The remaining file settings turn on file output. The container root filesystem
+      # is read-only by default (deployment.securityContext.readOnlyRootFilesystem), so
+      # point path at /tmp, which the chart mounts as an emptyDir, or at another
+      # writable mount. Prefer console output.
+      # file:
+      #   enabled: true
+      #   path: "logs"
+      #   fileName: "thunderid.log"
+      #   format: "text"
+      #   rotation:
+      #     size:
+      #       enabled: false
+      #       maxSizeMb: 10
+      #     time:
+      #       enabled: true
+      #       intervalDays: 1
+      #     maxBackups: 20
+      #     maxAgeDays: 0
+      #     compress: false
+    # Optional. Extra path prefixes served without an access log line.
+    # access:
+    #   excludePaths:
+    #     - /health
+
+  # Storage mode per resource type: "mutable", "declarative", or "composite".
+  # Only set these when declarativeResources.enabled=true and the resource should be
+  # sourced from mounted files. An unset key inherits the global setting.
+  # Example:
+  # stores:
+  #   application: composite
+  #   identity_provider: declarative
+  # Supported keys: user, group, role, theme, layout, translation, agent, user_type,
+  # organization_unit, identity_provider, application, server_config, resource.
+  stores: {}
 
 
 # Persistence configuration for SQLite databases
@@ -597,13 +690,31 @@ setup:
   ttlSecondsAfterFinished: 86400  # 24 hours
   # Enable debug mode for setup
   debug: false
-  # Default admin user credentials seeded by the setup job.
-  # WARNING: Replace the default password before deploying to any non-development environment.
+  # Admin user credentials seeded by the setup job (only when setup.enabled=true).
+  #
+  # Password resolution order (highest precedence first):
+  #   1. passwordRef  - sourced from an existing Kubernetes Secret
+  #   2. password     - the inline value below
+  #   3. generated    - a random password is stored in the "<release>-admin-credentials"
+  #                     Secret. Retrieve it with the command printed after installation.
+  # Username resolution: usernameRef if set, otherwise the inline username below.
+  # No default password is shipped: leaving everything unset generates one securely.
   admin:
     username: "admin"
-    password: "admin"
-    # Optional: source the admin password from an existing Kubernetes Secret.
-    # When `passwordRef.name` is set, it takes precedence over the plain `password` above.
+    # Source the admin username from an existing Kubernetes Secret. When
+    # usernameRef.name and usernameRef.key are both set, it takes precedence over
+    # the inline username above. name and key must be set together.
+    usernameRef:
+      name: ""
+      key: ""
+    # Inline admin password. Leave empty to generate a random one.
+    # Ignored when passwordRef is set.
+    password: ""
+    # Source the admin password from an existing Kubernetes Secret. When
+    # passwordRef.name and passwordRef.key are both set, it takes precedence over
+    # the inline password above and over generation. name and key must be set
+    # together. Point usernameRef and passwordRef at the same Secret name with
+    # different keys to source both credentials from one Secret.
     passwordRef:
       name: ""
       key: ""

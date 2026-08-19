@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -352,4 +337,24 @@ func (suite *CompositeRoleStoreTestSuite) TestGetRoleAssignments_FileAssignments
 
 	suite.Error(err)
 	suite.Equal(testErr, err)
+}
+
+// Only database-backed role permissions are prunable, so both cascade hooks must bypass the file
+// store entirely rather than consulting or mutating declarative roles.
+func (suite *CompositeRoleStoreTestSuite) TestCascadeHooks_UseDatabaseStoreOnly() {
+	referenced := []ResourcePermissions{{ResourceServerID: "rs1", Permissions: []string{"read"}}}
+	suite.mockDBStore.On("GetReferencedPermissions", mock.Anything).Return(referenced, nil)
+	suite.mockDBStore.On("DeleteRolePermission", mock.Anything, "rs1", "read").Return(int64(2), nil)
+
+	result, err := suite.store.GetReferencedPermissions(context.Background())
+	suite.NoError(err)
+	suite.Equal(referenced, result)
+
+	deleted, err := suite.store.DeleteRolePermission(context.Background(), "rs1", "read")
+	suite.NoError(err)
+	suite.Equal(int64(2), deleted)
+
+	suite.mockFileStore.AssertNotCalled(suite.T(), "GetReferencedPermissions", mock.Anything)
+	suite.mockFileStore.AssertNotCalled(suite.T(), "DeleteRolePermission",
+		mock.Anything, mock.Anything, mock.Anything)
 }

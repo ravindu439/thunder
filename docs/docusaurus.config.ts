@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type * as Preset from '@docusaurus/preset-classic';
 import type {Config} from '@docusaurus/types';
@@ -82,6 +67,7 @@ const config: Config = {
   onBrokenLinks: 'throw',
 
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: 'throw',
     },
@@ -98,6 +84,8 @@ const config: Config = {
       return result;
     },
   },
+
+  themes: ['@docusaurus/theme-mermaid'],
 
   // Internationalization (i18n) configuration.
   // See: https://docusaurus.io/docs/i18n/introduction
@@ -117,6 +105,19 @@ const config: Config = {
   clientModules: [require.resolve('./src/clientModules/tabTocSync.js')],
 
   headTags: [
+    {
+      tagName: 'script',
+      attributes: {},
+      // Reads the same "theme" localStorage key as Docusaurus' own no-flash script, but
+      // stamps the attribute the MUI/Oxygen-UI theme reads (colorSchemeSelector:
+      // "data-color-scheme"). Without this, a hard refresh paints MUI-styled surfaces with
+      // their light-scheme fallback for one frame before OxygenUIThemeProvider mounts and
+      // syncs to the already-correct Docusaurus theme. Docusaurus' stored value can be the
+      // literal string "system" (its tri-state toggle), which must resolve through
+      // prefers-color-scheme here rather than being stamped as-is, since Oxygen-UI's CSS
+      // only defines variables for "dark"/"light".
+      innerHTML: `(function(){try{var t=new URLSearchParams(window.location.search).get("docusaurus-theme")||window.localStorage.getItem("theme");var dark=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.setAttribute("data-color-scheme",dark?"dark":"light");}catch(e){}})();`,
+    },
     {
       tagName: 'link',
       attributes: {
@@ -178,11 +179,26 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
           // Edit URL for the "edit this page" feature.
           editUrl: productConfig.project.source.github.editUrls.content,
           // Versioning.
-          lastVersion: 'current',
+          lastVersion: 'v1.0.x',
           versions: {
             current: {
               label: 'Next',
               path: 'next',
+              // The current docs are the future/upcoming version, not an archive.
+              banner: 'unreleased',
+              // No "Version: Next" pill at the top of every doc page.
+              badge: false,
+            },
+            'v1.0.x': {
+              label: 'v1.0.x',
+              // Explicit URL segment so the stable release lives at /docs/v1.0.x/
+              // instead of the bare doc root. The version tracks the 1.0 minor line
+              // (1.0.0, 1.0.1, ...), so patch releases reuse these docs.
+              path: 'v1.0.x',
+              // Current stable release: not archived, so no "unmaintained" banner.
+              banner: 'none',
+              // No "Version: v1.0.x" pill at the top of every doc page.
+              badge: false,
             },
           },
           // Replace {{ProductName}}, {{productSlug}}, and local-URL placeholders inside code blocks at build time.

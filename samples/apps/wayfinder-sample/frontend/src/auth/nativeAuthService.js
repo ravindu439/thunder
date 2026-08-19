@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import { SCOPES } from "./config.js";
 
@@ -50,6 +35,9 @@ export async function initiateFlow(flowType) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    // The SSO session handle rides a cookie the server sets during sign-in. Credentials must be
+    // included for the browser to store it here and send it back on later flow calls.
+    credentials: "include",
   });
   if (!res.ok) throw new Error(`Flow initiation failed: ${res.status}`);
   return res.json();
@@ -65,9 +53,42 @@ export async function submitFlowStep({ executionId, action, inputs, challengeTok
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    credentials: "include",
   });
   if (!res.ok) throw new Error(`Flow step failed: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Ends the SSO session by running the application's sign-out flow natively, the same way
+ * authentication is driven. The default sign-out flow asks the user to confirm, which is submitted
+ * straight away since choosing sign out in the app is itself the confirmation.
+ *
+ * Throws unless the flow reports COMPLETE, so a caller is never told the session ended when it may
+ * still be alive server-side.
+ */
+export async function signOutNatively() {
+  let step = await initiateFlow("SIGNOUT");
+
+  for (let i = 0; i < 5 && step?.flowStatus !== "COMPLETE"; i++) {
+    const actions = step?.data?.actions ?? [];
+    if (actions.length === 0 || !step?.executionId) break;
+
+    // A step offering a choice cannot be answered without knowing what each option means, so only
+    // an unambiguous single action is submitted rather than guessing by list position.
+    if (actions.length > 1) {
+      throw new Error(
+        `Sign-out flow returned ${actions.length} actions (${actions.map((a) => a.ref).join(", ")}); ` +
+          "this sample only drives a single-action confirmation."
+      );
+    }
+
+    step = await submitFlowStep({ executionId: step.executionId, action: actions[0].ref });
+  }
+
+  if (step?.flowStatus !== "COMPLETE") {
+    throw new Error(`Sign-out flow did not complete (flowStatus: ${step?.flowStatus ?? "unknown"}).`);
+  }
 }
 
 export async function exchangeAssertion(assertion) {

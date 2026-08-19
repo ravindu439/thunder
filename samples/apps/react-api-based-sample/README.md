@@ -191,6 +191,3 @@ The built files will be in the `dist` directory.
 ## License
 
 Licensed under the Apache License, Version 2.0. You may not use this file except in compliance with the License.
-
----------------------------------------------------------------------------
-(c) Copyright 2026 WSO2 LLC.

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -28,6 +13,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/flow/core"
 	"github.com/thunder-id/thunderid/internal/flow/session"
 	"github.com/thunder-id/thunderid/internal/system/log"
+	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
@@ -123,6 +109,14 @@ func (e *sessionExecutor) saveCheckpoint(ctx *providers.NodeContext, execResp *p
 		return nil
 	}
 
+	// Mint (or reuse) this execution's token family id and publish it so the auth-assertion node
+	// stamps it onto the grant's tokens. Set it before the idempotency return so a re-executed join
+	// still carries it.
+	tokenFamilyID := e.resolveTokenFamilyID(ctx, logger)
+	if tokenFamilyID != "" {
+		execResp.RuntimeData[common.RuntimeKeyTokenFamilyID] = tokenFamilyID
+	}
+
 	// Idempotency: if this checkpoint was already saved in this flow execution, re-emit its handle
 	// instead of saving again.
 	savedKey := common.SSOCheckpointKey(common.RuntimeKeySSOSessionSaved, checkpoint)
@@ -164,6 +158,7 @@ func (e *sessionExecutor) saveCheckpoint(ctx *providers.NodeContext, execResp *p
 		RuntimeData:    sanitizeSnapshotRuntimeData(ctx.RuntimeData),
 		CompletedSteps: buildCompletedSteps(ctx.ExecutionHistory),
 		AppID:          ctx.Application.ID,
+		TokenFamilyID:  tokenFamilyID,
 	})
 	if err != nil {
 		return err
@@ -187,6 +182,22 @@ func (e *sessionExecutor) saveCheckpoint(ctx *providers.NodeContext, execResp *p
 	return nil
 }
 
+// resolveTokenFamilyID returns the token family id for this flow execution: the one an earlier
+// Session node already minted (kept stable across a flow's checkpoints), or a freshly minted UUIDv7.
+// A mint failure degrades gracefully — the grant's tokens simply carry no tfid.
+func (e *sessionExecutor) resolveTokenFamilyID(ctx *providers.NodeContext, logger *log.Logger) string {
+	if existing := ctx.RuntimeData[common.RuntimeKeyTokenFamilyID]; existing != "" {
+		return existing
+	}
+	tokenFamilyID, err := sysutils.GenerateUUIDv7()
+	if err != nil {
+		logger.Warn(ctx.Context, "Failed to mint token family id; grant tokens will carry no tfid",
+			log.Error(err))
+		return ""
+	}
+	return tokenFamilyID
+}
+
 // setHandleOut records a minted session handle on the response's EngineData channel — engine-only
 // output that the flow engine lifts onto the flow step for the transport layer to set the per-flow
 // cookie. EngineData is never returned to the client, so the handle does not leak into the response,
@@ -198,6 +209,18 @@ func setHandleOut(execResp *providers.ExecutorResponse, handle string) {
 	execResp.EngineData[common.RuntimeKeySSOSessionHandle] = handle
 }
 
+// readForwardedSSOData returns the session and checkpoint context the paired SSO-Check node read and
+// forwarded, or nils when this node was not reached directly from it. The service re-reads whatever it
+// is not given, so a missing or partial handover costs a query rather than correctness.
+func readForwardedSSOData(ctx *providers.NodeContext) (*session.Session, *session.SessionContext) {
+	if ctx.ForwardedData == nil {
+		return nil, nil
+	}
+	forwardedSession, _ := ctx.ForwardedData[common.ForwardedDataKeySSOSession].(*session.Session)
+	forwardedContext, _ := ctx.ForwardedData[common.ForwardedDataKeySSOSessionContext].(*session.SessionContext)
+	return forwardedSession, forwardedContext
+}
+
 // loadCheckpoint loads a checkpoint's saved flow state into the execution context so downstream
 // nodes continue with the authenticated subject and claims. The SSO session service fetches the
 // session and its checkpoint context (and refreshes the session's activity); this executor
@@ -205,7 +228,18 @@ func setHandleOut(execResp *providers.ExecutorResponse, handle string) {
 func (e *sessionExecutor) loadCheckpoint(ctx *providers.NodeContext, execResp *providers.ExecutorResponse,
 	checkpoint string, logger *log.Logger) error {
 	handle := ctx.RuntimeData[common.RuntimeKeySSOSessionHandle]
-	sess, sc, err := e.sso.LoadCheckpoint(ctx.Context, handle, checkpoint, ctx.Application.ID)
+	// An SSO reuse still issues a fresh grant, so mint a new token family id and record it against the
+	// joining participant. It is published onto RuntimeData after the snapshot replay below.
+	tokenFamilyID := e.resolveTokenFamilyID(ctx, logger)
+	forwardedSession, forwardedContext := readForwardedSSOData(ctx)
+	ssoSession, snapshot, err := e.sso.LoadCheckpoint(ctx.Context, session.LoadCheckpointInput{
+		Handle:        handle,
+		Checkpoint:    checkpoint,
+		AppID:         ctx.Application.ID,
+		TokenFamilyID: tokenFamilyID,
+		Session:       forwardedSession,
+		Context:       forwardedContext,
+	})
 	if err != nil {
 		return err
 	}
@@ -213,20 +247,26 @@ func (e *sessionExecutor) loadCheckpoint(ctx *providers.NodeContext, execResp *p
 	// Rehydrate the AuthUser from the snapshot verbatim — it was stored as-is — so downstream nodes
 	// continue with the same subject and attributes this session resolved when the checkpoint was saved.
 	var authUser providers.AuthUser
-	if err := json.Unmarshal(sc.AuthUser, &authUser); err != nil {
+	if err := json.Unmarshal(snapshot.AuthUser, &authUser); err != nil {
 		return fmt.Errorf("failed to rehydrate subject reference from snapshot: %w", err)
 	}
 	execResp.AuthUser = authUser
 
 	// Replay the snapshotted RuntimeData (the effective attribute set captured at save) so downstream
 	// nodes see the same attributes the fresh path produced.
-	for k, v := range sc.RuntimeData {
+	for k, v := range snapshot.RuntimeData {
 		execResp.RuntimeData[k] = v
 	}
 	// auth_time comes from the lean session, not the context. Set it after the RuntimeData replay so
 	// the live, session-derived value wins over any stale snapshot copy.
-	if !sess.AuthenticatedAt.IsZero() {
-		execResp.RuntimeData[common.RuntimeKeyAuthTime] = strconv.FormatInt(sess.AuthenticatedAt.Unix(), 10)
+	if !ssoSession.AuthenticatedAt.IsZero() {
+		execResp.RuntimeData[common.RuntimeKeyAuthTime] =
+			strconv.FormatInt(ssoSession.AuthenticatedAt.Unix(), 10)
+	}
+	// Publish the freshly minted token family id after the snapshot replay so it is never shadowed by
+	// a stale copy (the tfid is excluded from the snapshot, so this is the only source).
+	if tokenFamilyID != "" {
+		execResp.RuntimeData[common.RuntimeKeyTokenFamilyID] = tokenFamilyID
 	}
 
 	logger.Debug(ctx.Context, "Loaded SSO checkpoint",
@@ -243,11 +283,14 @@ func (e *sessionExecutor) loadCheckpoint(ctx *providers.NodeContext, execResp *p
 // classification is implemented.
 var requestScopedSnapshotDenyList = map[string]struct{}{
 	common.RuntimeKeyRequestedPermissions:        {},
+	common.RuntimeKeyResourceServerIdentifier:    {},
 	common.RuntimeKeyRequiredEssentialAttributes: {},
 	common.RuntimeKeyRequiredOptionalAttributes:  {},
 	common.RuntimeKeyRequiredLocales:             {},
 	common.RuntimeKeyClientID:                    {},
 	common.RuntimeKeyAuthorizationRequestID:      {},
+	// The token family id is minted fresh per flow execution, so it must not ride a reused snapshot.
+	common.RuntimeKeyTokenFamilyID: {},
 	// applicationId has no shared constant (set as a raw literal in enrichRuntimeData).
 	"applicationId": {},
 }

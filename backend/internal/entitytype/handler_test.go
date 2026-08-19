@@ -70,7 +70,7 @@ func (s *InlineStubEntityTypeService) GetEntityTypeList(
 }
 
 func (s *InlineStubEntityTypeService) GetAttributes(
-	ctx context.Context, cat TypeCategory, id string, f1, f2, f3 bool,
+	ctx context.Context, cat TypeCategory, id string, filter AttributeFilter,
 ) ([]AttributeInfo, *tidcommon.ServiceError) {
 	return []AttributeInfo{}, nil
 }
@@ -110,6 +110,12 @@ func (s *InlineStubEntityTypeService) ValidateEntityUniqueness(
 	eval func(map[string]interface{}) (bool, error),
 ) (bool, *tidcommon.ServiceError) {
 	return true, nil
+}
+
+func (s *InlineStubEntityTypeService) GetEntityTypeSchema(
+	ctx context.Context, cat TypeCategory, name string,
+) (*EntityType, *tidcommon.ServiceError) {
+	return &EntityType{Name: name, Category: cat}, nil
 }
 
 // --- POST ENDPOINT TESTS ---

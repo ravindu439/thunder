@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, IconButton, Tooltip, Typography} from '@wso2/oxygen-ui';
 import {CrossIcon} from '@wso2/oxygen-ui-icons-react';
@@ -22,9 +7,9 @@ import {Handle, Position, useNodeId, useReactFlow} from '@xyflow/react';
 import {memo, useCallback, useMemo, useRef, type DragEvent, type ReactElement} from 'react';
 import {useTranslation} from 'react-i18next';
 import type {CommonStepFactoryPropsInterface} from '../CommonStepFactory';
+import {executionSurfaceMixin, nodeShadowMixin} from '../flowNodeStyles';
 import useInteractionState from '@/features/flows/hooks/useInteractionState';
 import type {Resource} from '@/features/flows/models/resources';
-import './Rule.scss';
 
 /**
  * Props interface of {@link Rule}
@@ -69,15 +54,31 @@ function Rule({data, id}: RulePropsInterface): ReactElement {
   );
 
   return (
-    <div ref={ref} className="flow-builder-rule" onDrop={handleDrop} onDrag={handleDragOver}>
+    <Box
+      ref={ref}
+      data-flow-node-surface
+      data-testid="rule-node"
+      onDrop={handleDrop}
+      onDrag={handleDragOver}
+      sx={[
+        executionSurfaceMixin,
+        nodeShadowMixin,
+        {
+          border: '1px solid',
+          borderColor: 'rgba(var(--oxygen-palette-primary-mainChannel) / 0.45)',
+          borderRadius: 1,
+        },
+      ]}
+    >
       <Handle type="target" position={Position.Left} />
       <Box
         display="flex"
         justifyContent="space-between"
-        className="flow-builder-rule-action-panel"
+        data-testid="rule-action-panel"
+        sx={{p: 2.5}}
         onClick={() => setLastInteractedResource(ruleStep)}
       >
-        <Typography variant="body2" className="flow-builder-rule-id">
+        <Typography variant="body2" sx={{color: 'primary.main'}}>
           {t('flows:core.rule.conditionalRule')}
         </Typography>
         <Tooltip title={t('flows:core.rule.remove')}>
@@ -89,14 +90,21 @@ function Rule({data, id}: RulePropsInterface): ReactElement {
                 deleteElements({nodes: [{id: nodeId}]});
               }
             }}
-            className="flow-builder-rule-remove-button"
+            sx={{
+              border: '2px solid',
+              borderColor: 'grey.500',
+              color: 'grey.500',
+              ml: 2.5,
+              p: '2px',
+              '&:hover': {borderColor: 'text.primary', color: 'text.primary'},
+            }}
           >
             <CrossIcon />
           </IconButton>
         </Tooltip>
       </Box>
       <Handle type="source" position={Position.Right} id="a" />
-    </div>
+    </Box>
   );
 }
 

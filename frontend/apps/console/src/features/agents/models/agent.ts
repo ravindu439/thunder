@@ -1,24 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import type {OAuth2Config} from '../../applications/models/oauth';
-import type {AssertionConfig} from '../../applications/models/token';
-
+import type {AssertionConfig, OAuth2Config} from '@thunderid/configure-applications';
 /**
  * Agent types are restricted to a single bootstrap-provisioned `default` schema. The constant
  * is shared by the create wizard (auto-pick the singleton) and the agent listing's Schema button.
@@ -43,6 +26,7 @@ export interface Agent {
   type: string;
   name: string;
   description?: string;
+  logoUrl?: string;
   owner?: string;
   clientId?: string;
   attributes?: Record<string, unknown>;
@@ -53,8 +37,6 @@ export interface Agent {
   authFlowId?: string;
   registrationFlowId?: string;
   isRegistrationFlowEnabled?: boolean;
-  recoveryFlowId?: string;
-  isRecoveryFlowEnabled?: boolean;
   assertion?: AssertionConfig;
   loginConsent?: AgentLoginConsentConfig;
   isReadOnly?: boolean;
@@ -67,6 +49,7 @@ export interface BasicAgent {
   type: string;
   name: string;
   description?: string;
+  logoUrl?: string;
   clientId?: string;
   isReadOnly?: boolean;
 }
@@ -83,6 +66,7 @@ export interface CreateAgentRequest {
   type: string;
   name: string;
   description?: string;
+  logoUrl?: string;
   owner?: string;
   attributes?: Record<string, unknown>;
   inboundAuthConfig?: AgentInboundAuthConfig[];
@@ -93,6 +77,7 @@ export interface UpdateAgentRequest {
   type?: string;
   name?: string;
   description?: string;
+  logoUrl?: string;
   owner?: string;
   attributes?: Record<string, unknown>;
   allowedUserTypes?: string[];
@@ -100,8 +85,6 @@ export interface UpdateAgentRequest {
   authFlowId?: string;
   registrationFlowId?: string;
   isRegistrationFlowEnabled?: boolean;
-  recoveryFlowId?: string;
-  isRecoveryFlowEnabled?: boolean;
 }
 
 export interface AgentGroup {

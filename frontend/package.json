@@ -3,7 +3,7 @@
   "name": "@thunderid/frontend",
   "version": "0.0.0",
   "description": "Frontend workspace for ⚡️ ThunderID",
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend#readme",
@@ -17,8 +17,7 @@
   "keywords": [
     "thunderid",
     "frontend",
-    "workspace",
-    "wso2"
+    "workspace"
   ],
   "scripts": {
     "build:apps": "turbo run build --filter=./apps/*",
@@ -27,6 +26,7 @@
     "clean:node_modules": "rimraf node_modules",
     "dev": "turbo run dev --filter=./apps/*",
     "test:packages": "turbo run test --filter=./packages/* --concurrency=3",
+    "test:packages:coverage": "turbo run test:coverage --filter=./packages/* --concurrency=3",
     "i18n:extract": "pnpm i18next-cli sync"
   },
   "devDependencies": {

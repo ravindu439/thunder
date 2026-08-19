@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useReactFlow, type Edge, type Node} from '@xyflow/react';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
@@ -92,7 +77,9 @@ export interface FlowSimulation {
    */
   back: () => void;
   /**
-   * Previews a transition's edge on the canvas (null clears the preview).
+   * Previews a transition's edge on the canvas (null clears the preview). While
+   * the camera follows the flow, previewing also brings the transition's target
+   * into view alongside the current step.
    */
   preview: (option: SimulationOption | null) => void;
   /**
@@ -111,6 +98,11 @@ export interface FlowSimulation {
 }
 
 const FOCUS_OPTIONS = {duration: 500, maxZoom: 1.2, padding: 0.3};
+
+// Grace period before the camera zooms back after a hover preview ends, so
+// sweeping across the options list reads as one motion instead of the camera
+// bouncing between every row.
+const PREVIEW_RESTORE_DELAY_MS = 200;
 
 const NO_OPTIONS: SimulationOption[] = [];
 
@@ -148,8 +140,34 @@ function useFlowSimulation(nodes: Node[], edges: Edge[]): FlowSimulation {
 
   const currentNodeId: string | null = isSimulating ? (pathNodeIds[pathNodeIds.length - 1] ?? null) : null;
 
+  // Read through a ref so `preview` stays referentially stable while still
+  // seeing the step that is current at hover time.
+  const currentNodeIdRef = useRef<string | null>(currentNodeId);
+  useEffect(() => {
+    currentNodeIdRef.current = currentNodeId;
+  }, [currentNodeId]);
+
+  const restoreTimerRef = useRef<number | null>(null);
+  const hasActivePreviewRef = useRef<boolean>(false);
+
+  const cancelPendingRestore = useCallback((): void => {
+    if (restoreTimerRef.current !== null) {
+      window.clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => cancelPendingRestore, [cancelPendingRestore]);
+
+  const clearPreview = useCallback((): void => {
+    cancelPendingRestore();
+    hasActivePreviewRef.current = false;
+    setPreviewedOption(null);
+  }, [cancelPendingRestore]);
+
   const focusNode = useCallback(
     (nodeId: string): void => {
+      cancelPendingRestore();
       if (!followCameraRef.current) {
         return;
       }
@@ -157,7 +175,7 @@ function useFlowSimulation(nodes: Node[], edges: Edge[]): FlowSimulation {
         // Ignore fitView errors - focusing is best-effort
       });
     },
-    [fitView],
+    [fitView, cancelPendingRestore],
   );
 
   const start = useCallback((): void => {
@@ -170,9 +188,9 @@ function useFlowSimulation(nodes: Node[], edges: Edge[]): FlowSimulation {
     setIsSimulating(true);
     setPathNodeIds([startNode.id]);
     setPathEdges([]);
-    setPreviewedOption(null);
+    clearPreview();
     focusNode(startNode.id);
-  }, [focusNode]);
+  }, [focusNode, clearPreview]);
 
   const startAt = useCallback(
     (nodeId: string): void => {
@@ -182,20 +200,20 @@ function useFlowSimulation(nodes: Node[], edges: Edge[]): FlowSimulation {
       setIsSimulating(true);
       setPathNodeIds([nodeId]);
       setPathEdges([]);
-      setPreviewedOption(null);
+      clearPreview();
       focusNode(nodeId);
     },
-    [focusNode],
+    [focusNode, clearPreview],
   );
 
   const choose = useCallback(
     (option: SimulationOption): void => {
       setPathNodeIds((prev: string[]) => [...prev, option.targetNodeId]);
       setPathEdges((prev: TraversedEdge[]) => [...prev, {edgeId: option.edgeId, kind: option.kind}]);
-      setPreviewedOption(null);
+      clearPreview();
       focusNode(option.targetNodeId);
     },
-    [focusNode],
+    [focusNode, clearPreview],
   );
 
   const back = useCallback((): void => {
@@ -205,25 +223,62 @@ function useFlowSimulation(nodes: Node[], edges: Edge[]): FlowSimulation {
     const nextPath = pathNodeIds.slice(0, -1);
     setPathNodeIds(nextPath);
     setPathEdges((prev: TraversedEdge[]) => prev.slice(0, -1));
-    setPreviewedOption(null);
+    clearPreview();
     focusNode(nextPath[nextPath.length - 1]);
-  }, [pathNodeIds, focusNode]);
+  }, [pathNodeIds, focusNode, clearPreview]);
 
-  const preview = useCallback((option: SimulationOption | null): void => {
-    setPreviewedOption(option);
-  }, []);
+  const preview = useCallback(
+    (option: SimulationOption | null): void => {
+      setPreviewedOption(option);
+      if (!followCameraRef.current) {
+        hasActivePreviewRef.current = Boolean(option);
+        return;
+      }
+      cancelPendingRestore();
+      const currentId = currentNodeIdRef.current;
+      if (option) {
+        hasActivePreviewRef.current = true;
+        // Bring the hovered option's target into view together with the current
+        // step, so the previewed transition is fully visible.
+        const ids =
+          currentId && currentId !== option.targetNodeId ? [currentId, option.targetNodeId] : [option.targetNodeId];
+        fitView({...FOCUS_OPTIONS, duration: 400, nodes: ids.map((id) => ({id}))}).catch(() => {
+          // Ignore fitView errors - focusing is best-effort
+        });
+      } else if (hasActivePreviewRef.current) {
+        hasActivePreviewRef.current = false;
+        if (!currentId) {
+          return;
+        }
+        // Hover ended - restore the single-step focus after a short grace
+        // period, so moving on to the next option does not bounce the camera.
+        restoreTimerRef.current = window.setTimeout(() => {
+          restoreTimerRef.current = null;
+          // Re-checked at fire time: the user may have switched to the static
+          // view while the restore was pending.
+          if (!followCameraRef.current) {
+            return;
+          }
+          fitView({...FOCUS_OPTIONS, nodes: [{id: currentId}]}).catch(() => {
+            // Ignore fitView errors - focusing is best-effort
+          });
+        }, PREVIEW_RESTORE_DELAY_MS);
+      }
+    },
+    [fitView, cancelPendingRestore],
+  );
 
   const stop = useCallback((): void => {
     setIsSimulating(false);
     setPathNodeIds([]);
     setPathEdges([]);
-    setPreviewedOption(null);
+    clearPreview();
     if (followCameraRef.current) {
       fitView({duration: 500, padding: 0.2}).catch(() => {
         // Ignore fitView errors - focusing is best-effort
       });
     }
-  }, [fitView]);
+  }, [fitView, clearPreview]);
 
   const computedOptions: SimulationOption[] = useMemo(
     () => (currentNodeId ? getSimulationOptions(currentNodeId, nodes, edges) : NO_OPTIONS),

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {ActionTypes} from '../models/actions';
 import {BlockTypes, ElementTypes} from '../models/elements';
@@ -54,6 +39,11 @@ class VisualFlowConstants {
 
   public static readonly FLOW_BUILDER_INCOMPLETE_HANDLE_SUFFIX: string = `_${ActionTypes.Incomplete}`;
 
+  // Rendered size of the circular executor chip in compact (non-verbose) mode.
+  // Must match the dimensions in ExecutionCompact.tsx; used to feed the
+  // auto-layout engine the post-toggle node size before it is measured.
+  public static readonly FLOW_BUILDER_COMPACT_EXECUTION_NODE_SIZE: number = 48;
+
   public static readonly FLOW_BUILDER_CANVAS_ALLOWED_RESOURCE_TYPES: string[] = [
     StepTypes.View,
     StepTypes.Rule,
@@ -74,6 +64,7 @@ class VisualFlowConstants {
     ElementTypes.OtpInput,
     ElementTypes.Checkbox,
     ElementTypes.Dropdown,
+    ElementTypes.Select,
     // Widgets are allowed for drop detection, but handled specially to show dialog
     WidgetTypes.GoogleFederation,
     WidgetTypes.IdentifierPassword,
@@ -83,6 +74,7 @@ class VisualFlowConstants {
     WidgetTypes.EUDIWallet,
     WidgetTypes.PasskeyAuthentication,
     WidgetTypes.Provisioning,
+    WidgetTypes.Consent,
     WidgetTypes.MagicLink,
     WidgetTypes.SelfSignUpLink,
     WidgetTypes.SignInLink,
@@ -93,6 +85,7 @@ class VisualFlowConstants {
   public static readonly FLOW_BUILDER_VIEW_ALLOWED_RESOURCE_TYPES: string[] = [
     BlockTypes.Form,
     ElementTypes.Action,
+    ElementTypes.Resend,
     ElementTypes.Icon,
     ElementTypes.Stack,
     ElementTypes.Text,
@@ -111,6 +104,7 @@ class VisualFlowConstants {
     ElementTypes.OtpInput,
     ElementTypes.Checkbox,
     ElementTypes.Dropdown,
+    ElementTypes.Select,
     WidgetTypes.GoogleFederation,
     WidgetTypes.IdentifierPassword,
     WidgetTypes.SMSOTP,
@@ -144,7 +138,9 @@ class VisualFlowConstants {
     ElementTypes.OtpInput,
     ElementTypes.Checkbox,
     ElementTypes.Dropdown,
+    ElementTypes.Select,
     ElementTypes.Action,
+    ElementTypes.Resend,
     ElementTypes.Icon,
     ElementTypes.Stack,
     ElementTypes.Text,
@@ -158,6 +154,7 @@ class VisualFlowConstants {
 
   public static readonly FLOW_BUILDER_STACK_ALLOWED_RESOURCE_TYPES: string[] = [
     ElementTypes.Action,
+    ElementTypes.Resend,
     ElementTypes.Icon,
     ElementTypes.Stack,
     ElementTypes.Text,

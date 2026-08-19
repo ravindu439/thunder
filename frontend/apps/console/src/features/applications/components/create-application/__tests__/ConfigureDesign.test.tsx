@@ -1,61 +1,38 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
-import {generateIconSuggestions} from '@thunderid/components';
 import {render, screen} from '@thunderid/test-utils';
-import type {ReactNode} from 'react';
 import {describe, it, expect, beforeEach, vi} from 'vitest';
+import {ApplicationCreateFlowSignInApproach} from '../../../models/application-create-flow';
 import ConfigureDesign, {type ConfigureDesignProps} from '../ConfigureDesign';
 
 // Mock the Packages
-vi.mock('@thunderid/components', () => ({
-  generateIconSuggestions: vi.fn(() => null),
-  ResourceAvatar: vi.fn(({value, fallback, onClick}: {value?: string; fallback?: ReactNode; onClick?: () => void}) => (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{display: 'inline-block', background: 'none', border: 'none', padding: 0, cursor: 'pointer'}}
-    >
-      {value ?? fallback}
-    </button>
-  )),
-}));
 vi.mock('@thunderid/design');
 
-const {useGetThemes, useGetTheme} = await import('@thunderid/design');
+vi.mock('@/features/applications/hooks/useApplicationCreateContext', () => ({
+  default: () => ({
+    ouDefaults: {signIn: false, signUp: false, recovery: false, signOut: false, theme: false, layout: false},
+    selectedTemplateConfig: null,
+  }),
+}));
+
+const {useGetThemes, useGetTheme, useGetLayouts, useGetLayout} = await import('@thunderid/design');
 
 describe('ConfigureDesign', () => {
-  const mockOnLogoSelect = vi.fn();
   const mockOnThemeSelect = vi.fn();
-
-  const mockIconSuggestions = ['🐼', '🦊', '🐬', '🦁'];
+  const mockOnLayoutSelect = vi.fn();
 
   const defaultProps: ConfigureDesignProps = {
-    appLogo: null,
-    selectedTheme: null,
-    onLogoSelect: mockOnLogoSelect,
     onThemeSelect: mockOnThemeSelect,
+    onLayoutSelect: mockOnLayoutSelect,
+    selectedApproach: ApplicationCreateFlowSignInApproach.REDIRECT_BASED,
+    onApproachChange: vi.fn(),
+    showApproachSection: false,
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(generateIconSuggestions).mockReturnValue(mockIconSuggestions);
 
     vi.mocked(useGetThemes).mockReturnValue({
       data: undefined,
@@ -68,6 +45,18 @@ describe('ConfigureDesign', () => {
       isLoading: false,
       error: null,
     } as ReturnType<typeof useGetTheme>);
+
+    vi.mocked(useGetLayouts).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useGetLayouts>);
+
+    vi.mocked(useGetLayout).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useGetLayout>);
   });
 
   const renderComponent = (props: Partial<ConfigureDesignProps> = {}) =>
@@ -85,92 +74,6 @@ describe('ConfigureDesign', () => {
     expect(screen.getByText('Customize the appearance of your application')).toBeInTheDocument();
   });
 
-  it('should render logo section title', () => {
-    renderComponent();
-
-    expect(screen.getByRole('heading', {name: 'Application Logo'})).toBeInTheDocument();
-  });
-
-  it('should render shuffle button', () => {
-    renderComponent();
-
-    expect(screen.getByRole('button', {name: 'Shuffle'})).toBeInTheDocument();
-  });
-
-  it('should auto-select first emoji when appLogo is null', () => {
-    renderComponent();
-
-    expect(mockOnLogoSelect).toHaveBeenCalledWith(`emoji:${mockIconSuggestions[0]}`);
-  });
-
-  it('should not auto-select when appLogo is already set', () => {
-    renderComponent({appLogo: 'emoji:🐼'});
-
-    expect(mockOnLogoSelect).not.toHaveBeenCalled();
-  });
-
-  it('should render all emoji suggestions', () => {
-    renderComponent();
-
-    mockIconSuggestions.forEach((emoji) => {
-      expect(screen.getByText(emoji)).toBeInTheDocument();
-    });
-  });
-
-  it('should call onLogoSelect when clicking an emoji', async () => {
-    const user = userEvent.setup();
-    renderComponent();
-
-    await user.click(screen.getByText(mockIconSuggestions[0]));
-
-    expect(mockOnLogoSelect).toHaveBeenCalledWith(`emoji:${mockIconSuggestions[0]}`);
-  });
-
-  it('should regenerate icons when shuffle button is clicked', async () => {
-    const user = userEvent.setup();
-    const newIcons = ['🚀', '💡'];
-
-    vi.mocked(generateIconSuggestions).mockReturnValueOnce(mockIconSuggestions).mockReturnValueOnce(newIcons);
-
-    renderComponent();
-
-    const shuffleButton = screen.getByRole('button', {name: 'Shuffle'});
-    await user.click(shuffleButton);
-
-    expect(generateIconSuggestions).toHaveBeenCalledTimes(2);
-  });
-
-  it('should generate icons with correct count', () => {
-    renderComponent();
-
-    expect(generateIconSuggestions).toHaveBeenCalledWith(8);
-  });
-
-  it('should render a "+" button to open the full picker', () => {
-    renderComponent();
-
-    // The "+" button is an avatar rendered after the suggestions; it contains a Plus/lucide-plus SVG icon
-    expect(document.querySelector('.lucide-plus')).toBeInTheDocument();
-  });
-
-  it('should handle null appLogo prop without errors', () => {
-    renderComponent({appLogo: null});
-
-    expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument();
-  });
-
-  it('should handle rapid emoji clicks', async () => {
-    const user = userEvent.setup();
-    renderComponent();
-
-    await user.click(screen.getByText(mockIconSuggestions[0]));
-    await user.click(screen.getByText(mockIconSuggestions[1]));
-
-    expect(mockOnLogoSelect).toHaveBeenCalledTimes(3); // initial auto-select + 2 clicks
-    expect(mockOnLogoSelect).toHaveBeenCalledWith(`emoji:${mockIconSuggestions[0]}`);
-    expect(mockOnLogoSelect).toHaveBeenCalledWith(`emoji:${mockIconSuggestions[1]}`);
-  });
-
   describe('onReadyChange callback', () => {
     it('should call onReadyChange with true on mount', () => {
       const mockOnReadyChange = vi.fn();
@@ -180,32 +83,44 @@ describe('ConfigureDesign', () => {
     });
   });
 
-  describe('Custom logo (isCustomLogo)', () => {
-    it('should show a larger custom avatar when appLogo is a URL (not in suggestions)', () => {
-      renderComponent({appLogo: 'https://example.com/custom-logo.png'});
+  describe('Sign-In Approach', () => {
+    it('renders both approach options and reflects the selected one', () => {
+      renderComponent({
+        showApproachSection: true,
+        selectedApproach: ApplicationCreateFlowSignInApproach.EMBEDDED,
+      });
 
-      // When isCustomLogo=true, a large avatar is displayed — just verify no crash and heading exists
-      expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument();
+      expect(screen.getByText('Sign-In Approach')).toBeInTheDocument();
+      expect(screen.getByText(/Redirect to .* Gate/)).toBeInTheDocument();
+      expect(screen.getByText('Bring Your Own UI')).toBeInTheDocument();
+      expect(screen.getAllByRole('radio')[1]).toBeChecked();
     });
 
-    it('should treat an emoji not in suggestions as a custom logo', () => {
-      // '🐉' is not in mockIconSuggestions
-      renderComponent({appLogo: 'emoji:🐉'});
+    it('calls onApproachChange when a different card is clicked', async () => {
+      const onApproachChange = vi.fn();
+      const user = userEvent.setup();
 
-      expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument();
+      renderComponent({
+        showApproachSection: true,
+        selectedApproach: ApplicationCreateFlowSignInApproach.REDIRECT_BASED,
+        onApproachChange,
+      });
+
+      await user.click(screen.getAllByRole('radio')[1]);
+
+      expect(onApproachChange).toHaveBeenCalledWith(ApplicationCreateFlowSignInApproach.EMBEDDED);
     });
 
-    it('should treat an emoji in the suggestions list as a non-custom logo', () => {
-      // '🐼' IS in mockIconSuggestions
-      renderComponent({appLogo: `emoji:${mockIconSuggestions[0]}`});
+    it('hides the embedded option when allowEmbeddedApproach is false', () => {
+      renderComponent({
+        showApproachSection: true,
+        allowEmbeddedApproach: false,
+        selectedApproach: ApplicationCreateFlowSignInApproach.REDIRECT_BASED,
+      });
 
-      expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument();
-    });
-
-    it('should not auto-select logo when appLogo is already a URL', () => {
-      renderComponent({appLogo: 'https://example.com/logo.png'});
-
-      expect(mockOnLogoSelect).not.toHaveBeenCalled();
+      expect(screen.getByText(/Redirect to .* Gate/)).toBeInTheDocument();
+      expect(screen.queryByText('Bring Your Own UI')).not.toBeInTheDocument();
+      expect(screen.getAllByRole('radio')).toHaveLength(1);
     });
   });
 
@@ -322,6 +237,112 @@ describe('ConfigureDesign', () => {
       await user.click(secondThemeCard);
 
       expect(mockOnThemeSelectLocal).toHaveBeenCalledWith('theme-1', mockThemeDetails.theme);
+    });
+  });
+
+  describe('Layout selection', () => {
+    const mockLayoutDetails = {
+      id: 'layout-1',
+      displayName: 'Split Screen',
+      layout: {screens: {}},
+    };
+
+    const mockLayoutsList = [
+      {id: 'layout-1', displayName: 'Split Screen'},
+      {id: 'layout-2', displayName: 'Centered Card'},
+    ];
+
+    it('should call onLayoutSelect with layout details when layout is loaded, even though the picker UI is hidden', () => {
+      vi.mocked(useGetLayouts).mockReturnValue({
+        data: {layouts: mockLayoutsList},
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayouts>);
+
+      vi.mocked(useGetLayout).mockReturnValue({
+        data: mockLayoutDetails,
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayout>);
+
+      renderComponent();
+
+      expect(mockOnLayoutSelect).toHaveBeenCalledWith('layout-1', mockLayoutDetails.layout);
+    });
+
+    it('renders a layout card for each layout when more than one is available', () => {
+      vi.mocked(useGetLayouts).mockReturnValue({
+        data: {layouts: mockLayoutsList},
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayouts>);
+
+      vi.mocked(useGetLayout).mockReturnValue({
+        data: mockLayoutDetails,
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayout>);
+
+      renderComponent();
+
+      expect(screen.getByText('Layout')).toBeInTheDocument();
+      expect(screen.getByTestId('layout-card-layout-1')).toBeInTheDocument();
+      expect(screen.getByTestId('layout-card-layout-2')).toBeInTheDocument();
+    });
+
+    it('does not render the layout section when only one layout is available', () => {
+      vi.mocked(useGetLayouts).mockReturnValue({
+        data: {layouts: [mockLayoutsList[0]]},
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayouts>);
+
+      vi.mocked(useGetLayout).mockReturnValue({
+        data: mockLayoutDetails,
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayout>);
+
+      renderComponent();
+
+      expect(screen.queryByText('Layout')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('layout-card-layout-1')).not.toBeInTheDocument();
+    });
+
+    it('does not render the layout section when no layouts are configured', () => {
+      vi.mocked(useGetLayouts).mockReturnValue({
+        data: {layouts: []},
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayouts>);
+
+      renderComponent();
+
+      expect(screen.queryByText('Layout')).not.toBeInTheDocument();
+    });
+
+    it('selects a different layout when clicking its card', async () => {
+      const user = userEvent.setup();
+      const mockOnLayoutSelectLocal = vi.fn();
+
+      vi.mocked(useGetLayouts).mockReturnValue({
+        data: {layouts: mockLayoutsList},
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayouts>);
+
+      vi.mocked(useGetLayout).mockReturnValue({
+        data: mockLayoutDetails,
+        isLoading: false,
+        error: null,
+      } as unknown as ReturnType<typeof useGetLayout>);
+
+      renderComponent({onLayoutSelect: mockOnLayoutSelectLocal});
+
+      const secondLayoutCard = screen.getByTestId('layout-card-layout-2');
+      await user.click(secondLayoutCard);
+
+      expect(mockOnLayoutSelectLocal).toHaveBeenCalledWith('layout-1', mockLayoutDetails.layout);
     });
   });
 });

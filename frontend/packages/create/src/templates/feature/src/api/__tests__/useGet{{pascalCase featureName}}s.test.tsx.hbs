@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderHook, waitFor} from '@testing-library/react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -24,8 +9,8 @@ import useGet{{pascalCase featureName}}s, {{pascalCase featureName}}sListRespons
 import type Basic{{pascalCase featureName}} from '../../models/{{camelCase featureName}}';
 
 // Mock dependencies
-vi.mock('@asgardeo/react', () => ({
-  useAsgardeo: () => ({
+vi.mock('@thunderid/react', () => ({
+  useThunderID: () => ({
     http: {
       request: vi.fn(),
     },
@@ -84,8 +69,8 @@ describe('useGet{{pascalCase featureName}}s', () => {
   });
 
   it('should fetch {{camelCase featureName}}s successfully', async () => {
-    const {useAsgardeo} = await import('@asgardeo/react');
-    const mockHttp = useAsgardeo().http;
+    const {useThunderID} = await import('@thunderid/react');
+    const mockHttp = useThunderID().http;
 
     (mockHttp.request as jest.Mock).mockResolvedValue({
       data: mockResponse,
@@ -110,8 +95,8 @@ describe('useGet{{pascalCase featureName}}s', () => {
   });
 
   it('should fetch {{camelCase featureName}}s with custom parameters', async () => {
-    const {useAsgardeo} = await import('@asgardeo/react');
-    const mockHttp = useAsgardeo().http;
+    const {useThunderID} = await import('@thunderid/react');
+    const mockHttp = useThunderID().http;
 
     (mockHttp.request as jest.Mock).mockResolvedValue({
       data: mockResponse,
@@ -140,8 +125,8 @@ describe('useGet{{pascalCase featureName}}s', () => {
   });
 
   it('should handle empty search parameter', async () => {
-    const {useAsgardeo} = await import('@asgardeo/react');
-    const mockHttp = useAsgardeo().http;
+    const {useThunderID} = await import('@thunderid/react');
+    const mockHttp = useThunderID().http;
 
     (mockHttp.request as jest.Mock).mockResolvedValue({
       data: mockResponse,
@@ -167,8 +152,8 @@ describe('useGet{{pascalCase featureName}}s', () => {
   });
 
   it('should handle request failure', async () => {
-    const {useAsgardeo} = await import('@asgardeo/react');
-    const mockHttp = useAsgardeo().http;
+    const {useThunderID} = await import('@thunderid/react');
+    const mockHttp = useThunderID().http;
 
     (mockHttp.request as jest.Mock).mockRejectedValue(new Error('Network error'));
 

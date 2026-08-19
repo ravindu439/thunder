@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package layoutmgt provides layout management functionality.
 package layoutmgt
@@ -39,7 +24,7 @@ const loggerComponentName = "LayoutMgtService"
 // LayoutMgtServiceInterface defines the interface for the layout management service.
 type LayoutMgtServiceInterface interface {
 	GetLayoutList(ctx context.Context, limit, offset int) (*LayoutList, *tidcommon.ServiceError)
-	CreateLayout(ctx context.Context, layout CreateLayoutRequest) (*Layout, *tidcommon.ServiceError)
+	CreateLayout(ctx context.Context, layout CreateLayoutRequestWithID) (*Layout, *tidcommon.ServiceError)
 	GetLayout(ctx context.Context, id string) (*Layout, *tidcommon.ServiceError)
 	UpdateLayout(ctx context.Context, id string, layout UpdateLayoutRequest) (*Layout, *tidcommon.ServiceError)
 	DeleteLayout(ctx context.Context, id string) *tidcommon.ServiceError
@@ -97,7 +82,7 @@ func (ls *layoutMgtService) GetLayoutList(
 
 // CreateLayout creates a new layout configuration.
 func (ls *layoutMgtService) CreateLayout(
-	ctx context.Context, layout CreateLayoutRequest) (*Layout, *tidcommon.ServiceError) {
+	ctx context.Context, layout CreateLayoutRequestWithID) (*Layout, *tidcommon.ServiceError) {
 	ls.logger.Debug(ctx, "Creating layout configuration")
 
 	if layout.DisplayName == "" {
@@ -126,13 +111,24 @@ func (ls *layoutMgtService) CreateLayout(
 		return nil, err
 	}
 
-	id, err := utils.GenerateUUIDv7()
-	if err != nil {
-		ls.logger.Error(ctx, "Failed to generate UUID", log.Error(err))
-		return nil, &tidcommon.InternalServerError
+	id := layout.ID
+	if id == "" {
+		var err error
+		id, err = utils.GenerateUUIDv7()
+		if err != nil {
+			ls.logger.Error(ctx, "Failed to generate UUID", log.Error(err))
+			return nil, &tidcommon.InternalServerError
+		}
 	}
 
-	if err := ls.layoutMgtStore.CreateLayout(id, layout); err != nil {
+	storeReq := CreateLayoutRequest{
+		Handle:      layout.Handle,
+		DisplayName: layout.DisplayName,
+		Description: layout.Description,
+		Layout:      layout.Layout,
+	}
+
+	if err := ls.layoutMgtStore.CreateLayout(id, storeReq); err != nil {
 		ls.logger.Error(ctx, "Failed to create layout", log.Error(err))
 		return nil, &tidcommon.InternalServerError
 	}

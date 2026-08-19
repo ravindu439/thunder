@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -43,20 +28,36 @@ type Agent struct {
 
 // InboundAuthConfig represents an inbound authentication configuration entry.
 type InboundAuthConfig struct {
-	Type   string          `json:"type"`
+	Type   string            `json:"type"`
 	Config *OAuthAgentConfig `json:"config,omitempty"`
 }
 
 // OAuthAgentConfig represents the OAuth client configuration for an agent.
 type OAuthAgentConfig struct {
-	ClientID                string   `json:"clientId,omitempty"`
-	ClientSecret            string   `json:"clientSecret,omitempty"`
-	RedirectURIs            []string `json:"redirectUris,omitempty"`
-	GrantTypes              []string `json:"grantTypes,omitempty"`
-	ResponseTypes           []string `json:"responseTypes,omitempty"`
-	TokenEndpointAuthMethod string   `json:"tokenEndpointAuthMethod,omitempty"`
-	PKCERequired            bool     `json:"pkceRequired,omitempty"`
-	PublicClient            bool     `json:"publicClient,omitempty"`
+	ClientID                string            `json:"clientId,omitempty"`
+	ClientSecret            string            `json:"clientSecret,omitempty"`
+	RedirectURIs            []string          `json:"redirectUris,omitempty"`
+	GrantTypes              []string          `json:"grantTypes,omitempty"`
+	ResponseTypes           []string          `json:"responseTypes,omitempty"`
+	TokenEndpointAuthMethod string            `json:"tokenEndpointAuthMethod,omitempty"`
+	PKCERequired            bool              `json:"pkceRequired,omitempty"`
+	PublicClient            bool              `json:"publicClient,omitempty"`
+	Token                   *OAuthTokenConfig `json:"token,omitempty"`
+}
+
+// OAuthTokenConfig represents the OAuth token configuration for an agent's inbound auth config.
+type OAuthTokenConfig struct {
+	AccessToken *AccessTokenConfig `json:"accessToken,omitempty"`
+}
+
+// AccessTokenConfig represents the access token configuration, split by token subject.
+type AccessTokenConfig struct {
+	ClientConfig *AccessTokenSubConfig `json:"clientConfig,omitempty"`
+}
+
+// AccessTokenSubConfig represents the attribute selection for one access token subject type.
+type AccessTokenSubConfig struct {
+	Attributes []string `json:"attributes,omitempty"`
 }
 
 // AgentListResponse represents the paginated list response for agents.
@@ -81,6 +82,16 @@ type AgentGroupListResponse struct {
 	StartIndex   int           `json:"startIndex"`
 	Count        int           `json:"count"`
 	Groups       []AgentGroup  `json:"groups"`
+	Links        []interface{} `json:"links"`
+}
+
+// AgentRoleListResponse is the paginated role list response for an agent. Roles are reported by
+// name, both for direct assignments and for those inherited through group membership.
+type AgentRoleListResponse struct {
+	TotalResults int           `json:"totalResults"`
+	StartIndex   int           `json:"startIndex"`
+	Count        int           `json:"count"`
+	Roles        []string      `json:"roles"`
 	Links        []interface{} `json:"links"`
 }
 

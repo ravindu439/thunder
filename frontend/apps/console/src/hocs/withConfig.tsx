@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useConfig} from '@thunderid/contexts';
 import {ThunderIDProvider} from '@thunderid/react';
@@ -41,11 +26,31 @@ export default function withConfig<P extends object>(WrappedComponent: Component
     // configured resource identifier.
     const resourceIdentifier = config.trusted_issuer ? getServerUrl() : getResourceIdentifier();
 
+    // In the trusted-issuer (federated) model `baseUrl` points at the authorization server (IdP),
+    // so the SDK would otherwise send resource-server calls (flow execution, flow metadata, and the
+    // user profile) to the IdP instead of the resource server that owns the users and flows. Point
+    // those endpoints back at the resource server URL.
+    const resourceServerUrl = config.trusted_issuer ? getServerUrl().replace(/\/+$/, '') : undefined;
+
     // Behavioral defaults derived from app config and runtime heuristics.
     // config.sdk values are deep-merged on top, so operators can override any of these.
     const sdkDefaults: Partial<ThunderIDProviderProps> = {
       discovery: {wellKnown: {enabled: true}},
       ...(resourceIdentifier ? {signInOptions: {resource: resourceIdentifier}} : {}),
+      ...(resourceServerUrl
+        ? {
+            endpoints: {
+              flowExecute: `${resourceServerUrl}/flow/execute`,
+              flowMeta: `${resourceServerUrl}/flow/meta`,
+              usersMe: `${resourceServerUrl}/users/me`,
+            },
+          }
+        : {}),
+      sendIdTokenInLogoutRequest: false,
+      // Revoke the access token at the OP's revocation_endpoint before completing sign out, on top
+      // of the SDK's default RP-Initiated Logout. Best-effort: revocation failures don't block
+      // sign out. Override via config.js: `sdk: {tokenLifecycle: {revokeToken: {revokeOnSignOut: false}}}`.
+      tokenLifecycle: {revokeToken: {revokeOnSignOut: true}},
       // When the trusted issuer is a generic OIDC provider, suppress the SDK's
       // product-specific bootstrap calls that would otherwise 404 / be CORS-blocked
       // at the external authorization server: flow metadata (`{baseUrl}/flow/meta`).
@@ -79,6 +84,10 @@ export default function withConfig<P extends object>(WrappedComponent: Component
         baseUrl={getTrustedIssuerUrl() ?? (import.meta.env.VITE_THUNDER_BASE_URL as string)}
         clientId={getTrustedIssuerClientId() ?? (import.meta.env.VITE_THUNDER_CLIENT_ID as string)}
         afterSignInUrl={getClientUrl() ?? (import.meta.env.VITE_THUNDER_AFTER_SIGN_IN_URL as string)}
+        // Sign-out lands back on the console root, same as sign-in. Without this the SDK falls back
+        // to the page origin, which drops the client base path (e.g. `/console`) and fails the
+        // server's exact match against the application's registered post-logout redirect URIs.
+        afterSignOutUrl={getClientUrl() ?? (import.meta.env.VITE_THUNDER_AFTER_SIGN_IN_URL as string)}
         scopes={getTrustedIssuerScopes().length > 0 ? getTrustedIssuerScopes() : undefined}
         {...sdkProps}
       >

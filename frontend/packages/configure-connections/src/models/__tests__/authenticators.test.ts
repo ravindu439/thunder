@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, it, expect} from 'vitest';
 import {AuthenticatorTypes} from '../authenticators';
@@ -29,8 +14,12 @@ describe('AuthenticatorTypes', () => {
     expect(AuthenticatorTypes.PASSKEY).toBe('passkey');
   });
 
+  it('should have MAGIC_LINK defined with correct value', () => {
+    expect(AuthenticatorTypes.MAGIC_LINK).toBe('magic_link');
+  });
+
   it('should be a const object with expected keys', () => {
-    expect(Object.keys(AuthenticatorTypes)).toEqual(['CREDENTIALS_AUTH', 'PASSKEY']);
+    expect(Object.keys(AuthenticatorTypes)).toEqual(['CREDENTIALS_AUTH', 'PASSKEY', 'MAGIC_LINK']);
   });
 
   it('should allow type-safe assignment', () => {
@@ -41,5 +30,10 @@ describe('AuthenticatorTypes', () => {
   it('should allow type-safe assignment for PASSKEY', () => {
     const authenticator: AuthenticatorType = AuthenticatorTypes.PASSKEY;
     expect(authenticator).toBe('passkey');
+  });
+
+  it('should allow type-safe assignment for MAGIC_LINK', () => {
+    const authenticator: AuthenticatorType = AuthenticatorTypes.MAGIC_LINK;
+    expect(authenticator).toBe('magic_link');
   });
 });

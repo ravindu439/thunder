@@ -7,13 +7,16 @@ id: 019e3a5c-0501-7f3e-a66e-66fc7918c3a7
 ouHandle: default
 name: E2E Admin Native App
 description: Native application for E2E test infrastructure admin authentication
+type: fullstack
 # Flow Secret presented by the E2E helpers when initiating the admin authentication flow
 # directly via the Flow Execution API. Test-only credential.
 flowSecret: e2e-admin-native-app-secret
 authFlowHandle: default-flow
+# The admin user is bootstrap-provisioned as Person (see backend/cmd/server/bootstrap), which is
+# also what this file can rely on existing before any sample-app config is imported.
 allowedUserTypes:
-  - Customer
-
+  - Person
+  
 ---
 resource_type: server_config
 # Allows the sample apps' browser origins to reach the API during E2E tests. CORS origins come only from
@@ -24,3 +27,4 @@ value:
     - "https://localhost:3000"
     - "http://localhost:5173"
     - "http://localhost:6274"
+

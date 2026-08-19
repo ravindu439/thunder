@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package token
 
@@ -514,21 +499,23 @@ func (suite *TokenServiceTestSuite) TestProcessTokenRequest_WithRefreshToken() {
 
 	tokenRespDTO := &model.TokenResponseDTO{
 		AccessToken: model.TokenDTO{
-			Token:     "access-token-123",
-			TokenType: "Bearer",
-			ExpiresIn: 3600,
-			Scopes:    []string{"openid"},
-			Subject:   "user123",
-			Audiences: []string{"test-audience"},
+			Token:         "access-token-123",
+			TokenType:     "Bearer",
+			ExpiresIn:     3600,
+			Scopes:        []string{"openid"},
+			Subject:       "user123",
+			Audiences:     []string{"test-audience"},
+			TokenFamilyID: "tfid-access-123",
 		},
 		RefreshToken: model.TokenDTO{Token: ""},
 		IDToken:      model.TokenDTO{Token: ""},
 	}
 	suite.mockGrantHandler.On("HandleGrant", mock.Anything, mock.Anything, app).Return(tokenRespDTO, nil)
 
+	// The access token's tfid must be forwarded to refresh-token issuance so both tokens share the family.
 	mockRefreshHandler.
 		On("IssueRefreshToken", mock.Anything, tokenRespDTO, app, "user123", []string{"test-audience"},
-			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "").
+			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "", "tfid-access-123", int64(0)).
 		Return(nil)
 
 	svc := suite.newService()
@@ -583,7 +570,7 @@ func (suite *TokenServiceTestSuite) TestProcessTokenRequest_RefreshTokenIssuance
 
 	mockRefreshHandler.
 		On("IssueRefreshToken", mock.Anything, tokenRespDTO, app, "user123", []string{"test-audience"},
-			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "").
+			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "", "", int64(0)).
 		Return(&model.ErrorResponse{
 			Error:            "server_error",
 			ErrorDescription: "Failed to issue refresh token",
@@ -805,7 +792,7 @@ func (suite *TokenServiceTestSuite) TestProcessTokenRequest_WithRefreshToken_Use
 	mockRefreshHandler.
 		On("IssueRefreshToken", mock.Anything, tokenRespDTO, app, "user123",
 			[]string{"original-audience-1", "original-audience-2"},
-			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "").
+			"authorization_code", []string{"openid"}, (*model.ClaimsRequest)(nil), "", "", "", int64(0)).
 		Return(nil)
 
 	svc := suite.newService()
@@ -863,7 +850,8 @@ func (suite *TokenServiceTestSuite) TestProcessTokenRequest_CIBA_RefreshTokenUse
 	mockRefreshHandler.
 		On("IssueRefreshToken", mock.Anything, tokenRespDTO, app, "user-1",
 			[]string{"https://api.example.com"},
-			string(providers.GrantTypeCIBA), []string{"openid", "read"}, (*model.ClaimsRequest)(nil), "", "").
+			string(providers.GrantTypeCIBA), []string{"openid", "read"},
+			(*model.ClaimsRequest)(nil), "", "", "", int64(0)).
 		Return(nil)
 
 	svc := suite.newService()

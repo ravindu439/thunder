@@ -1,36 +1,26 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/thunder-id/thunderid/internal/application"
 	"github.com/thunder-id/thunderid/internal/connection"
 	"github.com/thunder-id/thunderid/internal/entitytype"
+	"github.com/thunder-id/thunderid/internal/system/cmodels"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/internal/system/cors"
 	"github.com/thunder-id/thunderid/internal/system/cors/corstest"
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
+	"github.com/thunder-id/thunderid/internal/system/kmprovider/defaultkm"
+	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 	"github.com/thunder-id/thunderid/tests/mocks/applicationmock"
 	"github.com/thunder-id/thunderid/tests/mocks/entitytypemock"
 	"github.com/thunder-id/thunderid/tests/mocks/idp/idpmock"
@@ -40,6 +30,30 @@ import (
 	"github.com/stretchr/testify/suite"
 	yaml "gopkg.in/yaml.v3"
 )
+
+// testCryptoKey is the shared key used so secret property encryption works in tests.
+const testCryptoKey = "0579f866ac7c9273580d0ff163fa01a7b2401a7ff3ddc3e3b14ae3136fa6025e"
+
+// TestMain wires cmodels' package-level config crypto provider once for the whole test
+// binary, so secret Property encryption works regardless of which test's SetupTest last
+// reset the server runtime.
+func TestMain(m *testing.M) {
+	config.ResetServerRuntime()
+	if err := config.InitializeServerRuntime("/tmp/test", &config.Config{
+		Crypto: config.CryptoConfig{Encryption: engineconfig.EncryptionConfig{Key: testCryptoKey}},
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize server runtime: %v\n", err)
+		os.Exit(1)
+	}
+	_, cfgCryptoSvc, err := defaultkm.Initialize(nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize default crypto provider: %v\n", err)
+		os.Exit(1)
+	}
+	cmodels.SetConfigCryptoProvider(cfgCryptoSvc)
+	config.ResetServerRuntime()
+	os.Exit(m.Run())
+}
 
 // InitTestSuite contains comprehensive tests for the init.go file.
 // The test suite covers:
@@ -94,7 +108,7 @@ func createTestExporters(
 	return []declarativeresource.ResourceExporter{
 		application.NewApplicationExporterForTest(appService),
 		connection.NewConnectionExporterForTest(idpService, notificationService),
-		entitytype.NewEntityTypeExporterForTest(entityTypeService),
+		entitytype.NewEntityTypeExporterForTest(entityTypeService, entitytype.TypeCategoryUser),
 	}
 }
 
@@ -158,27 +172,6 @@ func (suite *InitTestSuite) TestRegisterRoutes_JSONEndpoint() {
 	w := httptest.NewRecorder()
 
 	// The mux should handle the request (even if it fails due to invalid request body)
-	mux.ServeHTTP(w, req)
-
-	// Should not be 404 (route exists)
-	assert.NotEqual(suite.T(), http.StatusNotFound, w.Code)
-}
-
-// TestRegisterRoutes_ZIPEndpoint tests the ZIP export endpoint registration
-func (suite *InitTestSuite) TestRegisterRoutes_ZIPEndpoint() {
-	mux := http.NewServeMux()
-	exporters := createTestExporters(suite.mockAppService, suite.mockIDPService,
-		suite.mockNotificationService, suite.mockEntityTypeService)
-	mockService := newExportService(exporters, newParameterizer(templatingRules{}))
-	exportHandler := newExportHandler(mockService)
-
-	registerRoutes(mux, exportHandler)
-
-	// Test POST /export/zip endpoint
-	req := httptest.NewRequest("POST", "/export/zip", strings.NewReader(`{}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
 	mux.ServeHTTP(w, req)
 
 	// Should not be 404 (route exists)
@@ -438,7 +431,6 @@ func TestRouteHandling_Standalone(t *testing.T) {
 		expectNotFound bool
 	}{
 		{"POST", "/export", false},
-		{"POST", "/export/zip", false},
 		{"OPTIONS", "/export", false},
 		{"GET", "/export", true},   // Should be method not allowed, not not found
 		{"POST", "/invalid", true}, // Should be not found

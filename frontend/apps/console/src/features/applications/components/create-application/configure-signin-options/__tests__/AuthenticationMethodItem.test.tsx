@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -60,16 +45,12 @@ describe('AuthenticationMethodItem', () => {
       expect(screen.getByText('Test Auth Method')).toBeInTheDocument();
       expect(screen.getByTestId('test-icon')).toBeInTheDocument();
       expect(screen.getByRole('switch')).toBeInTheDocument();
-      expect(screen.getByRole('button')).toBeInTheDocument();
     });
 
-    it('should render with secondary text when provided', () => {
-      renderComponent({
-        secondary: 'Additional info',
-      });
+    it('should not render a button for the label/icon area', () => {
+      renderComponent();
 
-      expect(screen.getByText('Test Auth Method')).toBeInTheDocument();
-      expect(screen.getByText('Additional info')).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
 
     it('should show switch as checked when method is enabled', () => {
@@ -90,15 +71,13 @@ describe('AuthenticationMethodItem', () => {
       expect(switchElement).not.toBeChecked();
     });
 
-    it('should call onToggle when list item button is clicked', async () => {
+    it('should not call onToggle when clicking the label', async () => {
       const user = userEvent.setup();
       renderComponent();
 
-      const button = screen.getByRole('button');
-      await user.click(button);
+      await user.click(screen.getByText('Test Auth Method'));
 
-      expect(mockOnToggle).toHaveBeenCalledWith('test-auth-method');
-      expect(mockOnToggle).toHaveBeenCalledTimes(1);
+      expect(mockOnToggle).not.toHaveBeenCalled();
     });
 
     it('should call onToggle when switch is clicked', async () => {
@@ -112,15 +91,12 @@ describe('AuthenticationMethodItem', () => {
       expect(mockOnToggle).toHaveBeenCalledTimes(1);
     });
 
-    it('should not disable button or switch when available', () => {
+    it('should not disable the switch when available', () => {
       renderComponent({
         isAvailable: true,
       });
 
-      const button = screen.getByRole('button');
       const switchElement = screen.getByRole('switch');
-
-      expect(button).not.toBeDisabled();
       expect(switchElement).not.toBeDisabled();
     });
 
@@ -128,12 +104,12 @@ describe('AuthenticationMethodItem', () => {
       const user = userEvent.setup();
       renderComponent();
 
-      const button = screen.getByRole('button');
+      const switchElement = screen.getByRole('switch');
 
       // Click multiple times rapidly
-      await user.click(button);
-      await user.click(button);
-      await user.click(button);
+      await user.click(switchElement);
+      await user.click(switchElement);
+      await user.click(switchElement);
 
       expect(mockOnToggle).toHaveBeenCalledTimes(3);
       expect(mockOnToggle).toHaveBeenCalledWith('test-auth-method');
@@ -151,15 +127,6 @@ describe('AuthenticationMethodItem', () => {
       expect(screen.getByTestId('test-icon')).toBeInTheDocument();
     });
 
-    it('should disable the button when not available', () => {
-      renderComponent({
-        isAvailable: false,
-      });
-
-      const button = screen.getByRole('button');
-      expect(button).toHaveAttribute('aria-disabled', 'true');
-    });
-
     it('should not render a switch when not available', () => {
       renderComponent({
         isAvailable: false,
@@ -168,58 +135,34 @@ describe('AuthenticationMethodItem', () => {
       expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     });
 
-    it('should not call onToggle when disabled button is clicked', () => {
+    it('should not call onToggle when clicking the label', async () => {
+      const user = userEvent.setup();
       renderComponent({
         isAvailable: false,
       });
 
-      const button = screen.getByRole('button');
+      await user.click(screen.getByText('Test Auth Method'));
 
-      // Verify button is disabled by checking aria-disabled
-      expect(button).toHaveAttribute('aria-disabled', 'true');
       expect(mockOnToggle).not.toHaveBeenCalled();
-    });
-
-    it('should show "Not configured" regardless of secondary prop', () => {
-      renderComponent({
-        isAvailable: false,
-        secondary: 'This should not be shown',
-      });
-
-      expect(screen.getByText('Not configured')).toBeInTheDocument();
-      expect(screen.queryByText('This should not be shown')).not.toBeInTheDocument();
     });
   });
 
   describe('accessibility', () => {
-    it('should have proper ARIA roles', () => {
+    it('should expose only the switch as an interactive control', () => {
       renderComponent();
 
-      expect(screen.getByRole('button')).toBeInTheDocument();
       expect(screen.getByRole('switch')).toBeInTheDocument();
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
     });
 
-    it('should be keyboard navigable', async () => {
+    it('should be keyboard navigable via the switch', async () => {
       const user = userEvent.setup();
       renderComponent();
 
-      const button = screen.getByRole('button');
+      const switchElement = screen.getByRole('switch');
 
-      // Focus the button using Tab
       await user.tab();
-      expect(button).toHaveFocus();
-
-      // Activate with Enter
-      await user.keyboard('{Enter}');
-      expect(mockOnToggle).toHaveBeenCalledWith('test-auth-method');
-    });
-
-    it('should handle Space key activation', async () => {
-      const user = userEvent.setup();
-      renderComponent();
-
-      const button = screen.getByRole('button');
-      button.focus();
+      expect(switchElement).toHaveFocus();
 
       await user.keyboard(' ');
       expect(mockOnToggle).toHaveBeenCalledWith('test-auth-method');
@@ -249,10 +192,10 @@ describe('AuthenticationMethodItem', () => {
 
     it('should handle special characters in method names', () => {
       renderComponent({
-        name: 'OAuth 2.0 & OIDC Provider',
+        name: 'OAuth 2 & OIDC Provider',
       });
 
-      expect(screen.getByText('OAuth 2.0 & OIDC Provider')).toBeInTheDocument();
+      expect(screen.getByText('OAuth 2 & OIDC Provider')).toBeInTheDocument();
     });
 
     it('should handle different ID formats', async () => {
@@ -261,8 +204,7 @@ describe('AuthenticationMethodItem', () => {
         id: 'oauth2-provider-123',
       });
 
-      const button = screen.getByRole('button');
-      await user.click(button);
+      await user.click(screen.getByRole('switch'));
 
       expect(mockOnToggle).toHaveBeenCalledWith('oauth2-provider-123');
     });
@@ -276,11 +218,9 @@ describe('AuthenticationMethodItem', () => {
       });
 
       const switchElement = screen.getByRole('switch');
-      const button = screen.getByRole('button');
 
       expect(switchElement).toBeChecked();
       expect(switchElement).not.toBeDisabled();
-      expect(button).not.toBeDisabled();
     });
 
     it('should handle disabled but available state', () => {
@@ -290,36 +230,29 @@ describe('AuthenticationMethodItem', () => {
       });
 
       const switchElement = screen.getByRole('switch');
-      const button = screen.getByRole('button');
 
       expect(switchElement).not.toBeChecked();
       expect(switchElement).not.toBeDisabled();
-      expect(button).not.toBeDisabled();
     });
 
-    it('should override enabled state when not available', () => {
+    it('should not render a switch when not available, regardless of enabled state', () => {
       renderComponent({
         isEnabled: true,
         isAvailable: false,
       });
 
       expect(screen.queryByRole('switch')).not.toBeInTheDocument();
-      expect(screen.getByRole('button')).toHaveAttribute('aria-disabled', 'true');
     });
   });
 
   describe('isDisabled prop', () => {
-    it('should disable switch and button when isDisabled is true', () => {
+    it('should disable the switch when isDisabled is true', () => {
       renderComponent({
         isAvailable: true,
         isDisabled: true,
       });
 
-      const switchElement = screen.getByRole('switch');
-      const button = screen.getByRole('button');
-
-      expect(switchElement).toBeDisabled();
-      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(screen.getByRole('switch')).toBeDisabled();
     });
 
     it('should not call onToggle when isDisabled is true', () => {
@@ -335,17 +268,6 @@ describe('AuthenticationMethodItem', () => {
       expect(mockOnToggle).not.toHaveBeenCalled();
     });
 
-    it('should render secondary text as undefined when not provided', () => {
-      renderComponent({
-        isAvailable: true,
-        secondary: undefined,
-      });
-
-      // The primary text should be present but no secondary text
-      expect(screen.getByText('Test Auth Method')).toBeInTheDocument();
-      // No additional secondary text element should be rendered
-    });
-
     it('should combine isEnabled true with isDisabled true', () => {
       renderComponent({
         isEnabled: true,
@@ -356,15 +278,6 @@ describe('AuthenticationMethodItem', () => {
       const switchElement = screen.getByRole('switch');
       expect(switchElement).toBeChecked();
       expect(switchElement).toBeDisabled();
-    });
-
-    it('should render with secondary text when available and provided', () => {
-      renderComponent({
-        isAvailable: true,
-        secondary: 'Description text',
-      });
-
-      expect(screen.getByText('Description text')).toBeInTheDocument();
     });
 
     it('should render icon in the disabled state when not available', () => {

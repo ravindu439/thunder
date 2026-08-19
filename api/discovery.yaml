@@ -64,6 +64,8 @@ paths:
                 code_challenge_methods_supported:
                   - S256
                 authorization_response_iss_parameter_supported: true
+                authorization_grant_profiles_supported:
+                  - "urn:ietf:params:oauth:grant-profile:id-jag"
 
   /.well-known/openid-configuration:
     get:
@@ -116,6 +118,8 @@ paths:
                   - email_verified
                 claims_parameter_supported: true
                 authorization_response_iss_parameter_supported: true
+                authorization_grant_profiles_supported:
+                  - "urn:ietf:params:oauth:grant-profile:id-jag"
         "500":
           description: Internal server error — metadata could not be generated.
 
@@ -187,6 +191,11 @@ components:
         authorization_response_iss_parameter_supported:
           type: boolean
           description: Whether the `iss` parameter is included in authorization responses (RFC 9207).
+        authorization_grant_profiles_supported:
+          type: array
+          items:
+            type: string
+          description: Authorization grant profiles supported, e.g. the ID-JAG profile (`urn:ietf:params:oauth:grant-profile:id-jag`).
 
     OIDCProviderMetadata:
       allOf:

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,7 +16,7 @@ import type {JSX, ReactNode} from 'react';
 import {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useSearchParams} from 'react-router';
-import ROUTES from '../../constants/routes';
+import RouteConfig from '../../configs/RouteConfig';
 
 export default function RecoveryBox(): JSX.Element {
   const {resolveAll} = useTemplateLiteralResolver();
@@ -45,8 +30,8 @@ export default function RecoveryBox(): JSX.Element {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '');
   const applicationId = searchParams.get('applicationId');
   const signInUrl = applicationId
-    ? `${base}${ROUTES.AUTH.SIGN_IN}?applicationId=${applicationId}`
-    : `${base}${ROUTES.AUTH.SIGN_IN}`;
+    ? `${base}${RouteConfig.signIn()}?applicationId=${applicationId}`
+    : `${base}${RouteConfig.signIn()}`;
 
   return (
     <AuthCardLayout
@@ -139,7 +124,6 @@ export default function RecoveryBox(): JSX.Element {
                             action.eventType === EmbeddedFlowEventType.Trigger || action.eventType === 'TRIGGER';
                           void handleSubmit(action, inputs, isTrigger);
                         }}
-                        signInFallbackUrl={signInUrl}
                       />
                     ))}
                   </Box>

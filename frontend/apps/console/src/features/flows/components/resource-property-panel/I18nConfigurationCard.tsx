@@ -1,22 +1,8 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useGetLanguages, useGetTranslations, useUpdateTranslation} from '@thunderid/i18n';
+import {getErrorMessage} from '@thunderid/utils';
 import {
   Alert,
   Autocomplete,
@@ -116,6 +102,14 @@ export function I18nConfigurationCardContent({
   const [selectedLanguage, setSelectedLanguage] = useState<string>(FlowI18nConstants.DEFAULT_LANGUAGE);
   const [error, setError] = useState<string | null>(null);
 
+  // Resolves an error through the `flows` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `flows:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `flows:${key}`, options),
+    [t],
+  );
+
   useEffect(() => {
     onCreateModeChange?.(isCreateMode);
   }, [isCreateMode, onCreateModeChange]);
@@ -207,11 +201,18 @@ export function I18nConfigurationCardContent({
           handleExitCreateMode();
         },
         onError: (err: Error) => {
-          setError(err.message || t('common:errors.unknown'));
+          setError(
+            getErrorMessage(
+              err,
+              tForErrors,
+              'core.elements.textPropertyField.i18nCard.createError',
+              'Failed to create translation. Please try again.',
+            ),
+          );
         },
       },
     );
-  }, [newKey, newTranslationValue, selectedLanguage, updateTranslation, onChange, handleExitCreateMode, t]);
+  }, [newKey, newTranslationValue, selectedLanguage, updateTranslation, onChange, handleExitCreateMode, t, tForErrors]);
 
   const renderLoadingContent = (): ReactElement => (
     <Box sx={{display: 'flex', justifyContent: 'center', p: 2}}>

@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {useConfig} from '@thunderid/contexts';
+import {ApplicationQueryKeys} from '@thunderid/configure-applications';
+import type {Application} from '@thunderid/configure-applications';
+import {useConfig, useToast} from '@thunderid/contexts';
 import {useThunderID} from '@thunderid/react';
 import {waitFor, act, renderHook} from '@thunderid/test-utils';
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
-import ApplicationQueryKeys from '../../constants/application-query-keys';
-import type {Application} from '../../models/application';
 import type {CreateApplicationRequest} from '../../models/requests';
 import useCreateApplication from '../useCreateApplication';
 
@@ -37,6 +22,7 @@ vi.mock('@thunderid/contexts', async (importOriginal) => {
   return {
     ...actual,
     useConfig: vi.fn(),
+    useToast: vi.fn(),
   };
 });
 
@@ -139,10 +125,12 @@ describe('useCreateApplication', () => {
   };
 
   let mockHttpRequest: ReturnType<typeof vi.fn>;
+  let mockShowToast: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     // Mock HTTP request function
     mockHttpRequest = vi.fn();
+    mockShowToast = vi.fn();
 
     // Mock useThunderID hook
     vi.mocked(useThunderID).mockReturnValue({
@@ -155,6 +143,10 @@ describe('useCreateApplication', () => {
     vi.mocked(useConfig).mockReturnValue({
       getServerUrl: () => 'https://localhost:8090',
     } as ReturnType<typeof useConfig>);
+
+    vi.mocked(useToast).mockReturnValue({
+      showToast: mockShowToast,
+    } as unknown as ReturnType<typeof useToast>);
   });
 
   afterEach(() => {
@@ -199,6 +191,8 @@ describe('useCreateApplication', () => {
       },
       data: mockRequest,
     });
+
+    expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'success');
   });
 
   it('should set pending state during creation', async () => {
@@ -246,6 +240,20 @@ describe('useCreateApplication', () => {
     expect(result.current.error).toEqual(apiError);
     expect(result.current.data).toBeUndefined();
     expect(result.current.isPending).toBe(false);
+  });
+
+  it('should not show a toast on error', async () => {
+    mockHttpRequest.mockRejectedValueOnce(new Error('Failed to create application'));
+
+    const {result} = renderHook(() => useCreateApplication());
+
+    result.current.mutate(mockRequest);
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it('should handle network error', async () => {

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -60,6 +45,12 @@ func newSessionSignOutExecutor(flowFactory core.FlowFactoryInterface, sso sessio
 // cookie-clear signal. Terminate is idempotent, so a missing or already-ended session is not an
 // error; the cookie is cleared regardless so the browser drops any stale handle. It routes to the
 // success outcome — sign-out completes even when there was nothing to end.
+//
+// When the node opts in with the promptOnSignOut property and the RP-initiated logout arrived without
+// a valid id_token_hint (RuntimeKeyLogoutPromptRequired), the executor first routes to the node's
+// onIncomplete confirmation prompt and only terminates the session once the End-User confirms. This
+// keeps the confirmation logic in the executor rather than a node condition the flow editor cannot
+// represent. See decide for how the prompt's action types map to outcomes.
 func (e *sessionSignOutExecutor) Execute(ctx *providers.NodeContext) (*providers.ExecutorResponse, error) {
 	logger := e.logger.With(log.String(log.LoggerKeyExecutionID, ctx.ExecutionID))
 
@@ -67,6 +58,16 @@ func (e *sessionSignOutExecutor) Execute(ctx *providers.NodeContext) (*providers
 		Status:      providers.ExecComplete,
 		RuntimeData: make(map[string]string),
 		EngineData:  make(map[string]string),
+	}
+
+	// Ask the End-User to confirm before terminating when the node requests it and no valid
+	// id_token_hint established the request's legitimacy. Routing to the onIncomplete prompt and back
+	// is enough: the prompt forwards the chosen action's type here on the re-run, so the decision is
+	// read off that type without persisting any marker.
+	if e.decide(ctx) == signOutPrompt {
+		execResp.Status = providers.ExecUserInputRequired
+		logger.Debug(ctx.Context, "Routing to sign-out confirmation prompt")
+		return execResp, nil
 	}
 
 	in := session.SSOInputsFrom(ctx.Context)
@@ -81,4 +82,44 @@ func (e *sessionSignOutExecutor) Execute(ctx *providers.NodeContext) (*providers
 
 	logger.Debug(ctx.Context, "Terminated SSO session on sign-out", log.String("flowId", in.FlowID))
 	return execResp, nil
+}
+
+// signOutOutcome is what the executor does with the current request.
+type signOutOutcome int
+
+const (
+	// signOutTerminate ends the SSO session.
+	signOutTerminate signOutOutcome = iota
+	// signOutPrompt routes to the node's onIncomplete confirmation prompt.
+	signOutPrompt
+)
+
+// decide reports what the executor should do with the current request.
+//
+// Confirmation is skipped entirely unless the node opts in (promptOnSignOut) and the RP-initiated
+// logout requires a prompt because it carried no valid id_token_hint. Past that, the outcome comes
+// from the action type the confirmation prompt forwards on the re-run, so the End-User's choice is
+// read off the flow definition rather than a persisted marker.
+//
+// Each action the confirmation prompt can raise maps to one outcome here: a new button on that
+// prompt is supported by giving its action type a case, and a new outcome by adding a
+// signOutOutcome and handling it in Execute.
+func (e *sessionSignOutExecutor) decide(ctx *providers.NodeContext) signOutOutcome {
+	promptEnabled, _ := ctx.NodeProperties[propertyKeyPromptOnSignOut].(bool)
+	if !promptEnabled {
+		return signOutTerminate
+	}
+	if ctx.RuntimeData[common.RuntimeKeyLogoutPromptRequired] != dataValueTrue {
+		return signOutTerminate
+	}
+
+	actionType, _ := ctx.ForwardedData[common.ForwardedDataKeyActionType].(string)
+	switch common.ActionType(actionType) {
+	case common.ActionTypeConfirm:
+		return signOutTerminate
+	default:
+		// The initial request forwards no action type at all, and a type this executor does not
+		// recognize is not consent to end the session. Both ask the End-User to confirm.
+		return signOutPrompt
+	}
 }

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package entitytype_test
 
@@ -49,7 +34,7 @@ func TestEntityTypeExporterTestSuite(t *testing.T) {
 
 func (s *EntityTypeExporterTestSuite) SetupTest() {
 	s.mockService = entitytypemock.NewEntityTypeServiceInterfaceMock(s.T())
-	s.exporter = entitytype.NewEntityTypeExporterForTest(s.mockService)
+	s.exporter = entitytype.NewEntityTypeExporterForTest(s.mockService, entitytype.TypeCategoryUser)
 	s.logger = log.GetLogger()
 }
 
@@ -75,7 +60,10 @@ func (s *EntityTypeExporterTestSuite) TestGetAllResourceIDs_Success() {
 
 	s.mockService.EXPECT().
 		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryUser, 100, 0, false).
-		Return(expectedResponse, nil)
+		Return(expectedResponse, nil).Once()
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryUser, 100, 2, false).
+		Return(&entitytype.EntityTypeListResponse{Types: []entitytype.EntityTypeListItem{}}, nil).Once()
 
 	ids, err := s.exporter.GetAllResourceIDs(context.Background())
 
@@ -217,4 +205,196 @@ func (s *EntityTypeExporterTestSuite) TestGetResourceRules() {
 	assert.NotNil(s.T(), rules)
 	// ResourceRules is currently an empty struct, but the function should return a valid pointer
 	assert.IsType(s.T(), &declarativeresource.ResourceRules{}, rules)
+}
+
+// AgentTypeExporterTestSuite tests the entityTypeExporter configured for TypeCategoryAgent.
+type AgentTypeExporterTestSuite struct {
+	suite.Suite
+	mockService *entitytypemock.EntityTypeServiceInterfaceMock
+	exporter    declarativeresource.ResourceExporter
+	logger      *log.Logger
+}
+
+func TestAgentTypeExporterTestSuite(t *testing.T) {
+	suite.Run(t, new(AgentTypeExporterTestSuite))
+}
+
+func (s *AgentTypeExporterTestSuite) SetupTest() {
+	s.mockService = entitytypemock.NewEntityTypeServiceInterfaceMock(s.T())
+	s.exporter = entitytype.NewEntityTypeExporterForTest(s.mockService, entitytype.TypeCategoryAgent)
+	s.logger = log.GetLogger()
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetResourceType() {
+	assert.Equal(s.T(), "agent_type", s.exporter.GetResourceType())
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetParameterizerType() {
+	assert.Equal(s.T(), "AgentType", s.exporter.GetParameterizerType())
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetAllResourceIDs_Success() {
+	expectedResponse := &entitytype.EntityTypeListResponse{
+		Types: []entitytype.EntityTypeListItem{
+			{ID: "agenttype1", Name: "Agent Type 1"},
+			{ID: "agenttype2", Name: "Agent Type 2"},
+		},
+	}
+
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 0, false).
+		Return(expectedResponse, nil).Once()
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 2, false).
+		Return(&entitytype.EntityTypeListResponse{Types: []entitytype.EntityTypeListItem{}}, nil).Once()
+
+	ids, err := s.exporter.GetAllResourceIDs(context.Background())
+
+	assert.Nil(s.T(), err)
+	assert.Len(s.T(), ids, 2)
+	assert.ElementsMatch(s.T(), []string{"agenttype1", "agenttype2"}, ids)
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetAllResourceIDs_Error() {
+	expectedError := &tidcommon.ServiceError{
+		Code: "ERR_CODE",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.entitytypeexporter.test_error",
+			DefaultValue: "test error",
+		},
+	}
+
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 0, false).
+		Return(nil, expectedError)
+
+	ids, err := s.exporter.GetAllResourceIDs(context.Background())
+
+	assert.Nil(s.T(), ids)
+	assert.Equal(s.T(), expectedError, err)
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetAllResourceIDs_EmptyList() {
+	expectedResponse := &entitytype.EntityTypeListResponse{
+		Types: []entitytype.EntityTypeListItem{},
+	}
+
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 0, false).
+		Return(expectedResponse, nil)
+
+	ids, err := s.exporter.GetAllResourceIDs(context.Background())
+
+	assert.Nil(s.T(), err)
+	assert.Len(s.T(), ids, 0)
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetAllResourceIDs_Pagination() {
+	firstPage := &entitytype.EntityTypeListResponse{
+		Types: []entitytype.EntityTypeListItem{
+			{ID: "agenttype1", Name: "Agent Type 1"},
+			{ID: "agenttype2", Name: "Agent Type 2"},
+		},
+	}
+	secondPage := &entitytype.EntityTypeListResponse{Types: []entitytype.EntityTypeListItem{}}
+
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 0, false).
+		Return(firstPage, nil).Once()
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 2, false).
+		Return(secondPage, nil).Once()
+
+	ids, err := s.exporter.GetAllResourceIDs(context.Background())
+
+	assert.Nil(s.T(), err)
+	assert.Len(s.T(), ids, 2)
+	assert.ElementsMatch(s.T(), []string{"agenttype1", "agenttype2"}, ids)
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetAllResourceIDs_FiltersReadOnly() {
+	response := &entitytype.EntityTypeListResponse{
+		Types: []entitytype.EntityTypeListItem{
+			{ID: "agenttype-db", IsReadOnly: false},
+			{ID: "agenttype-decl", IsReadOnly: true},
+		},
+	}
+
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 0, false).
+		Return(response, nil).Once()
+	s.mockService.EXPECT().
+		GetEntityTypeList(mock.Anything, entitytype.TypeCategoryAgent, 100, 2, false).
+		Return(&entitytype.EntityTypeListResponse{Types: []entitytype.EntityTypeListItem{}}, nil).Once()
+
+	ids, err := s.exporter.GetAllResourceIDs(context.Background())
+
+	assert.Nil(s.T(), err)
+	assert.Len(s.T(), ids, 1)
+	assert.Equal(s.T(), "agenttype-db", ids[0])
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetResourceByID_Success() {
+	expectedSchema := &entitytype.EntityType{
+		ID:   "agenttype1",
+		Name: "Test Agent Type",
+	}
+
+	s.mockService.EXPECT().
+		GetEntityType(mock.Anything, entitytype.TypeCategoryAgent, "agenttype1", mock.Anything).
+		Return(expectedSchema, nil)
+
+	resource, name, err := s.exporter.GetResourceByID(context.Background(), "agenttype1")
+
+	assert.Nil(s.T(), err)
+	assert.Equal(s.T(), "Test Agent Type", name)
+	assert.Equal(s.T(), expectedSchema, resource)
+}
+
+func (s *AgentTypeExporterTestSuite) TestGetResourceByID_Error() {
+	expectedError := &tidcommon.ServiceError{
+		Code: "ERR_CODE",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.entitytypeexporter.test_error",
+			DefaultValue: "test error",
+		},
+	}
+
+	s.mockService.EXPECT().
+		GetEntityType(mock.Anything, entitytype.TypeCategoryAgent, "agenttype1", mock.Anything).
+		Return(nil, expectedError)
+
+	resource, name, err := s.exporter.GetResourceByID(context.Background(), "agenttype1")
+
+	assert.Nil(s.T(), resource)
+	assert.Empty(s.T(), name)
+	assert.Equal(s.T(), expectedError, err)
+}
+
+func (s *AgentTypeExporterTestSuite) TestValidateResource_InvalidType() {
+	invalidResource := "not a schema"
+
+	name, err := s.exporter.ValidateResource(context.Background(), invalidResource, "agenttype1", s.logger)
+
+	assert.Empty(s.T(), name)
+	assert.NotNil(s.T(), err)
+	assert.Equal(s.T(), "agent_type", err.ResourceType)
+	assert.Equal(s.T(), "agenttype1", err.ResourceID)
+	assert.Equal(s.T(), "INVALID_TYPE", err.Code)
+}
+
+func (s *AgentTypeExporterTestSuite) TestValidateResource_EmptyName() {
+	schema := &entitytype.EntityType{
+		ID:   "agenttype1",
+		Name: "",
+	}
+
+	name, err := s.exporter.ValidateResource(context.Background(), schema, "agenttype1", s.logger)
+
+	assert.Empty(s.T(), name)
+	assert.NotNil(s.T(), err)
+	assert.Equal(s.T(), "agent_type", err.ResourceType)
+	assert.Equal(s.T(), "agenttype1", err.ResourceID)
+	assert.Equal(s.T(), "SCHEMA_VALIDATION_ERROR", err.Code)
+	assert.Contains(s.T(), err.Error, "name is empty")
 }

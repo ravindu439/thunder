@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {existsSync, mkdirSync, writeFileSync} from 'fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'fs';
 import {join, dirname} from 'path';
 import {fileURLToPath} from 'url';
 import {createLogger} from '@thunderid/logger';
@@ -26,6 +11,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const OUTPUT_FILE = join(__dirname, '..', 'static', 'data', 'releases.json');
+const CONTRIBUTORS_DATA_FILE = join(__dirname, '..', 'static', 'data', 'contributors.json');
 
 const GITHUB_REPO = DocusaurusProductConfig.project.source.github.fullName;
 const GITHUB_REPO_URL = DocusaurusProductConfig.project.source.github.url;
@@ -35,8 +21,9 @@ const GITHUB_RELEASES_API_URL = `${GITHUB_REPO_API_URL}/releases`;
 
 const logger = createLogger('generate-changelog');
 
-// Cache for user avatars to avoid repeated API calls.
-const userAvatarCache = {};
+const userProfileCache = new Map();
+const userProfileFetchFailures = new Set();
+
 const ignoredContributorUsernames = [
   '123',
   'asgardeo',
@@ -51,7 +38,7 @@ const ignoredContributorUsernames = [
 
 function getGitHubHeaders() {
   return {
-    'User-Agent': 'Thunder-Docs-Changelog-Generator',
+    'User-Agent': `${PROJECT_NAME}-Docs-Changelog-Generator`,
     ...(process.env.GITHUB_TOKEN ? {Authorization: `token ${process.env.GITHUB_TOKEN}`} : {}),
   };
 }
@@ -78,6 +65,81 @@ async function fetchJsonWithHeaders(url) {
     body: await response.json(),
     headers: response.headers,
   };
+}
+
+function getUserProfileCacheKey(username) {
+  return username.toLowerCase();
+}
+
+function buildFallbackContributorProfile(username) {
+  return {
+    avatarUrl: null,
+    profileUrl: `https://github.com/${username}`,
+    username,
+  };
+}
+
+function setCachedContributorProfile(username, profile) {
+  if (!username) {
+    return;
+  }
+
+  userProfileCache.set(getUserProfileCacheKey(username), {
+    avatarUrl: profile.avatarUrl ?? null,
+    profileUrl: profile.profileUrl || `https://github.com/${username}`,
+    username: profile.username || username,
+  });
+}
+
+function getCachedContributorProfile(username) {
+  const profile = userProfileCache.get(getUserProfileCacheKey(username));
+
+  if (!profile) {
+    return null;
+  }
+
+  return {
+    ...profile,
+    profileUrl: profile.profileUrl || `https://github.com/${username}`,
+    username,
+  };
+}
+
+function readJsonFile(filePath) {
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    logger.warn(`Could not read cached contributor profiles from ${filePath}: ${error.message}`);
+
+    return null;
+  }
+}
+
+function seedContributorProfileCache() {
+  const contributorsData = readJsonFile(CONTRIBUTORS_DATA_FILE);
+
+  for (const contributor of contributorsData?.contributors || []) {
+    setCachedContributorProfile(contributor.login, {
+      avatarUrl: contributor.avatarUrl,
+      profileUrl: contributor.htmlUrl,
+      username: contributor.login,
+    });
+  }
+
+  const releasesData = readJsonFile(OUTPUT_FILE);
+  const releaseEntries = [releasesData?.latestRelease, ...(releasesData?.releases || [])].filter(Boolean);
+
+  for (const release of releaseEntries) {
+    for (const contributor of [...(release.contributors || []), ...(release.newContributors || [])]) {
+      if (contributor.avatarUrl) {
+        setCachedContributorProfile(contributor.username, contributor);
+      }
+    }
+  }
 }
 
 async function fetchRepository() {
@@ -163,32 +225,6 @@ function sanitizeReleaseBody(body = '', releaseTag) {
     .join('`');
 
   return sanitized;
-}
-
-async function fetchUserAvatar(username) {
-  if (Object.prototype.hasOwnProperty.call(userAvatarCache, username)) {
-    return userAvatarCache[username];
-  }
-
-  try {
-    const data = await fetchJson(`https://api.github.com/users/${username}`);
-
-    userAvatarCache[username] = {
-      avatarUrl: data.avatar_url,
-      profileUrl: data.html_url,
-      username,
-    };
-
-    return userAvatarCache[username];
-  } catch (error) {
-    userAvatarCache[username] = null;
-
-    if (error.status !== 404) {
-      logger.warn(`Failed to fetch avatar for ${username}: ${error.message}`);
-    }
-
-    return null;
-  }
 }
 
 function extractContributorsFromBody(body) {
@@ -281,22 +317,53 @@ function pickPrimaryAsset(assets) {
   );
 }
 
+async function fetchContributorProfile(username) {
+  const cachedProfile = getCachedContributorProfile(username);
+
+  if (cachedProfile) {
+    return cachedProfile;
+  }
+
+  try {
+    const data = await fetchJson(`https://api.github.com/users/${username}`);
+    const profile = {
+      avatarUrl: data.avatar_url,
+      profileUrl: data.html_url,
+      username: data.login || username,
+    };
+
+    setCachedContributorProfile(username, profile);
+
+    return getCachedContributorProfile(username) || profile;
+  } catch (error) {
+    if (error.status !== 404) {
+      userProfileFetchFailures.add(`${username}: ${error.status || error.message}`);
+    }
+
+    return buildFallbackContributorProfile(username);
+  }
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({length: Math.min(limit, items.length)}, worker));
+
+  return results;
+}
+
 async function buildContributorProfiles(usernames) {
-  const profiles = await Promise.all(
-    usernames.map(async (username) => {
-      const profile = await fetchUserAvatar(username);
-
-      return (
-        profile || {
-          avatarUrl: null,
-          profileUrl: `https://github.com/${username}`,
-          username,
-        }
-      );
-    }),
-  );
-
-  return profiles.filter(Boolean);
+  return mapWithConcurrency(usernames, 4, fetchContributorProfile);
 }
 
 async function buildReleaseEntry(release) {
@@ -343,6 +410,14 @@ async function buildChangelogData(repository, releases) {
   const publishedReleases = releases.filter((release) => !release.draft);
   const releaseEntries = await Promise.all(publishedReleases.map(buildReleaseEntry));
 
+  if (userProfileFetchFailures.size > 0) {
+    logger.warn(
+      `Could not fetch ${userProfileFetchFailures.size} contributor avatar profile(s). Using initials fallback for: ${[
+        ...userProfileFetchFailures,
+      ].join(', ')}`,
+    );
+  }
+
   const latestEntry = releaseEntries.find((entry) => !entry.isPrerelease) ?? releaseEntries[0];
   if (latestEntry) {
     latestEntry.isLatest = true;
@@ -387,6 +462,8 @@ function writeChangelogData(changelogData) {
 }
 
 async function generate() {
+  seedContributorProfileCache();
+
   try {
     const [repository, releases] = await Promise.all([fetchRepository(), fetchReleases()]);
     const changelogData = await buildChangelogData(repository, releases);

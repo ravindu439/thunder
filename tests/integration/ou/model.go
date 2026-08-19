@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ou
 
@@ -106,6 +91,23 @@ type GroupListResponse struct {
 	StartIndex   int              `json:"startIndex"`
 	Count        int              `json:"count"`
 	Groups       []Group          `json:"groups"`
+	Links        []testutils.Link `json:"links"`
+}
+
+// Role represents a role with basic information for OU endpoints.
+type Role struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	IsReadOnly  bool   `json:"isReadOnly"`
+}
+
+// RoleListResponse represents the response for listing roles in an organization unit.
+type RoleListResponse struct {
+	TotalResults int              `json:"totalResults"`
+	StartIndex   int              `json:"startIndex"`
+	Count        int              `json:"count"`
+	Roles        []Role           `json:"roles"`
 	Links        []testutils.Link `json:"links"`
 }
 

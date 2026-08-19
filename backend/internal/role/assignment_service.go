@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -32,7 +17,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/group"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/internal/system/sysauthz"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 )
 
@@ -59,7 +44,8 @@ type roleAssignmentService struct {
 	entityService     entity.EntityServiceInterface
 	groupService      group.GroupServiceInterface
 	entityTypeService entitytype.EntityTypeServiceInterface
-	transactioner     transaction.Transactioner
+	transactioner     providers.Transactioner
+	authzService      sysauthz.SystemAuthorizationServiceInterface
 }
 
 // newRoleAssignmentService creates a new instance of roleAssignmentService.
@@ -68,7 +54,8 @@ func newRoleAssignmentService(
 	entityService entity.EntityServiceInterface,
 	groupService group.GroupServiceInterface,
 	entityTypeService entitytype.EntityTypeServiceInterface,
-	transactioner transaction.Transactioner,
+	transactioner providers.Transactioner,
+	authzService sysauthz.SystemAuthorizationServiceInterface,
 ) RoleAssignmentServiceInterface {
 	return &roleAssignmentService{
 		roleStore:         roleStore,
@@ -76,6 +63,7 @@ func newRoleAssignmentService(
 		groupService:      groupService,
 		entityTypeService: entityTypeService,
 		transactioner:     transactioner,
+		authzService:      authzService,
 	}
 }
 
@@ -252,45 +240,65 @@ func (as *roleAssignmentService) getAssignmentsByEntityCategory(
 // Assignments can be added to both mutable (DB-backed) and declarative (file-backed) roles.
 func (as *roleAssignmentService) AddAssignments(
 	ctx context.Context, id string, assignments []RoleAssignment) *tidcommon.ServiceError {
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, assignmentLoggerComponentName))
-	logger.Debug(ctx, "Adding assignments to role", log.String("id", id))
-
-	normalized, svcErr := as.prepareAssignments(ctx, id, assignments)
-	if svcErr != nil {
-		return svcErr
-	}
-
-	if err := as.transactioner.Transact(ctx, func(txCtx context.Context) error {
-		return as.roleStore.AddAssignments(txCtx, id, normalized)
-	}); err != nil {
-		logger.Error(ctx, "Failed to add assignments to role", log.String("id", id), log.Error(err))
-		return &tidcommon.InternalServerError
-	}
-
-	logger.Debug(ctx, "Successfully added assignments to role", log.String("id", id))
-	return nil
+	return as.modifyAssignments(ctx, id, assignments,
+		as.roleStore.AddAssignments,
+		"add assignments to role", "added assignments to role")
 }
 
 // RemoveAssignments removes assignments from a role.
 // Assignments can be removed from both mutable (DB-backed) and declarative (file-backed) roles.
 func (as *roleAssignmentService) RemoveAssignments(
 	ctx context.Context, id string, assignments []RoleAssignment) *tidcommon.ServiceError {
+	return as.modifyAssignments(ctx, id, assignments,
+		as.roleStore.RemoveAssignments,
+		"remove assignments from role", "removed assignments from role")
+}
+
+// modifyAssignments is the shared implementation for AddAssignments and RemoveAssignments. Both
+// directions carry the same requirement, since assigning conveys the role's permissions to the
+// assignee.
+func (as *roleAssignmentService) modifyAssignments(
+	ctx context.Context,
+	id string,
+	assignments []RoleAssignment,
+	storeOp func(context.Context, string, []RoleAssignment) error,
+	action, successAction string,
+) *tidcommon.ServiceError {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, assignmentLoggerComponentName))
-	logger.Debug(ctx, "Removing assignments from role", log.String("id", id))
+	logger.Debug(ctx, "Modifying role assignments",
+		log.String("action", action), log.String("id", id))
+
+	if svcErr := as.authzService.CanGrantMembership(ctx, sysauthz.PrincipalTypeRole, id); svcErr != nil {
+		return svcErr
+	}
 
 	normalized, svcErr := as.prepareAssignments(ctx, id, assignments)
 	if svcErr != nil {
 		return svcErr
 	}
 
+	var capturedSvcErr *tidcommon.ServiceError
 	if err := as.transactioner.Transact(ctx, func(txCtx context.Context) error {
-		return as.roleStore.RemoveAssignments(txCtx, id, normalized)
+		// Re-evaluated inside the transaction, since the role's permissions may change after the
+		// earlier check.
+		if svcErr := as.authzService.CanGrantMembership(
+			txCtx, sysauthz.PrincipalTypeRole, id,
+		); svcErr != nil {
+			capturedSvcErr = svcErr
+			return errors.New("rollback for disallowed grant")
+		}
+		return storeOp(txCtx, id, normalized)
 	}); err != nil {
-		logger.Error(ctx, "Failed to remove assignments from role", log.String("id", id), log.Error(err))
+		if capturedSvcErr != nil {
+			return capturedSvcErr
+		}
+		logger.Error(ctx, "Failed to modify role assignments",
+			log.String("action", action), log.String("id", id), log.Error(err))
 		return &tidcommon.InternalServerError
 	}
 
-	logger.Debug(ctx, "Successfully removed assignments from role", log.String("id", id))
+	logger.Debug(ctx, "Successfully modified role assignments",
+		log.String("action", successAction), log.String("id", id))
 	return nil
 }
 

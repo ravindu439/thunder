@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -39,8 +24,15 @@ vi.mock('@/features/flows/hooks/useInteractionState', () => ({
   }),
 }));
 
+// Mock useFlowConfig (verbose by default; compact-mode tests flip it)
+const mockUseFlowConfig = vi.fn(() => ({isVerboseMode: true}));
+
+vi.mock('@/features/flows/hooks/useFlowConfig', () => ({
+  default: () => mockUseFlowConfig(),
+}));
+
 // Mock ValidationErrorBoundary
-vi.mock('../../../validation-panel/ValidationErrorBoundary', () => ({
+vi.mock('../../../../validation-panel/ValidationErrorBoundary', () => ({
   default: ({children, resource}: {children: React.ReactNode; resource: unknown}) => (
     <div data-testid="validation-error-boundary" data-resource={JSON.stringify(resource)}>
       {children}
@@ -84,6 +76,15 @@ vi.mock('../../view/View', () => ({
   },
 }));
 
+// Mock ExecutionCompact component
+vi.mock('../ExecutionCompact', () => ({
+  default: ({resource}: {resource: {display?: {label?: string}}}) => (
+    <div data-testid="execution-compact" data-label={resource?.display?.label}>
+      Execution Compact: {resource?.display?.label}
+    </div>
+  ),
+}));
+
 // Mock ExecutionMinimal component
 vi.mock('../ExecutionMinimal', () => ({
   default: ({resource}: {resource: {display?: {label?: string; description?: string; outcomes?: unknown}}}) => (
@@ -122,6 +123,75 @@ describe('Execution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseNodeId.mockReturnValue('execution-node-id');
+    mockUseFlowConfig.mockReturnValue({isVerboseMode: true});
+  });
+
+  describe('Compact Mode', () => {
+    beforeEach(() => {
+      mockUseFlowConfig.mockReturnValue({isVerboseMode: false});
+    });
+
+    it('should render ExecutionCompact instead of ExecutionMinimal when verbose mode is off', () => {
+      render(
+        <Execution
+          {...createMockProps({
+            data: {
+              action: {executor: {name: 'Simple Executor'}},
+              components: [],
+            },
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId('execution-compact')).toBeInTheDocument();
+      expect(screen.queryByTestId('execution-minimal')).not.toBeInTheDocument();
+    });
+
+    it('should render ExecutionCompact instead of View when verbose mode is off and data has components', () => {
+      render(
+        <Execution
+          {...createMockProps({
+            data: {
+              action: {executor: {name: 'Google OAuth'}},
+              components: [{id: 'comp-1', type: 'BUTTON'}],
+            },
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId('execution-compact')).toBeInTheDocument();
+      expect(screen.queryByTestId('view-component')).not.toBeInTheDocument();
+    });
+
+    it('should keep the compact node wrapped in ValidationErrorBoundary', () => {
+      render(
+        <Execution
+          {...createMockProps({
+            data: {
+              action: {executor: {name: 'Compact Executor'}},
+            },
+          })}
+        />,
+      );
+
+      const boundary = screen.getByTestId('validation-error-boundary');
+      expect(boundary).toContainElement(screen.getByTestId('execution-compact'));
+    });
+
+    it('should pass the resolved display label to ExecutionCompact', () => {
+      render(
+        <Execution
+          {...createMockProps({
+            data: {
+              action: {executor: {name: 'Default Name'}},
+              display: {label: 'Custom Label'},
+            },
+          })}
+        />,
+      );
+
+      expect(screen.getByTestId('execution-compact')).toHaveAttribute('data-label', 'Custom Label');
+    });
   });
 
   describe('Rendering with Components', () => {

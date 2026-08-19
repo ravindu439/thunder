@@ -116,6 +116,7 @@ paths:
                 validityPeriod: 3600
                 userAttributes: ["email", "username"]
               allowedUserTypes: ["employee", "customer"]
+              passkeyAllowedOrigins: ["https://myapp.example.com", "https://myapp-staging.example.com"]
               loginConsent:
                 validityPeriod: 3600
               inboundAuthConfig:
@@ -192,6 +193,7 @@ paths:
                   validityPeriod: 3600
                   userAttributes: ["email", "username"]
                 allowedUserTypes: ["employee", "customer"]
+                passkeyAllowedOrigins: ["https://myapp.example.com", "https://myapp-staging.example.com"]
                 loginConsent:
                   enabled: true
                   validityPeriod: 3600
@@ -336,6 +338,7 @@ paths:
                   validityPeriod: 3600
                   userAttributes: ["email", "username"]
                 allowedUserTypes: ["employee", "customer"]
+                passkeyAllowedOrigins: ["https://myapp.example.com", "https://myapp-staging.example.com"]
                 loginConsent:
                   enabled: true
                   validityPeriod: 3600
@@ -466,6 +469,7 @@ paths:
                 validityPeriod: 3600
                 userAttributes: ["email", "username"]
               allowedUserTypes: ["employee", "customer"]
+              passkeyAllowedOrigins: ["https://myapp.example.com", "https://myapp-staging.example.com"]
               loginConsent:
                 validityPeriod: 3600
               inboundAuthConfig:
@@ -543,6 +547,7 @@ paths:
                   validityPeriod: 3600
                   userAttributes: ["email", "username"]
                 allowedUserTypes: ["employee", "customer"]
+                passkeyAllowedOrigins: ["https://myapp.example.com", "https://myapp-staging.example.com"]
                 loginConsent:
                   enabled: true
                   validityPeriod: 3600
@@ -746,7 +751,7 @@ components:
   schemas:
     ApplicationRequest:
       type: object
-      required: [name, ouId]
+      required: [name, ouId, type]
       properties:
         ouId:
           type: string
@@ -796,6 +801,13 @@ components:
           format: uuid
           description: The ID of the layout configuration associated with this application.
           example: "770e8400-e29b-41d4-a716-446655440002"
+        type:
+          type: string
+          enum: [browser, fullstack, mobile, m2m, mcp, custom]
+          description: >
+            The canonical application type (platform/client class). Required at creation and
+            immutable thereafter. Use custom for applications that do not fit the other classes.
+          example: "browser"
         template:
           type: string
           description: The template type of the application.
@@ -840,8 +852,14 @@ components:
           type: array
           items:
             type: string
-          description: Array of allowed user types for this application.
+          description: User types allowed to sign up through this application.
           example: ["employee", "customer", "partner"]
+        passkeyAllowedOrigins:
+          type: array
+          items:
+            type: string
+          description: Allowed origins for WebAuthn/passkey operations for this application. When set, overrides the server-level passkey allowed origins for flow-based passkey operations.
+          example: ["https://myapp.example.com", "https://myapp-staging.example.com"]
         loginConsent:
           type: object
           properties:
@@ -859,10 +877,12 @@ components:
         flowSecret:
           type: string
           description: >
-            Flow Secret for backend/server-side applications — non-public clients that do not use the
-            redirect-based authorization_code flow. Used to authenticate when initiating a flow directly
-            via the Flow Execution API. When omitted on creation, a secret is generated automatically for
-            eligible applications and returned once in the creation response.
+            Flow Secret used to authenticate when initiating a flow directly via the Flow Execution API.
+            Issued only to full-stack, custom, and mcp applications that either have no OAuth 2.0
+            configuration (embedded) or are configured as a confidential, non-redirect OAuth 2.0 client.
+            Browser, mobile, and machine-to-machine applications are never issued one. When omitted
+            on creation, a secret is generated automatically for eligible applications and returned once in
+            the creation response.
           example: "550e8400e29b41d4a716446655440000abcdef0123456789"
 
     ApplicationCompleteResponse:
@@ -918,6 +938,13 @@ components:
           format: uuid
           description: The ID of the layout configuration associated with this application.
           example: "660e8400-e29b-41d4-a716-446655440001"
+        type:
+          type: string
+          enum: [browser, fullstack, mobile, m2m, mcp, custom]
+          description: >
+            The canonical application type (platform/client class). Required at creation and
+            immutable thereafter. Use custom for applications that do not fit the other classes.
+          example: "browser"
         template:
           type: string
           description: The template type of the application.
@@ -925,10 +952,11 @@ components:
         flowSecret:
           type: string
           description: >
-            Flow Secret for backend/server-side applications. Returned only in the creation response
-            for eligible applications (non-public clients that do not use the redirect-based
-            authorization_code flow). Used to authenticate when initiating a flow directly via the
-            Flow Execution API.
+            Flow Secret used to authenticate when initiating a flow directly via the Flow Execution API.
+            Issued and returned once in the creation response only for full-stack, custom, and mcp
+            applications that either have no OAuth 2.0 configuration (embedded) or are configured as a
+            confidential, non-redirect OAuth 2.0 client. Browser, mobile, and machine-to-machine
+            applications are never issued one.
           example: "550e8400e29b41d4a716446655440000abcdef0123456789"
         url:
           type: string
@@ -970,8 +998,14 @@ components:
           type: array
           items:
             type: string
-          description: Array of allowed user types for this application.
+          description: User types allowed to sign up through this application.
           example: ["employee", "customer", "partner"]
+        passkeyAllowedOrigins:
+          type: array
+          items:
+            type: string
+          description: Allowed origins for WebAuthn/passkey operations for this application. When set, overrides the server-level passkey allowed origins for flow-based passkey operations.
+          example: ["https://myapp.example.com", "https://myapp-staging.example.com"]
         loginConsent:
           type: object
           properties:
@@ -1040,6 +1074,13 @@ components:
           format: uuid
           description: The ID of the layout configuration associated with this application.
           example: "770e8400-e29b-41d4-a716-446655440002"
+        type:
+          type: string
+          enum: [browser, fullstack, mobile, m2m, mcp, custom]
+          description: >
+            The canonical application type (platform/client class). Required at creation and
+            immutable thereafter. Use custom for applications that do not fit the other classes.
+          example: "browser"
         template:
           type: string
           description: The template type of the application.
@@ -1084,8 +1125,14 @@ components:
           type: array
           items:
             type: string
-          description: Array of allowed user types for this application.
+          description: User types allowed to sign up through this application.
           example: ["employee", "customer", "partner"]
+        passkeyAllowedOrigins:
+          type: array
+          items:
+            type: string
+          description: Allowed origins for WebAuthn/passkey operations for this application. When set, overrides the server-level passkey allowed origins for flow-based passkey operations.
+          example: ["https://myapp.example.com", "https://myapp-staging.example.com"]
         loginConsent:
           type: object
           properties:
@@ -1155,6 +1202,13 @@ components:
           format: uuid
           description: The ID of the layout configuration associated with this application.
           example: "770e8400-e29b-41d4-a716-446655440002"
+        type:
+          type: string
+          enum: [browser, fullstack, mobile, m2m, mcp, custom]
+          description: >
+            The canonical application type (platform/client class). Required at creation and
+            immutable thereafter. Use custom for applications that do not fit the other classes.
+          example: "browser"
         template:
           type: string
           description: The template type of the application.
@@ -1211,6 +1265,15 @@ components:
           description: >
             Configuration applied when the access token's subject is the OAuth client itself,
             issued only via the client_credentials grant.
+        defaultAudience:
+          type: string
+          maxLength: 2048
+          description: >
+            The aud claim for access tokens that are not bound to a resource server, that is,
+            OIDC-only or scopeless requests. Falls back to the client_id when empty. A request
+            that targets a resource server (via the resource parameter or API scopes) uses that
+            resource server as the audience instead.
+          example: https://api.example.com
 
     AccessTokenSubConfig:
       type: object
@@ -1372,15 +1435,22 @@ components:
       type: object
       description: >
         Platform attestation configuration used to verify the binary identity of a mobile client
-        when it initiates a flow directly over HTTP. Configure exactly one platform.
-      oneOf:
-        - required: [android]
-        - required: [apple]
+        when it initiates a flow directly over HTTP. Configure at most one platform; devMode is
+        independent of the platform fields and may be set with neither configured.
+      not:
+        required: [android, apple]
       properties:
         android:
           $ref: '#/components/schemas/AndroidAttestation'
         apple:
           $ref: '#/components/schemas/AppleAttestation'
+        devMode:
+          type: boolean
+          default: false
+          description: >
+            When true, skips the platform-attestation check for a mobile application during direct
+            flow initiation. Disabled by default; enable only for testing or trying out
+            sample/development mobile clients.
 
     AndroidAttestation:
       type: object
@@ -1506,8 +1576,9 @@ components:
         includeActClaim:
           type: boolean
           description: >-
-            When true, access tokens issued through this client's authorization_code flow include
-            an implicit on-behalf-of `act` claim identifying the application.
+            When true, access tokens this client obtains for a user through the authorization_code
+            or CIBA grant include an implicit on-behalf-of `act` claim identifying the application.
+            Agent clients always include the claim, regardless of this setting.
           example: false
           default: false
         scopes:
@@ -1619,8 +1690,9 @@ components:
         includeActClaim:
           type: boolean
           description: >-
-            When true, access tokens issued through this client's authorization_code flow include
-            an implicit on-behalf-of `act` claim identifying the application.
+            When true, access tokens this client obtains for a user through the authorization_code
+            or CIBA grant include an implicit on-behalf-of `act` claim identifying the application.
+            Agent clients always include the claim, regardless of this setting.
           example: false
           default: false
         scopes:

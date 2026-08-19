@@ -1,22 +1,7 @@
 #!/usr/bin/env node
 
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Cuts a new Docusaurus documentation version and snapshots the API spec for it.
@@ -36,7 +21,7 @@
  */
 
 import {execFileSync} from 'child_process';
-import {existsSync} from 'fs';
+import {existsSync, readdirSync, rmSync} from 'fs';
 import {join, dirname} from 'path';
 import {fileURLToPath} from 'url';
 import {createLogger} from '@thunderid/logger';
@@ -74,6 +59,25 @@ try {
   // Step 2: Cut the Docusaurus doc version (snapshots content/ and versioned_sidebars/).
   logger.info(`📸 Cutting Docusaurus doc version ${version}...`);
   execFileSync('pnpm', ['docusaurus', 'docs:version', version], {stdio: 'inherit'});
+
+  // Step 3: docs:version copies the entire content/ tree, including the SDK sidebar.ts
+  // files under content/sdks/*/. Those are never imported for versioned docs (the frozen
+  // sidebar lives in versioned_sidebars/version-<v>-sidebars.json), so they're dead
+  // clutter in the snapshot — drop them.
+  const snapshotSdksDir = join(__dirname, '..', 'versioned_docs', `version-${version}`, 'sdks');
+  if (existsSync(snapshotSdksDir)) {
+    let removed = 0;
+    for (const sdk of readdirSync(snapshotSdksDir)) {
+      const sidebarFile = join(snapshotSdksDir, sdk, 'sidebar.ts');
+      if (existsSync(sidebarFile)) {
+        rmSync(sidebarFile);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      logger.info(`🧹 Removed ${removed} copied SDK sidebar.ts file(s) from the snapshot.`);
+    }
+  }
 
   logger.info(`✅ Version ${version} cut successfully.`);
   logger.info(`   → API spec: static/api/${version}/combined.yaml`);

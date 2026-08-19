@@ -1,27 +1,13 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
-import {Stack, Typography, CircularProgress, TextField, FormControl, FormLabel} from '@wso2/oxygen-ui';
+import {Stack, Typography, CircularProgress, TextField} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Link} from 'react-router';
 import useGetOrganizationUnit from '../../../api/useGetOrganizationUnit';
+import useOrganizationUnitRoutes from '../../../hooks/useOrganizationUnitRoutes';
 import type {OUNavigationState} from '../../../models/navigation';
 import type {OrganizationUnit} from '../../../models/organization-unit';
 
@@ -49,6 +35,7 @@ interface ParentSettingsSectionProps {
  */
 export default function ParentSettingsSection({organizationUnit}: ParentSettingsSectionProps): JSX.Element {
   const {t} = useTranslation();
+  const routes = useOrganizationUnitRoutes();
 
   const {data: parentOU, isLoading: isLoadingParent} = useGetOrganizationUnit(
     organizationUnit.parent ?? undefined,
@@ -58,14 +45,9 @@ export default function ParentSettingsSection({organizationUnit}: ParentSettings
   const renderParentInfo = (): JSX.Element => {
     if (!organizationUnit.parent) {
       return (
-        <TextField
-          fullWidth
-          id="parent-ou-input"
-          value={t('organizationUnits:edit.general.ou.noParent.label')}
-          InputProps={{
-            readOnly: true,
-          }}
-        />
+        <Typography variant="body2" color="text.secondary">
+          {t('organizationUnits:edit.general.ou.noParent.label', 'This is a root organization unit.')}
+        </Typography>
       );
     }
 
@@ -85,7 +67,7 @@ export default function ParentSettingsSection({organizationUnit}: ParentSettings
         <Stack direction="row" spacing={1} alignItems="center">
           <Typography
             component={Link}
-            to={`/organization-units/${parentOU.id}`}
+            to={routes.detail(parentOU.id)}
             state={navigationState}
             data-state={JSON.stringify(navigationState)}
             variant="body2"
@@ -111,6 +93,9 @@ export default function ParentSettingsSection({organizationUnit}: ParentSettings
         fullWidth
         id="parent-ou-input"
         value={organizationUnit.parent}
+        inputProps={{
+          'aria-label': t('organizationUnits:edit.general.ou.parent.label', 'Parent Organization Unit'),
+        }}
         InputProps={{
           readOnly: true,
         }}
@@ -126,13 +111,13 @@ export default function ParentSettingsSection({organizationUnit}: ParentSettings
 
   return (
     <SettingsCard
-      title={t('organizationUnits:edit.general.sections.parentOUSettings.title')}
-      description={t('organizationUnits:edit.general.sections.parentOUSettings.description')}
+      title={t('organizationUnits:edit.general.sections.parentOUSettings.title', 'Parent Organization Unit')}
+      description={t(
+        'organizationUnits:edit.general.sections.parentOUSettings.description',
+        'The parent organization unit in the hierarchy.',
+      )}
     >
-      <FormControl fullWidth>
-        <FormLabel htmlFor="parent-ou-input">{t('organizationUnits:edit.general.ou.parent.label')}</FormLabel>
-        {renderParentInfo()}
-      </FormControl>
+      {renderParentInfo()}
     </SettingsCard>
   );
 }

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -179,22 +164,26 @@ func (fe *flowEngine) executeNodePackage(ctx *EngineContext,
 		FlowID:      ssoFlowID(ctx),
 		FlowVersion: ctx.SSOFlowVersion,
 	})
+	fe.replayPromptInputs(ctx)
+
 	nodeCtx := &providers.NodeContext{
-		Context:          ssoCtx,
-		ExecutionID:      ctx.ExecutionID,
-		FlowType:         ctx.FlowType,
-		EntityID:         ctx.AppID,
-		CurrentAction:    ctx.CurrentAction,
-		Verbose:          ctx.Verbose,
-		NodeInputs:       getNodeInputs(ctx.CurrentNode),
-		UserInputs:       ctx.UserInputs,
-		CurrentNodeID:    ctx.CurrentNode.GetID(),
-		RuntimeData:      ctx.RuntimeData,
-		ForwardedData:    ctx.ForwardedData,
-		Application:      ctx.Application,
-		AuthUser:         ctx.AuthUser,
-		ExecutionHistory: ctx.ExecutionHistory,
+		Context:           ssoCtx,
+		ExecutionID:       ctx.ExecutionID,
+		FlowType:          ctx.FlowType,
+		EntityID:          ctx.AppID,
+		CurrentAction:     ctx.CurrentAction,
+		Verbose:           ctx.Verbose,
+		NodeInputs:        getNodeInputs(ctx.CurrentNode),
+		UserInputs:        ctx.UserInputs,
+		CurrentNodeID:     ctx.CurrentNode.GetID(),
+		RuntimeData:       ctx.RuntimeData,
+		SharedRuntimeData: ctx.sharedRuntimeData,
+		ForwardedData:     ctx.ForwardedData,
+		Application:       ctx.Application,
+		AuthUser:          ctx.AuthUser,
+		ExecutionHistory:  ctx.ExecutionHistory,
 	}
+	nodeCtx.SetInitiatorRequest(ctx.GetInitiatorRequest())
 	if nodeCtx.NodeInputs == nil {
 		nodeCtx.NodeInputs = make([]providers.Input, 0)
 	}
@@ -703,6 +692,13 @@ func (fe *flowEngine) updateContextWithNodeResponse(engineCtx *EngineContext, no
 		}
 		engineCtx.RuntimeData = sysutils.MergeStringMaps(engineCtx.RuntimeData, nodeResp.RuntimeData)
 	}
+	if len(nodeResp.SharedRuntimeData) > 0 {
+		if engineCtx.sharedRuntimeData == nil {
+			engineCtx.sharedRuntimeData = make(map[string]string)
+		}
+		engineCtx.sharedRuntimeData = sysutils.MergeStringMaps(
+			engineCtx.sharedRuntimeData, nodeResp.SharedRuntimeData)
+	}
 
 	// Handle additional data from the node response (e.g., passkeyCreationOptions, passkeyChallenge)
 	if len(nodeResp.AdditionalData) > 0 {
@@ -1032,6 +1028,7 @@ func (fe *flowEngine) switchContextToCallee(ctx *EngineContext,
 	ctx.CurrentNodeResponse = nil
 	ctx.CurrentSegmentID = ""
 	ctx.CurrentAction = ""
+	ctx.clearPausedPromptInputs()
 
 	// Set the current node to the start node of the callee graph
 	startNode, startErr := calleeGraph.GetStartNode()
@@ -1217,6 +1214,34 @@ func (fe *flowEngine) resolveStepForRedirection(ctx *EngineContext, nodeResp *co
 	return nil
 }
 
+// replayPromptInputs restores the inputs the paused prompt resolved to into ForwardedData before
+// that same node runs again. Dynamic inputs (schema attributes an executor found missing, resolver
+// options) reach a prompt through ForwardedData, which executeNodePackage clears after a single hop,
+// so a bare resume or a page refresh would otherwise render the prompt with only its static inputs.
+// Skipped when an action was selected, since the prompt then evaluates against that action's own
+// inputs, and when an executor already forwarded inputs in this traversal.
+func (fe *flowEngine) replayPromptInputs(ctx *EngineContext) {
+	if len(ctx.CurrentPromptInputs) == 0 || ctx.CurrentNode == nil {
+		return
+	}
+	if ctx.CurrentAction != "" {
+		return
+	}
+	if ctx.CurrentNode.GetID() != ctx.CurrentPromptNodeID {
+		return
+	}
+	if ctx.ForwardedData != nil {
+		if _, ok := ctx.ForwardedData[common.ForwardedDataKeyInputs]; ok {
+			return
+		}
+	}
+
+	if ctx.ForwardedData == nil {
+		ctx.ForwardedData = make(map[string]interface{})
+	}
+	ctx.ForwardedData[common.ForwardedDataKeyInputs] = ctx.CurrentPromptInputs
+}
+
 // resolveStepDetailsForPrompt resolves the step details for a user prompt response.
 func (fe *flowEngine) resolveStepDetailsForPrompt(ctx *EngineContext, nodeResp *common.NodeResponse,
 	flowStep *FlowStep) error {
@@ -1271,6 +1296,12 @@ func (fe *flowEngine) resolveStepDetailsForPrompt(ctx *EngineContext, nodeResp *
 
 	if len(nodeResp.FieldErrors) > 0 {
 		flowStep.Data.FieldErrors = nodeResp.FieldErrors
+	}
+
+	// Record how this prompt resolved so re-entering it renders the same step.
+	if ctx.CurrentNode != nil {
+		ctx.CurrentPromptInputs = flowStep.Data.Inputs
+		ctx.CurrentPromptNodeID = ctx.CurrentNode.GetID()
 	}
 
 	flowStep.Status = providers.FlowStatusIncomplete

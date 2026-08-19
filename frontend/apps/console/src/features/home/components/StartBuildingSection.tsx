@@ -1,40 +1,35 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {useGetApplications} from '@thunderid/configure-applications';
 import {useConfig} from '@thunderid/contexts';
-import {Box, Button, Card, Chip, Stack, Typography} from '@wso2/oxygen-ui';
+import {alpha, Box, Button, Card, Stack, Typography, useMediaQuery, useTheme} from '@wso2/oxygen-ui';
+import {ArrowRight} from '@wso2/oxygen-ui-icons-react';
 import {motion} from 'framer-motion';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
-import HomeFloatingLogos from './HomeFloatingLogos';
-import useGetApplications from '../../applications/api/useGetApplications';
+import FrameworkFlipCard from './FrameworkFlipCard';
+import RouteConfig from '../../../configs/RouteConfig';
 
 export default function StartBuildingSection(): JSX.Element {
   const navigate = useNavigate();
+  const theme = useTheme();
   const {t} = useTranslation('home');
   const {data} = useGetApplications({limit: 1});
   const {config} = useConfig();
+
+  const showFrameworks = useMediaQuery(theme.breakpoints.up('lg'));
+  const showAllFrameworkSlots = useMediaQuery(theme.breakpoints.up('xl'));
 
   const {brand} = config;
   const {product_name: productName} = brand || {};
   const totalApps = data?.totalResults ?? 0;
   const hasApps = totalApps > 0;
+
+  const goToApplicationList = () => {
+    navigate(RouteConfig.applications.list())?.catch(() => undefined);
+  };
 
   return (
     <Box
@@ -43,61 +38,133 @@ export default function StartBuildingSection(): JSX.Element {
       animate={{opacity: 1, y: 0}}
       transition={{duration: 0.4, ease: 'easeOut'}}
     >
-      <Card variant="outlined" sx={{position: 'relative', overflow: 'hidden', minHeight: 180, p: 4}}>
-        <HomeFloatingLogos />
+      <Card
+        variant="outlined"
+        sx={(theme) => ({
+          position: 'relative',
+          overflow: 'hidden',
+          minHeight: 180,
+          p: 4,
+          borderColor: alpha(theme.palette.primary.main, 0.22),
+          background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)}, ${alpha(theme.palette.primary.main, 0.02)} 60%)`,
+        })}
+      >
+        <Box
+          sx={(theme) => ({
+            position: 'absolute',
+            top: -120,
+            right: -40,
+            width: 420,
+            height: 420,
+            borderRadius: '50%',
+            background: `radial-gradient(circle, ${alpha(theme.palette.primary.main, 0.16)}, transparent 75%)`,
+            filter: 'blur(20px)',
+            pointerEvents: 'none',
+          })}
+        />
 
-        {/* Foreground content */}
-        <Box sx={{position: 'relative', zIndex: 1, maxWidth: {xs: '100%', sm: '55%'}}}>
-          <Stack spacing={2}>
-            <Typography variant="h3" fontWeight={600}>
-              {t('start_building.hero.title', {
-                product: productName,
-                defaultValue: 'Integrate {{product}} into your application',
-              })}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {t(
-                'start_building.hero.description',
-                'Add secure login, token management, and user sessions to your app in minutes.',
-              )}
-            </Typography>
-            <Stack direction="row" spacing={1.5} alignItems="center">
-              {hasApps ? (
-                <>
+        <Box
+          sx={{
+            position: 'relative',
+            zIndex: 1,
+            display: 'flex',
+            flexDirection: {xs: 'column', lg: 'row'},
+            alignItems: {xs: 'flex-start', lg: 'center'},
+            gap: {xs: 3, lg: 4},
+          }}
+        >
+          <Box sx={{flex: 1, minWidth: 0}}>
+            <Stack spacing={2}>
+              <Typography
+                variant="overline"
+                color="primary.light"
+                sx={{fontSize: '0.6875rem', fontWeight: 700, letterSpacing: '0.08em'}}
+              >
+                {t('start_building.hero.eyebrow', 'Get Started')}
+              </Typography>
+              <Typography variant="h3" fontWeight={600}>
+                {t('start_building.hero.title', {
+                  product: productName,
+                  defaultValue: 'Integrate {{product}} into your application',
+                })}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{maxWidth: 520}}>
+                {t(
+                  'start_building.hero.description',
+                  'Add secure login, token management, and user sessions to your app in minutes.',
+                )}
+              </Typography>
+              <Box sx={{display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5}}>
+                {hasApps ? (
+                  <>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        navigate(RouteConfig.applications.types())?.catch(() => undefined);
+                      }}
+                      sx={{textTransform: 'none', whiteSpace: 'nowrap'}}
+                    >
+                      {t('start_building.hero.actions.view_apps.label', 'Create Applications')}
+                    </Button>
+                    <Box
+                      onClick={goToApplicationList}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.25,
+                        color: 'primary.light',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Typography variant="body2" color="inherit">
+                        {t('start_building.hero.status.app_count', {
+                          count: totalApps,
+                          defaultValue: '{{count}} application',
+                        })}
+                      </Typography>
+                      <ArrowRight size={16} />
+                    </Box>
+                  </>
+                ) : (
                   <Button
                     variant="contained"
                     size="small"
                     onClick={() => {
-                      navigate('/applications/types')?.catch(() => undefined);
+                      navigate(RouteConfig.applications.types())?.catch(() => undefined);
                     }}
                     sx={{textTransform: 'none'}}
                   >
-                    {t('start_building.hero.actions.view_apps.label', 'Create Applications')}
+                    {t('start_building.hero.actions.create.label', 'Create Application')}
                   </Button>
-                  <Chip
-                    label={t('start_building.hero.status.app_count', {
-                      count: totalApps,
-                      defaultValue: '{{count}} application',
-                    })}
-                    size="small"
-                    variant="outlined"
-                    sx={{height: 24, fontSize: '0.75rem'}}
-                  />
-                </>
-              ) : (
-                <Button
-                  variant="contained"
-                  size="small"
-                  onClick={() => {
-                    navigate('/applications/types')?.catch(() => undefined);
-                  }}
-                  sx={{textTransform: 'none'}}
-                >
-                  {t('start_building.hero.actions.create.label', 'Create Application')}
-                </Button>
-              )}
+                )}
+              </Box>
             </Stack>
-          </Stack>
+          </Box>
+
+          {showFrameworks && (
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 1.25,
+                flexShrink: 0,
+                pl: 4,
+                borderLeft: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <Typography
+                variant="overline"
+                sx={{fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.06em', color: 'text.disabled'}}
+              >
+                {t('start_building.frameworks.label', 'Start with a Template')}
+              </Typography>
+              <FrameworkFlipCard slotCount={showAllFrameworkSlots ? 3 : 1} />
+            </Box>
+          )}
         </Box>
       </Card>
     </Box>

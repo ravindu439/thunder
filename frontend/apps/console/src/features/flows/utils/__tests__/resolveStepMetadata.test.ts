@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, expect, it} from 'vitest';
 import type {Resources} from '../../models/resources';
@@ -246,6 +231,43 @@ describe('resolveStepMetadata', () => {
 
       expect(properties.includeOptional).toBe(true);
       expect(properties.maxPerPrompt).toBe(5);
+    });
+
+    it('should coerce the sign-out prompt property string to a boolean based on the executor default', () => {
+      const steps: Step[] = [
+        createMockStep({
+          id: 'session-sign-out-step',
+          type: 'TASK_EXECUTION',
+          data: {
+            action: {
+              executor: {name: 'SessionSignOutExecutor'},
+            },
+            properties: {
+              promptOnSignOut: 'true',
+            },
+          },
+        }),
+      ];
+
+      const resources = createMockResources({
+        executors: [
+          createMockStep({
+            type: 'TASK_EXECUTION',
+            data: {
+              action: {
+                executor: {name: 'SessionSignOutExecutor'},
+              },
+              properties: {
+                promptOnSignOut: false,
+              },
+            },
+          }),
+        ],
+      });
+
+      const result = resolveStepMetadata(resources, steps);
+
+      expect(result[0].data.properties!.promptOnSignOut).toBe(true);
     });
 
     it('should fall back to executor defaults for invalid numeric strings in persisted executor properties', () => {

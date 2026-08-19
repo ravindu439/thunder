@@ -1,26 +1,10 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwe
 
 import (
 	"crypto/aes"
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -426,9 +410,75 @@ func (s *JEWUtilsTestSuite) TestExtractEPKFromHeader() {
 	_, err = extractEPKFromHeader(map[string]interface{}{"epk": "not-a-map"})
 	s.Error(err)
 	s.Contains(err.Error(), "missing or invalid epk")
+}
+
+func (s *JEWUtilsTestSuite) TestDecodeAPUAPV() {
+	// Valid base64url value
+	decoded := decodeAPUAPV(map[string]interface{}{"apu": base64.RawURLEncoding.EncodeToString([]byte("hello"))}, "apu")
+	s.Equal([]byte("hello"), decoded)
+
+	// Missing field
+	s.Nil(decodeAPUAPV(map[string]interface{}{}, "apu"))
+
+	// Empty string field
+	s.Nil(decodeAPUAPV(map[string]interface{}{"apu": ""}, "apu"))
+
+	// Field is not a string
+	s.Nil(decodeAPUAPV(map[string]interface{}{"apu": 123}, "apu"))
+
+	// Invalid base64
+	s.Nil(decodeAPUAPV(map[string]interface{}{"apu": "!invalid-base64!"}, "apu"))
+}
+
+func (s *JEWUtilsTestSuite) TestJwkToECDHPublicKey_InvalidKty() {
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecdhPub, _ := privKey.PublicKey.ECDH()
+	epkMap, _ := epkToMap(ecdhPub)
+
+	// Missing kty
+	missingKty := map[string]interface{}{
+		"crv": epkMap["crv"],
+		"x":   epkMap["x"],
+		"y":   epkMap["y"],
+	}
+	_, err := jwkToECDHPublicKey(missingKty)
+	s.Error(err)
+	s.Contains(err.Error(), "missing or invalid kty/crv/x/y")
+
+	// Wrong kty
+	wrongKty := map[string]interface{}{
+		"kty": "RSA",
+		"crv": epkMap["crv"],
+		"x":   epkMap["x"],
+		"y":   epkMap["y"],
+	}
+	_, err = jwkToECDHPublicKey(wrongKty)
+	s.Error(err)
+	s.Contains(err.Error(), "missing or invalid kty/crv/x/y")
+
+	// Valid kty
+	pub, err := jwkToECDHPublicKey(epkMap)
+	s.NoError(err)
+	s.Equal(ecdhPub, pub)
+}
+
+func (s *JEWUtilsTestSuite) TestExtractECDHPublicKeyFromHeader() {
+	// Valid EPK
+	privKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecdhPub, _ := privKey.PublicKey.ECDH()
+	epkMap, _ := epkToMap(ecdhPub)
+
+	pub, err := extractECDHPublicKeyFromHeader(map[string]interface{}{"epk": epkMap})
+	s.NoError(err)
+	s.Equal(ecdhPub, pub)
+
+	// Missing "epk" key
+	_, err = extractECDHPublicKeyFromHeader(map[string]interface{}{})
+	s.Error(err)
+	s.Contains(err.Error(), "missing or invalid epk")
 
 	// "epk" is a map with invalid JWK (bad x/y coordinates)
-	_, err = extractEPKFromHeader(map[string]interface{}{
+	_, err = extractECDHPublicKeyFromHeader(map[string]interface{}{
 		"epk": map[string]interface{}{
 			"kty": "EC",
 			"crv": "P-256",
@@ -438,78 +488,4 @@ func (s *JEWUtilsTestSuite) TestExtractEPKFromHeader() {
 	})
 	s.Error(err)
 	s.Contains(err.Error(), "invalid epk in header")
-}
-
-func (s *JEWUtilsTestSuite) TestGetECCurveInfoP256() {
-	curve, keySize, err := getECCurveInfo("P-256")
-	s.NoError(err)
-	s.Equal(ecdh.P256(), curve)
-	s.Equal(32, keySize)
-}
-
-func (s *JEWUtilsTestSuite) TestGetECCurveInfoP384() {
-	curve, keySize, err := getECCurveInfo("P-384")
-	s.NoError(err)
-	s.Equal(ecdh.P384(), curve)
-	s.Equal(48, keySize)
-}
-
-func (s *JEWUtilsTestSuite) TestGetECCurveInfoP521() {
-	curve, keySize, err := getECCurveInfo("P-521")
-	s.NoError(err)
-	s.Equal(ecdh.P521(), curve)
-	s.Equal(66, keySize)
-}
-
-func (s *JEWUtilsTestSuite) TestGetECCurveInfoUnsupported() {
-	curve, keySize, err := getECCurveInfo("P-999")
-	s.Error(err)
-	s.Nil(curve)
-	s.Equal(0, keySize)
-	s.Contains(err.Error(), "unsupported EC curve")
-}
-
-func (s *JEWUtilsTestSuite) TestJWKToECPublicKeyMissingParams() {
-	_, err := jwkToECPublicKey(map[string]interface{}{"x": "val", "y": "val"})
-	s.Error(err)
-	s.Contains(err.Error(), "JWK missing EC parameters")
-}
-
-func (s *JEWUtilsTestSuite) TestJWKToECPublicKeyUnsupportedCurve() {
-	_, err := jwkToECPublicKey(map[string]interface{}{
-		"crv": "P-999",
-		"x":   base64.RawURLEncoding.EncodeToString([]byte("value")),
-		"y":   base64.RawURLEncoding.EncodeToString([]byte("value")),
-	})
-	s.Error(err)
-	s.Contains(err.Error(), "unsupported EC curve")
-}
-
-func (s *JEWUtilsTestSuite) TestJWKToECPublicKeyInvalidCoordinateLength() {
-	_, err := jwkToECPublicKey(map[string]interface{}{
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString([]byte("short")),
-		"y":   base64.RawURLEncoding.EncodeToString([]byte("short")),
-	})
-	s.Error(err)
-	s.Contains(err.Error(), "invalid EC coordinate length")
-}
-
-func (s *JEWUtilsTestSuite) TestJWKToECPublicKeyValid() {
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	s.NoError(err)
-	ecdhPub, err := privKey.PublicKey.ECDH()
-	s.NoError(err)
-
-	raw := ecdhPub.Bytes() // 0x04 || x || y
-	jwk := map[string]interface{}{
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(raw[1:33]),
-		"y":   base64.RawURLEncoding.EncodeToString(raw[33:]),
-	}
-
-	pub, err := jwkToECPublicKey(jwk)
-	s.NoError(err)
-	s.NotNil(pub)
-	s.Equal(ecdhPub, pub)
 }

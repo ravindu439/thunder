@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package resource
 
@@ -603,6 +588,38 @@ func (suite *ActionAPITestSuite) TestActionPermissionDerivationWithCustomDelimit
 }
 
 // Helper functions
+
+// listActionsByKind lists actions filtered by kind. When resourceID is empty the resource server
+// level endpoint is used.
+func listActionsByKind(resourceServerID, resourceID, kind string) (*ActionListResponse, error) {
+	path := fmt.Sprintf("/%s/actions?kind=%s", resourceServerID, kind)
+	if resourceID != "" {
+		path = fmt.Sprintf("/%s/resources/%s/actions?kind=%s", resourceServerID, resourceID, kind)
+	}
+
+	resp, err := doRawRequest(http.MethodGet, resourceServerURL("%s", path), nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, resp.Body)
+	}
+
+	var list ActionListResponse
+	if err := json.Unmarshal([]byte(resp.Body), &list); err != nil {
+		return nil, err
+	}
+	return &list, nil
+}
+
+// actionIDs returns the IDs of the actions in a list response.
+func actionIDs(list *ActionListResponse) []string {
+	ids := make([]string, 0, len(list.Actions))
+	for _, action := range list.Actions {
+		ids = append(ids, action.ID)
+	}
+	return ids
+}
 
 func createActionAtResourceServer(resourceServerID string, req CreateActionRequest) (string, error) {
 	client := testutils.GetHTTPClient()

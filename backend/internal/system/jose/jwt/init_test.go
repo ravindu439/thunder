@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwt
 
@@ -34,7 +19,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
 	joseconfig "github.com/thunder-id/thunderid/internal/system/jose/config"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 	"github.com/thunder-id/thunderid/tests/mocks/crypto/cryptomock"
 )
 
@@ -108,13 +93,14 @@ func (suite *InitTestSuite) TestInitialize_Success() {
 
 	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
 	cryptoMock.EXPECT().
-		GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{KeyID: "test-kid"}).
-		Return([]kmprovider.PublicKeyInfo{{
+		GetPublicKeys(mock.Anything, providers.PublicKeyFilter{KeyID: "test-kid"}).
+		Return([]providers.PublicKeyInfo{{
 			KeyID:      "test-kid",
-			Algorithm:  cryptolib.AlgorithmRS256,
+			Algorithm:  string(cryptolib.AlgorithmRS256),
 			PublicKey:  &suite.testPrivateKey.PublicKey,
 			Thumbprint: "test-kid",
 		}}, nil)
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return([]string{string(cryptolib.AlgorithmRS256)})
 
 	jwtService, err := Initialize(cryptoMock, cfg)
 	assert.NoError(suite.T(), err)
@@ -131,7 +117,7 @@ func (suite *InitTestSuite) TestInitialize_PublicKeyRetrievalError() {
 
 	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
 	cryptoMock.EXPECT().
-		GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{KeyID: "test-kid"}).
+		GetPublicKeys(mock.Anything, providers.PublicKeyFilter{KeyID: "test-kid"}).
 		Return(nil, errors.New("provider unavailable"))
 
 	jwtService, err := Initialize(cryptoMock, cfg)
@@ -149,13 +135,14 @@ func (suite *InitTestSuite) TestInitialize_WithoutPreferredKeyID() {
 
 	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
 	cryptoMock.EXPECT().
-		GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{KeyID: ""}).
-		Return([]kmprovider.PublicKeyInfo{{
+		GetPublicKeys(mock.Anything, providers.PublicKeyFilter{KeyID: ""}).
+		Return([]providers.PublicKeyInfo{{
 			KeyID:      "",
-			Algorithm:  cryptolib.AlgorithmRS256,
+			Algorithm:  string(cryptolib.AlgorithmRS256),
 			PublicKey:  &suite.testPrivateKey.PublicKey,
 			Thumbprint: "test-kid",
 		}}, nil)
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return([]string{string(cryptolib.AlgorithmRS256)})
 
 	jwtService, err := Initialize(cryptoMock, cfg)
 	assert.NoError(suite.T(), err)

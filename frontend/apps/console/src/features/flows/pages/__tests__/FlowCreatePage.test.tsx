@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent, waitFor, act} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -33,7 +18,11 @@ vi.mock('@thunderid/logger/react', () => ({
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_key: string, defaultValue: string) => defaultValue,
+    t: (key: string, fallback?: string | {defaultValue?: string}) => {
+      if (typeof fallback === 'string') return fallback || key;
+      if (fallback && typeof fallback === 'object') return fallback.defaultValue ?? key;
+      return key;
+    },
   }),
 }));
 
@@ -50,9 +39,12 @@ vi.mock('react-router', async () => {
 
 // Mock useCreateFlow
 const mockMutate = vi.fn();
+const mockReset = vi.fn();
 const mockCreateFlow = {
   mutate: mockMutate,
+  reset: mockReset,
   isPending: false,
+  isError: false,
 };
 
 vi.mock('../../api/useCreateFlow', () => ({
@@ -90,6 +82,7 @@ describe('FlowCreatePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateFlow.isPending = false;
+    mockCreateFlow.isError = false;
     capturedTypeProps = {};
     capturedTemplateProps = {};
     capturedConfigureProps = {};
@@ -281,13 +274,13 @@ describe('FlowCreatePage', () => {
       fireEvent.click(screen.getByText('Create'));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-123');
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-123');
       });
     });
 
-    it('should display error alert when creation fails', async () => {
-      mockMutate.mockImplementation((_req: unknown, options: {onError: (err: {message: string}) => void}) => {
-        options.onError({message: 'Creation failed'});
+    it('should display a resolved error message when creation fails, never the raw server text', async () => {
+      mockMutate.mockImplementation((_req: unknown, options: {onError: (err: Error) => void}) => {
+        options.onError(new Error('Creation failed'));
       });
 
       render(<FlowCreatePage />);
@@ -305,8 +298,66 @@ describe('FlowCreatePage', () => {
       fireEvent.click(screen.getByText('Create'));
 
       await waitFor(() => {
-        expect(screen.getByText('Creation failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed to create flow. Please try again.')).toBeInTheDocument();
+        expect(screen.queryByText('Creation failed')).not.toBeInTheDocument();
       });
+    });
+
+    it('should clear a stale create error and reset the errored mutation as soon as the flow type changes', async () => {
+      mockMutate.mockImplementation((_req: unknown, options: {onError: (err: Error) => void}) => {
+        options.onError(new Error('Creation failed'));
+      });
+
+      render(<FlowCreatePage />);
+
+      navigateToConfigureStep();
+
+      act(() => {
+        (capturedConfigureProps.onChange as (v: {name: string; handle: string}) => void)({
+          name: 'Test',
+          handle: 'test',
+        });
+        (capturedConfigureProps.onReadyChange as (ready: boolean) => void)(true);
+      });
+
+      fireEvent.click(screen.getByText('Create'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to create flow. Please try again.')).toBeInTheDocument();
+      });
+
+      // Simulate the mutation now being in an errored state, as it would be after onError fires.
+      mockCreateFlow.isError = true;
+
+      // Navigate back to the Type step and change the type: this feeds the create request, so it
+      // should clear the stale error and reset the errored mutation.
+      fireEvent.click(screen.getByRole('button', {name: 'Flow Type'}));
+      act(() => {
+        (capturedTypeProps.onTypeChange as (type: string) => void)('REGISTRATION');
+      });
+
+      expect(screen.queryByText('Failed to create flow. Please try again.')).not.toBeInTheDocument();
+      expect(mockReset).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not reset the create mutation on a field change while a create is still pending', () => {
+      mockCreateFlow.isPending = true;
+      mockCreateFlow.isError = false;
+
+      render(<FlowCreatePage />);
+
+      navigateToConfigureStep();
+
+      act(() => {
+        (capturedConfigureProps.onChange as (v: {name: string; handle: string}) => void)({
+          name: 'Test',
+          handle: 'test',
+        });
+      });
+
+      // A real mutation can't be isPending and isError at once, so clearCreateError's isError
+      // check alone is sufficient to guard reset() from firing mid-flight.
+      expect(mockReset).not.toHaveBeenCalled();
     });
   });
 });

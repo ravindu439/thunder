@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, expect, it} from 'vitest';
 import {CONNECTION_FORM_FIELDS, type ConnectionFieldDef} from '../../config/connectionFormFields';
@@ -28,7 +13,9 @@ import {
 
 const GOOGLE_FIELDS = CONNECTION_FORM_FIELDS.google;
 const OIDC_FIELDS = CONNECTION_FORM_FIELDS.oidc;
+const OAUTH_FIELDS = CONNECTION_FORM_FIELDS.oauth;
 const TWILIO_FIELDS = CONNECTION_FORM_FIELDS.twilio;
+const SMS_GATEWAY_FIELDS = CONNECTION_FORM_FIELDS['sms-gateway'];
 const REDIRECT = 'https://id.acme.io/oauth/callback/google';
 const VALID_ACCOUNT_SID = `AC${'a1b2c3d4e5f6'.repeat(2)}01234567`;
 
@@ -39,6 +26,14 @@ describe('emptyFormValues', () => {
     expect(values.name).toBe('');
     expect(values.clientId).toBe('');
     expect(values.clientSecret).toBe('');
+  });
+
+  it('prefills fields that declare a default value', () => {
+    const values = emptyFormValues(SMS_GATEWAY_FIELDS, REDIRECT);
+    expect(values.httpMethod).toBe('POST');
+    expect(values.contentType).toBe('JSON');
+    expect(values.url).toBe('');
+    expect(values.httpHeaders).toBe('');
   });
 });
 
@@ -112,6 +107,37 @@ describe('formValuesToRequest', () => {
       {mode: 'create'},
     ) as unknown as Record<string, unknown>;
     expect(payload.trustedTokenAudience).toBe('my-external-client-id');
+  });
+
+  it('sends the SMS gateway transport fields and omits empty optional headers', () => {
+    const payload = formValuesToRequest(
+      {name: 'Custom SMS Sender', url: 'https://sms.example.com/send', httpMethod: 'POST', contentType: 'JSON'},
+      SMS_GATEWAY_FIELDS,
+      {mode: 'create'},
+    ) as unknown as Record<string, unknown>;
+
+    expect(payload).toEqual({
+      name: 'Custom SMS Sender',
+      url: 'https://sms.example.com/send',
+      httpMethod: 'POST',
+      contentType: 'JSON',
+    });
+  });
+
+  it('still sends the SMS gateway transport defaults now that neither field is required', () => {
+    const values = {
+      ...emptyFormValues(SMS_GATEWAY_FIELDS, REDIRECT),
+      name: 'Custom SMS Sender',
+      url: 'https://sms.example.com/send',
+    };
+
+    expect(validateConnectionForm(values, SMS_GATEWAY_FIELDS, 'create')).toEqual({});
+    expect(formValuesToRequest(values, SMS_GATEWAY_FIELDS, {mode: 'create'})).toEqual({
+      name: 'Custom SMS Sender',
+      url: 'https://sms.example.com/send',
+      httpMethod: 'POST',
+      contentType: 'JSON',
+    });
   });
 
   it('omits the secret on edit when not replacing (keep stored value)', () => {
@@ -206,6 +232,23 @@ describe('validateConnectionForm', () => {
     expect(errors.name).toBe('connections:validation.required');
     expect(errors.clientId).toBe('connections:validation.required');
     expect(errors.clientSecret).toBe('connections:validation.required');
+  });
+
+  it('does not require the OAuth 2 user profile endpoint', () => {
+    const errors = validateConnectionForm(
+      {
+        name: 'n',
+        clientId: 'c',
+        clientSecret: 's',
+        redirectUri: REDIRECT,
+        authorizationEndpoint: 'https://i/a',
+        tokenEndpoint: 'https://i/t',
+        userInfoEndpoint: '',
+      },
+      OAUTH_FIELDS,
+      'create',
+    );
+    expect(errors).not.toHaveProperty('userInfoEndpoint');
   });
 
   it('does not require the secret on edit', () => {

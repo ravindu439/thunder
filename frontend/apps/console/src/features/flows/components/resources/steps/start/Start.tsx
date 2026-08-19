@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2023-2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2023-2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Fab} from '@wso2/oxygen-ui';
 import {Handle, Position} from '@xyflow/react';
@@ -22,7 +7,6 @@ import type {ReactElement} from 'react';
 import type {CommonStepFactoryPropsInterface} from '../CommonStepFactory';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
 import {StaticStepTypes} from '@/features/flows/models/steps';
-import './Start.scss';
 
 /**
  * Props interface of {@link Start}
@@ -41,11 +25,17 @@ export type StartPropsInterface = CommonStepFactoryPropsInterface;
 function Start(): ReactElement {
   return (
     <div>
-      <Fab aria-label="start" className="start" variant="extended" size="small">
+      <Fab
+        aria-label="start"
+        color="primary"
+        variant="extended"
+        size="small"
+        data-flow-node-surface
+        sx={{boxShadow: 'none', pointerEvents: 'none', zIndex: 0}}
+      >
         Start
       </Fab>
       <Handle
-        className="hidden-handle"
         id={`${StaticStepTypes.Start.toLowerCase()}${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`}
         type="source"
         position={Position.Right}

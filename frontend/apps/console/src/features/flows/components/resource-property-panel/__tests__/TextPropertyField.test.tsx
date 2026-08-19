@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent, waitFor} from '@testing-library/react';
 import type {ReactNode} from 'react';
@@ -255,9 +240,7 @@ describe('TextPropertyField', () => {
 
       // The text field should have the i18n key
       expect(screen.getByRole('textbox')).toHaveValue('{{t(common.submit)}}');
-      // The resolved value label should be displayed
-      expect(screen.getByText('flows:core.elements.textPropertyField.resolvedValue')).toBeInTheDocument();
-      // The resolved value should be displayed (mock returns the key itself)
+      // The resolved value is shown as a single caption line, labelled by tooltip.
       expect(screen.getByText('common.submit')).toBeInTheDocument();
     });
 
@@ -272,8 +255,8 @@ describe('TextPropertyField', () => {
         {wrapper: createWrapper()},
       );
 
-      // Should not have the resolved value label
-      expect(screen.queryByText('flows:core.elements.textPropertyField.resolvedValue')).not.toBeInTheDocument();
+      // Should not show a resolved value preview for a plain literal.
+      expect(screen.queryByLabelText('flows:core.elements.textPropertyField.resolvedValue')).not.toBeInTheDocument();
     });
   });
 
@@ -529,7 +512,7 @@ describe('TextPropertyField', () => {
 
       // Verify the component renders with i18n pattern
       expect(screen.getByRole('textbox')).toHaveValue('{{t(common.test)}}');
-      expect(screen.getByText('flows:core.elements.textPropertyField.resolvedValue')).toBeInTheDocument();
+      expect(screen.getByText('common.test')).toBeInTheDocument();
     });
 
     it('should not render i18n resolved value box when pattern has empty key', () => {
@@ -698,6 +681,94 @@ describe('TextPropertyField', () => {
 
       expect(screen.getByRole('textbox')).toHaveValue('{{t(app.module.feature.component.label)}}');
       expect(screen.getByText('app.module.feature.component.label')).toBeInTheDocument();
+    });
+  });
+
+  describe('Suggestions', () => {
+    const suggestions = ['row', 'column', 'row-reverse'];
+
+    const renderWithSuggestions = (propertyValue = '') =>
+      render(
+        <TextPropertyField
+          resource={mockResource}
+          propertyKey="direction"
+          propertyValue={propertyValue}
+          onChange={mockOnChange}
+          suggestions={suggestions}
+        />,
+        {wrapper: createWrapper()},
+      );
+
+    it('should offer the suggestions in a dropdown', () => {
+      renderWithSuggestions();
+
+      fireEvent.keyDown(screen.getByRole('combobox'), {key: 'ArrowDown'});
+
+      expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(suggestions);
+    });
+
+    it('should commit a selected suggestion immediately', () => {
+      renderWithSuggestions();
+
+      fireEvent.keyDown(screen.getByRole('combobox'), {key: 'ArrowDown'});
+      fireEvent.click(screen.getAllByRole('option').find((option) => option.textContent === 'column')!);
+
+      expect(mockOnChange).toHaveBeenCalledWith('direction', 'column', mockResource);
+    });
+
+    it('should accept a custom value that is not suggested', () => {
+      renderWithSuggestions();
+
+      fireEvent.change(screen.getByRole('combobox'), {target: {value: 'safe center'}});
+
+      expect(screen.getByRole('combobox')).toHaveValue('safe center');
+      expect(mockOnChange).toHaveBeenCalledWith('direction', 'safe center', mockResource, true);
+    });
+
+    it('should keep the typed value while a debounced update is in flight', () => {
+      // The parent only echoes the value back after a debounce, so the field has to
+      // hold its own state or keystrokes get clobbered mid-typing.
+      renderWithSuggestions();
+
+      const input = screen.getByRole('combobox');
+      fireEvent.change(input, {target: {value: 'col'}});
+      fireEvent.change(input, {target: {value: 'colu'}});
+
+      expect(input).toHaveValue('colu');
+    });
+
+    it('should hide the dynamic value button for structural properties', () => {
+      // Layout values map straight to CSS, so i18n/meta templates do not apply.
+      render(
+        <TextPropertyField
+          resource={mockResource}
+          propertyKey="direction"
+          propertyValue=""
+          onChange={mockOnChange}
+          suggestions={suggestions}
+          supportsDynamicValue={false}
+        />,
+        {wrapper: createWrapper()},
+      );
+
+      // The i18n mock echoes the key back, so the tooltip label is the raw key.
+      expect(
+        screen.queryByLabelText('flows:core.elements.textPropertyField.tooltip.configureDynamicValue'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('should keep the dynamic value button when the property supports it', () => {
+      renderWithSuggestions();
+
+      expect(
+        screen.getByLabelText('flows:core.elements.textPropertyField.tooltip.configureDynamicValue'),
+      ).toBeInTheDocument();
+    });
+
+    it('should render the field label above the input', () => {
+      renderWithSuggestions();
+
+      expect(screen.getByText('Direction')).toBeInTheDocument();
     });
   });
 });

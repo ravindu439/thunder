@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
@@ -27,8 +12,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 const (
@@ -81,9 +66,9 @@ var acrValuesAuthzFlow = testutils.Flow{
 			"onSuccess": "auth_assert",
 		},
 		{
-			"id":   "auth_assert",
-			"type": "TASK_EXECUTION",
-			"executor": map[string]interface{}{"name": "AuthAssertExecutor"},
+			"id":        "auth_assert",
+			"type":      "TASK_EXECUTION",
+			"executor":  map[string]interface{}{"name": "AuthAssertExecutor"},
 			"onSuccess": "end",
 		},
 		{
@@ -121,6 +106,7 @@ func (ts *AcrValuesAuthzTestSuite) SetupSuite() {
 		"name":                      acrAppName,
 		"description":               "Application for acr_values authorization integration tests",
 		"ouId":                      ts.ouID,
+		"type":                      "fullstack",
 		"authFlowId":                ts.authFlowID,
 		"isRegistrationFlowEnabled": false,
 		"inboundAuthConfig": []map[string]interface{}{

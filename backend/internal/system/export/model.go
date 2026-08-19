@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
@@ -22,20 +7,23 @@ import declarativeresource "github.com/thunder-id/thunderid/internal/system/decl
 
 // ExportRequest represents the request structure for exporting resources.
 type ExportRequest struct {
-	Agents            []string `json:"agents,omitempty"`
-	Applications      []string `json:"applications,omitempty"`
-	Connections       []string `json:"connections,omitempty"`
-	UserTypes         []string `json:"userTypes,omitempty"`
-	OrganizationUnits []string `json:"organizationUnits,omitempty"`
-	Users             []string `json:"users,omitempty"`
-	Groups            []string `json:"groups,omitempty"`
-	ResourceServers   []string `json:"resourceServers,omitempty"`
-	Roles             []string `json:"roles,omitempty"`
-	Flows             []string `json:"flows,omitempty"`
-	Translations      []string `json:"translations,omitempty"`
-	Layouts           []string `json:"layouts,omitempty"`
-	Themes            []string `json:"themes,omitempty"`
-	ServerConfigs     []string `json:"serverConfigs,omitempty"`
+	Agents                   []string `json:"agents,omitempty"`
+	Applications             []string `json:"applications,omitempty"`
+	Connections              []string `json:"connections,omitempty"`
+	UserTypes                []string `json:"userTypes,omitempty"`
+	AgentTypes               []string `json:"agentTypes,omitempty"`
+	OrganizationUnits        []string `json:"organizationUnits,omitempty"`
+	Users                    []string `json:"users,omitempty"`
+	Groups                   []string `json:"groups,omitempty"`
+	ResourceServers          []string `json:"resourceServers,omitempty"`
+	Roles                    []string `json:"roles,omitempty"`
+	Flows                    []string `json:"flows,omitempty"`
+	Translations             []string `json:"translations,omitempty"`
+	Layouts                  []string `json:"layouts,omitempty"`
+	Themes                   []string `json:"themes,omitempty"`
+	ServerConfigs            []string `json:"serverConfigs,omitempty"`
+	CredentialConfigurations []string `json:"credentialConfigurations,omitempty"`
+	PresentationDefinitions  []string `json:"presentationDefinitions,omitempty"`
 
 	Options *ExportOptions `json:"options,omitempty"`
 }

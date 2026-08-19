@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import { SequenceDiagram } from './SequenceDiagram';
 
@@ -191,6 +176,26 @@ export function OIDCFlowDiagram() {
         { from: 3, to: 2, label: ['200 OK — access token + ID token', '(+ refresh token)'] },
         { from: 2, to: 3, label: 'GET /oauth2/userinfo', sublabel: ['Authorization:', 'Bearer <access_token>'] },
         { from: 3, to: 2, label: '200 OK — user claims' },
+      ]}
+    />
+  );
+}
+
+export function RPInitiatedLogoutDiagram() {
+  return (
+    <SequenceDiagram
+      actors={['User Agent', 'Application', 'ThunderID']}
+      gaps={[360, 360]}
+      ariaLabel="RP-Initiated Logout flow: the user signs out of the application, the application clears its local session and redirects the browser to the end_session_endpoint, ThunderID validates the request and runs the sign-out flow to terminate the SSO session, then redirects the browser to the post-logout redirect URI."
+      rows={[
+        { from: 0, to: 1, label: 'Sign out' },
+        { note: 'Application clears its local session', between: [1, 1] },
+        { from: 1, to: 0, label: ['302 Redirect to', '/oauth2/logout'] },
+        { from: 0, to: 2, label: 'GET /oauth2/logout', sublabel: ['id_token_hint,', 'post_logout_redirect_uri, state'] },
+        { note: 'Validate request, run the sign-out flow', between: [2, 2] },
+        { note: 'Terminate SSO session, clear session cookie', between: [2, 2] },
+        { from: 2, to: 0, label: ['302 Redirect to', 'post_logout_redirect_uri?state=...'] },
+        { from: 0, to: 1, label: 'Land on the post-logout page' },
       ]}
     />
   );

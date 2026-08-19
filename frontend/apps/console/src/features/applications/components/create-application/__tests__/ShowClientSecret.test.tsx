@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -34,8 +19,6 @@ describe('ShowClientSecret', () => {
   const mockCopy = vi.fn().mockResolvedValue(undefined);
 
   const defaultProps: ShowClientSecretProps = {
-    appName: 'Test Application',
-    clientId: 'test_client_id_12345',
     clientSecret: 'test_secret_12345',
     onCopySecret: mockOnCopySecret,
     onContinue: mockOnContinue,
@@ -67,22 +50,6 @@ describe('ShowClientSecret', () => {
       expect(screen.getByText(/store it somewhere safe/i)).toBeInTheDocument();
     });
 
-    it('should display the application name', () => {
-      renderComponent();
-
-      expect(screen.getByText('App Name')).toBeInTheDocument();
-      expect(screen.getByText('Test Application')).toBeInTheDocument();
-    });
-
-    it('should render the client ID field', () => {
-      renderComponent();
-
-      expect(screen.getByText('Client ID')).toBeInTheDocument();
-      const input = screen.getByDisplayValue('test_client_id_12345');
-      expect(input).toBeInTheDocument();
-      expect(input).toHaveAttribute('readonly');
-    });
-
     it('should render the client secret field', () => {
       renderComponent();
 
@@ -103,8 +70,40 @@ describe('ShowClientSecret', () => {
     it('should render action buttons', () => {
       renderComponent();
 
-      expect(screen.getByRole('button', {name: /copy secret/i})).toBeInTheDocument();
+      expect(screen.getByTestId('application-copy-secret-button')).toHaveTextContent(/copy client secret/i);
       expect(screen.getByRole('button', {name: /continue/i})).toBeInTheDocument();
+    });
+  });
+
+  describe('flow secret copy', () => {
+    it('should name the Flow Secret when only a Flow Secret is issued', () => {
+      renderComponent({clientSecret: '', flowSecret: 'flow_secret_12345'});
+
+      expect(screen.getByRole('heading', {level: 1, name: /save your flow secret/i})).toBeInTheDocument();
+      expect(screen.getByText(/only time you'll see this secret\. Store it somewhere safe\./i)).toBeInTheDocument();
+      expect(screen.getByText(/your flow secret is a confidential key/i)).toBeInTheDocument();
+      expect(screen.getByTestId('application-copy-secret-button')).toHaveTextContent(/copy flow secret/i);
+      expect(screen.queryByText(/your client secret is a confidential key/i)).not.toBeInTheDocument();
+    });
+
+    it('should copy the Flow Secret from the main copy button when it is the only secret', async () => {
+      const user = userEvent.setup();
+      renderComponent({clientSecret: '', flowSecret: 'flow_secret_12345'});
+
+      await user.click(screen.getByTestId('application-copy-secret-button'));
+
+      await waitFor(() => {
+        expect(mockCopy).toHaveBeenCalledWith('flow_secret_12345');
+      });
+    });
+
+    it('should use neutral copy when both secrets are issued', () => {
+      renderComponent({flowSecret: 'flow_secret_12345'});
+
+      expect(screen.getByRole('heading', {level: 1, name: /save your secrets/i})).toBeInTheDocument();
+      expect(screen.getByText(/only time you'll see these secrets\. Store them somewhere safe\./i)).toBeInTheDocument();
+      expect(screen.getByText(/these secrets are confidential keys/i)).toBeInTheDocument();
+      expect(screen.getByTestId('application-copy-secret-button')).toHaveTextContent(/copy client secret/i);
     });
   });
 
@@ -136,7 +135,7 @@ describe('ShowClientSecret', () => {
       const user = userEvent.setup();
       renderComponent();
 
-      const copyButton = screen.getByRole('button', {name: 'Copy Client Secret'});
+      const copyButton = screen.getAllByRole('button', {name: 'Copy Client Secret'})[0];
 
       await user.click(copyButton);
 
@@ -145,24 +144,11 @@ describe('ShowClientSecret', () => {
       });
     });
 
-    it('should call copy function when copy client ID button is clicked', async () => {
-      const user = userEvent.setup();
-      renderComponent();
-
-      const copyButton = screen.getByRole('button', {name: 'Copy Client ID'});
-
-      await user.click(copyButton);
-
-      await waitFor(() => {
-        expect(mockCopy).toHaveBeenCalledWith('test_client_id_12345');
-      });
-    });
-
     it('should call copy function when main copy button is clicked', async () => {
       const user = userEvent.setup();
       renderComponent();
 
-      const mainCopyButton = screen.getByRole('button', {name: /copy secret/i});
+      const mainCopyButton = screen.getByTestId('application-copy-secret-button');
       await user.click(mainCopyButton);
 
       await waitFor(() => {
@@ -218,23 +204,11 @@ describe('ShowClientSecret', () => {
   });
 
   describe('props variations', () => {
-    it('should render with different app name', () => {
-      renderComponent({appName: 'Another App'});
-
-      expect(screen.getByText('Another App')).toBeInTheDocument();
-    });
-
     it('should render with different client secret', () => {
       renderComponent({clientSecret: 'different_secret_abc'});
 
       const input = screen.getByDisplayValue('different_secret_abc');
       expect(input).toBeInTheDocument();
-    });
-
-    it('should not render the client ID field when not provided', () => {
-      renderComponent({clientId: ''});
-
-      expect(screen.queryByText('Client ID')).not.toBeInTheDocument();
     });
   });
 

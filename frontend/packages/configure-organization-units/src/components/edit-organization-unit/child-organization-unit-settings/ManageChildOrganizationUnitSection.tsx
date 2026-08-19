@@ -1,30 +1,16 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard} from '@thunderid/components';
+import {QueryErrorNotice, SettingsCard} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
-import {Box, DataGrid, Avatar, useTheme} from '@wso2/oxygen-ui';
+import {Box, DataGrid, Avatar} from '@wso2/oxygen-ui';
 import {Building} from '@wso2/oxygen-ui-icons-react';
 import {useMemo, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import useGetChildOrganizationUnits from '../../../api/useGetChildOrganizationUnits';
+import useOrganizationUnitRoutes from '../../../hooks/useOrganizationUnitRoutes';
 import type {OUNavigationState} from '../../../models/navigation';
 import type {OrganizationUnit} from '../../../models/organization-unit';
 
@@ -61,12 +47,12 @@ export default function ManageChildOrganizationUnitSection({
   organizationUnitName,
 }: ManageChildOrganizationUnitSectionProps): JSX.Element {
   const navigate = useNavigate();
+  const routes = useOrganizationUnitRoutes();
   const {t} = useTranslation();
-  const theme = useTheme();
   const logger = useLogger('ManageChildOrganizationUnitSection');
   const dataGridLocaleText = useDataGridLocaleText();
 
-  const {data: childOUsData, isLoading} = useGetChildOrganizationUnits(organizationUnitId);
+  const {data: childOUsData, isLoading, error, refetch} = useGetChildOrganizationUnits(organizationUnitId);
 
   const columns: DataGrid.GridColDef<OrganizationUnit>[] = useMemo(
     () => [
@@ -88,13 +74,11 @@ export default function ManageChildOrganizationUnitSection({
             <Avatar
               sx={{
                 p: 0.5,
-                backgroundColor: theme.vars?.palette.grey[500],
+                bgcolor: 'primary.main',
+                color: 'primary.contrastText',
                 width: 30,
                 height: 30,
                 fontSize: '0.875rem',
-                ...theme.applyStyles('dark', {
-                  backgroundColor: theme.vars?.palette.grey[900],
-                }),
               }}
             >
               <Building size={14} />
@@ -122,13 +106,37 @@ export default function ManageChildOrganizationUnitSection({
         valueGetter: (_value, row): string => row.description ?? '-',
       },
     ],
-    [t, theme],
+    [t],
   );
+
+  if (error) {
+    return (
+      <SettingsCard
+        title={t('organizationUnits:edit.childOUs.sections.manage.title', 'Child Organization Units')}
+        description={t(
+          'organizationUnits:edit.childOUs.sections.manage.description',
+          'View and manage child organization units under this OU',
+        )}
+      >
+        <QueryErrorNotice
+          error={error}
+          t={(key, options) => t(key.includes(':') ? key : `organizationUnits:${key}`, options)}
+          variant="inline"
+          onRetry={() => void refetch()}
+          fallbackKey="organizationUnits:edit.childOUs.sections.manage.error"
+          fallbackDefaultValue="Failed to load child organization units"
+        />
+      </SettingsCard>
+    );
+  }
 
   return (
     <SettingsCard
-      title={t('organizationUnits:edit.childOUs.sections.manage.title')}
-      description={t('organizationUnits:edit.childOUs.sections.manage.description')}
+      title={t('organizationUnits:edit.childOUs.sections.manage.title', 'Child Organization Units')}
+      description={t(
+        'organizationUnits:edit.childOUs.sections.manage.description',
+        'Organization units nested under this one.',
+      )}
       slotProps={{
         content: {
           sx: {
@@ -152,7 +160,7 @@ export default function ManageChildOrganizationUnitSection({
               },
             };
             (async (): Promise<void> => {
-              await navigate(`/organization-units/${ou.id}`, {state: navigationState});
+              await navigate(routes.detail(ou.id), {state: navigationState});
             })().catch((_error: unknown) => {
               logger.error('Failed to navigate to child organization unit', {error: _error, ouId: ou.id});
             });

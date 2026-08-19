@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package utils provides utility functions for OAuth2 operations.
 package utils
@@ -25,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
@@ -43,23 +29,45 @@ func GetURIWithQueryParams(uri string, queryParams map[string]string) (string, e
 	return utils.GetURIWithQueryParams(uri, queryParams)
 }
 
+// allowedErrorParamChars matches the character set permitted for the error and error_description
+// parameters: %x20-21 / %x23-5B / %x5D-7E.
+var allowedErrorParamChars = regexp.MustCompile(`^[\x20-\x21\x23-\x5B\x5D-\x7E]*$`)
+
+// maxErrorDescriptionLength bounds the error description carried in a client redirect.
+const maxErrorDescriptionLength = 256
+
 // validateErrorParams validates the error code and error description parameters.
 func validateErrorParams(err, desc string) error {
-	// Define a regex pattern for the allowed character set: %x20-21 / %x23-5B / %x5D-7E
-	allowedCharPattern := `^[\x20-\x21\x23-\x5B\x5D-\x7E]*$`
-	allowedCharRegex := regexp.MustCompile(allowedCharPattern)
-
 	// Validate the error code.
-	if err != "" && !allowedCharRegex.MatchString(err) {
+	if err != "" && !allowedErrorParamChars.MatchString(err) {
 		return fmt.Errorf("invalid error code: %s", err)
 	}
 
 	// Validate the error description.
-	if desc != "" && !allowedCharRegex.MatchString(desc) {
+	if desc != "" && !allowedErrorParamChars.MatchString(desc) {
 		return fmt.Errorf("invalid error description: %s", desc)
 	}
 
 	return nil
+}
+
+// SanitizeErrorDescription drops characters the spec disallows in an error description and truncates
+// the result, so a description sourced from a flow error cannot make the client redirect unbuildable.
+// It returns "" when nothing usable remains, letting the caller fall back to its own message.
+func SanitizeErrorDescription(desc string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if allowedErrorParamChars.MatchString(string(r)) {
+			return r
+		}
+		return -1
+	}, desc)
+
+	sanitized = strings.TrimSpace(sanitized)
+	if len(sanitized) > maxErrorDescriptionLength {
+		sanitized = strings.TrimSpace(sanitized[:maxErrorDescriptionLength])
+	}
+
+	return sanitized
 }
 
 const (
@@ -133,17 +141,17 @@ func GenerateAuthorizationCode() (string, error) {
 }
 
 // SeparateOIDCAndNonOIDCScopes separates the given scopes into OIDC and non-OIDC scopes.
-// A scope is treated as OIDC if it is a standard OIDC scope or is present in the app's
-// custom scope_claims mapping.
+// A scope is OIDC if it is a standard OIDC scope or the app's scope-to-claims mapping defines it.
+// Anything else is a permission scope for the resource servers.
 func SeparateOIDCAndNonOIDCScopes(scopes string, scopeClaimsMapping map[string][]string) ([]string, []string) {
 	scopeSlice := utils.ParseStringArray(scopes, " ")
 	var oidcScopes []string
 	var nonOidcScopes []string
 
 	for _, scp := range scopeSlice {
+		_, isMapped := scopeClaimsMapping[scp]
 		_, isStandard := constants.StandardOIDCScopes[scp]
-		_, isCustomOIDC := scopeClaimsMapping[scp]
-		if isStandard || isCustomOIDC {
+		if isMapped || isStandard {
 			oidcScopes = append(oidcScopes, scp)
 		} else {
 			nonOidcScopes = append(nonOidcScopes, scp)
@@ -152,24 +160,33 @@ func SeparateOIDCAndNonOIDCScopes(scopes string, scopeClaimsMapping map[string][
 	return oidcScopes, nonOidcScopes
 }
 
-// FilterOIDCScopesByAllowedScopes filters requested OIDC scopes against the application's active scopes.
-func FilterOIDCScopesByAllowedScopes(oidcScopes []string, allowedScopes []string) []string {
-	if allowedScopes == nil {
-		return oidcScopes
+// ResolveScopeClaims returns the claims a scope releases. The app's mapping wins where it defines
+// the scope, so mapping it to a shorter list narrows what it releases; a standard OIDC scope the
+// app leaves unmapped falls back to its standard claims. Returns nil for an unmapped custom scope,
+// which therefore releases nothing.
+func ResolveScopeClaims(scope string, scopeClaimsMapping map[string][]string) []string {
+	if claims, ok := scopeClaimsMapping[scope]; ok {
+		return claims
 	}
-
-	allowedScopeSet := make(map[string]struct{}, len(allowedScopes))
-	for _, scope := range allowedScopes {
-		allowedScopeSet[scope] = struct{}{}
+	if standard, ok := constants.StandardOIDCScopes[scope]; ok {
+		return standard.Claims
 	}
+	return nil
+}
 
-	filteredScopes := make([]string, 0, len(oidcScopes))
-	for _, scope := range oidcScopes {
-		if _, ok := allowedScopeSet[scope]; ok {
-			filteredScopes = append(filteredScopes, scope)
+// DefaultScopeClaims returns the standard OIDC scope-to-claims mapping a client starts with when
+// created without one. openid is left out: it is always granted and carries no user attributes.
+func DefaultScopeClaims() map[string][]string {
+	defaults := make(map[string][]string, len(constants.StandardOIDCScopes))
+	for scope, def := range constants.StandardOIDCScopes {
+		if scope == constants.ScopeOpenID {
+			continue
 		}
+		claims := make([]string, len(def.Claims))
+		copy(claims, def.Claims)
+		defaults[scope] = claims
 	}
-	return filteredScopes
+	return defaults
 }
 
 // ParseClaimsRequest parses the claims parameter JSON string into a ClaimsRequest struct.

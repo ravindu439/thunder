@@ -420,6 +420,74 @@ func (_c *groupStoreInterfaceMock_DeleteMembershipsByMember_Call) RunAndReturn(r
 	return _c
 }
 
+// GetDirectGroupParents provides a mock function for the type groupStoreInterfaceMock
+func (_mock *groupStoreInterfaceMock) GetDirectGroupParents(ctx context.Context, groupIDs []string) ([]string, error) {
+	ret := _mock.Called(ctx, groupIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDirectGroupParents")
+	}
+
+	var r0 []string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) ([]string, error)); ok {
+		return returnFunc(ctx, groupIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string) []string); ok {
+		r0 = returnFunc(ctx, groupIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string) error); ok {
+		r1 = returnFunc(ctx, groupIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// groupStoreInterfaceMock_GetDirectGroupParents_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDirectGroupParents'
+type groupStoreInterfaceMock_GetDirectGroupParents_Call struct {
+	*mock.Call
+}
+
+// GetDirectGroupParents is a helper method to define mock.On call
+//   - ctx context.Context
+//   - groupIDs []string
+func (_e *groupStoreInterfaceMock_Expecter) GetDirectGroupParents(ctx interface{}, groupIDs interface{}) *groupStoreInterfaceMock_GetDirectGroupParents_Call {
+	return &groupStoreInterfaceMock_GetDirectGroupParents_Call{Call: _e.mock.On("GetDirectGroupParents", ctx, groupIDs)}
+}
+
+func (_c *groupStoreInterfaceMock_GetDirectGroupParents_Call) Run(run func(ctx context.Context, groupIDs []string)) *groupStoreInterfaceMock_GetDirectGroupParents_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *groupStoreInterfaceMock_GetDirectGroupParents_Call) Return(strings []string, err error) *groupStoreInterfaceMock_GetDirectGroupParents_Call {
+	_c.Call.Return(strings, err)
+	return _c
+}
+
+func (_c *groupStoreInterfaceMock_GetDirectGroupParents_Call) RunAndReturn(run func(ctx context.Context, groupIDs []string) ([]string, error)) *groupStoreInterfaceMock_GetDirectGroupParents_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetGroup provides a mock function for the type groupStoreInterfaceMock
 func (_mock *groupStoreInterfaceMock) GetGroup(ctx context.Context, id string) (group.GroupDAO, error) {
 	ret := _mock.Called(ctx, id)

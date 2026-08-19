@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   type Connection,
@@ -37,6 +22,56 @@ import VisualFlowConstants from '../constants/VisualFlowConstants';
 import type {Element} from '../models/elements';
 import {ElementTypes} from '../models/elements';
 import type {StepData} from '../models/steps';
+
+/** Matches a `data-action-ref` attribute and captures its delimiter and value. */
+const ACTION_REF_SENTINEL = /(\sdata-action-ref\s*=\s*)(?:"([^"]*)"|'([^']*)')/gi;
+
+/**
+ * Rewrites the `data-action-ref` sentinels inside a rich text's label so they keep matching the
+ * component's `action.ref`. The adapter only dispatches when the clicked anchor's sentinel equals
+ * the ref, so the two values must always move together.
+ *
+ * A label with no sentinel at all is returned unchanged: the adapter dispatches on any anchor
+ * click in that case. In a label with several sentinels, one carrying some other ref belongs to a
+ * different link and is left alone. A lone sentinel is unambiguously this component's, so it is
+ * rewritten even when it does not match `previousRef` — that is how a label left divergent by an
+ * earlier build, where the ref moved without the sentinel, heals.
+ *
+ * With several sentinels and no ref to match them against, only the first is rewritten: it is the
+ * anchor the properties panel derives the ref from, and rewriting them all would point unrelated
+ * links at this action.
+ *
+ * @param label - The rich text's label, which may be HTML.
+ * @param previousRef - The ref the label's sentinels are expected to carry, if any.
+ * @param nextRef - The ref to write.
+ * @returns The label with its matching sentinels rewritten.
+ */
+const syncLabelActionRef = (label: string, previousRef: string | undefined, nextRef: string): string => {
+  const isAmbiguous = (label.match(ACTION_REF_SENTINEL)?.length ?? 0) > 1;
+  const hasPreviousRef = previousRef !== undefined && previousRef !== '';
+  let seen = 0;
+
+  return label.replace(
+    ACTION_REF_SENTINEL,
+    (match: string, prefix: string, doubleQuoted?: string, singleQuoted?: string) => {
+      const currentRef = doubleQuoted ?? singleQuoted;
+
+      seen += 1;
+
+      if (isAmbiguous) {
+        if (!hasPreviousRef) {
+          return seen === 1 ? `${prefix}"${nextRef}"` : match;
+        }
+
+        if (currentRef !== previousRef) {
+          return match;
+        }
+      }
+
+      return `${prefix}"${nextRef}"`;
+    },
+  );
+};
 
 /**
  * Props interface for useVisualFlowHandlers hook
@@ -98,9 +133,10 @@ const useVisualFlowHandlers = (props: UseVisualFlowHandlersProps): UseVisualFlow
 
       const currentNodes = getNodes();
 
-      // If the edge originates from a rich-text action handle, copy the target node's id
-      // into the rich-text component's `action.ref`. Author-facing UX: they draw the edge
-      // and the "Connected step" field auto-populates.
+      // If the edge originates from a rich-text action handle, name the action after the target
+      // node. The ref is a lookup key the runtime matches against the clicked anchor's
+      // `data-action-ref`, so the label's sentinel is rewritten in the same pass. Changing one
+      // without the other leaves a link that renders but dispatches nothing.
       const nextSuffix = VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX;
       if (
         connection.sourceHandle &&
@@ -119,10 +155,28 @@ const useVisualFlowHandlers = (props: UseVisualFlowHandlersProps): UseVisualFlow
             let localChanged = false;
             const next = elements.map((el) => {
               if (el.id === componentId && el.type === ElementTypes.RichText) {
-                const withAction = el as Element & {action?: {ref?: string}};
-                if (withAction.action !== undefined && withAction.action.ref !== targetId) {
-                  localChanged = true;
-                  return {...el, action: {...withAction.action, ref: targetId}} as Element;
+                const withAction = el as Element & {action?: {ref?: string} | null; label?: string};
+                // A toggled-off link stores `action: null`, which has no ref to move.
+                if (withAction.action !== undefined && withAction.action !== null) {
+                  const nextLabel: string | undefined =
+                    typeof withAction.label === 'string'
+                      ? syncLabelActionRef(withAction.label, withAction.action.ref, targetId)
+                      : undefined;
+
+                  // Reconnecting to the step the ref already names must still heal a label whose
+                  // sentinel has drifted, otherwise the most direct repair gesture is a no-op.
+                  if (
+                    withAction.action.ref !== targetId ||
+                    (nextLabel !== undefined && nextLabel !== withAction.label)
+                  ) {
+                    localChanged = true;
+
+                    return {
+                      ...el,
+                      action: {...withAction.action, ref: targetId},
+                      ...(nextLabel !== undefined ? {label: nextLabel} : {}),
+                    } as Element;
+                  }
                 }
               }
 

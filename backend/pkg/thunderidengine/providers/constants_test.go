@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package providers
 
@@ -51,6 +36,22 @@ func (suite *ConstantsTestSuite) TestGrantType_IsValid() {
 	}
 	assert.False(suite.T(), GrantType("implicit").IsValid())
 	assert.False(suite.T(), GrantType("").IsValid())
+}
+
+func (suite *ConstantsTestSuite) TestGrantType_IssuesRefreshToken() {
+	assert.True(suite.T(), GrantTypeAuthorizationCode.IssuesRefreshToken())
+	assert.True(suite.T(), GrantTypeCIBA.IssuesRefreshToken())
+	assert.False(suite.T(), GrantTypeClientCredentials.IssuesRefreshToken())
+	assert.False(suite.T(), GrantTypeRefreshToken.IssuesRefreshToken())
+	assert.False(suite.T(), GrantTypeTokenExchange.IssuesRefreshToken())
+	assert.False(suite.T(), GrantTypeJWTBearer.IssuesRefreshToken())
+}
+
+func (suite *ConstantsTestSuite) TestAnyIssuesRefreshToken() {
+	assert.True(suite.T(), AnyIssuesRefreshToken([]string{"client_credentials", "authorization_code"}))
+	assert.True(suite.T(), AnyIssuesRefreshToken([]string{string(GrantTypeCIBA)}))
+	assert.False(suite.T(), AnyIssuesRefreshToken([]string{"client_credentials", "refresh_token"}))
+	assert.False(suite.T(), AnyIssuesRefreshToken([]string{}))
 }
 
 func (suite *ConstantsTestSuite) TestResponseType_IsValid() {

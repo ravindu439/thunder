@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwe
 
@@ -47,6 +32,14 @@ const (
 	// A256GCMKW represents AES GCM Key Wrap with 256-bit key (RFC 7518 §4.7)
 	A256GCMKW KeyEncAlgorithm = "A256GCMKW"
 )
+
+// knownKeyEncAlgorithms lists every JWE "alg" (key management) algorithm value this package
+// recognizes, regardless of whether the configured crypto provider actually supports it.
+var knownKeyEncAlgorithms = []KeyEncAlgorithm{
+	RSAOAEP, RSAOAEP256, A128KW, A192KW, A256KW,
+	ECDHES, ECDHESA128KW, ECDHESA192KW, ECDHESA256KW,
+	A128GCMKW, A192GCMKW, A256GCMKW,
+}
 
 // ContentEncAlgorithm represents the JWE content encryption algorithm (enc header parameter)
 type ContentEncAlgorithm string

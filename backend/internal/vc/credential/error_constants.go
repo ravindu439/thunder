@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package credential
 
@@ -143,6 +128,51 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.vci.configuration_invalid_ou_description",
 			DefaultValue: "A valid organization unit (ouId or ouHandle) is required",
+		},
+	}
+
+	// ErrorConfigurationEmptyClaimName indicates a claim was declared without a name.
+	ErrorConfigurationEmptyClaimName = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "VCI-2008",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.vci.configuration_empty_claim_name",
+			DefaultValue: "Invalid claim",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.vci.configuration_empty_claim_name_description",
+			DefaultValue: "Claim names must not be empty",
+		},
+	}
+
+	// ErrorConfigurationDuplicateClaim indicates the same claim name was declared more than once.
+	ErrorConfigurationDuplicateClaim = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "VCI-2009",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.vci.configuration_duplicate_claim",
+			DefaultValue: "Duplicate claim",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.vci.configuration_duplicate_claim_description",
+			DefaultValue: "Claim name '{{param(claim)}}' is declared more than once",
+		},
+	}
+
+	// ErrorConfigurationReservedClaim indicates a claim name collides with a registered SD-JWT
+	// claim. Issuing such a credential would place the name in both the payload and a disclosure,
+	// which a conformant wallet must reject.
+	ErrorConfigurationReservedClaim = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "VCI-2010",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.vci.configuration_reserved_claim",
+			DefaultValue: "Reserved claim",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.vci.configuration_reserved_claim_description",
+			DefaultValue: "Claim name '{{param(claim)}}' is reserved by the SD-JWT VC format and " +
+				"cannot be used as a credential claim",
 		},
 	}
 )

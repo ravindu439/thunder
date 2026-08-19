@@ -1,38 +1,12 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useQueryClient} from '@tanstack/react-query';
-import {PageLoadingAnimation, ResourceAvatar} from '@thunderid/components';
+import {PageLoadingAnimation, QueryErrorNotice, ResourceAvatar} from '@thunderid/components';
 import {useConfig} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
 import {useThunderID} from '@thunderid/react';
-import {
-  Box,
-  IconButton,
-  Typography,
-  CircularProgress,
-  TreeView,
-  Snackbar,
-  Alert,
-  useTheme,
-  Avatar,
-  Tooltip,
-} from '@wso2/oxygen-ui';
+import {Box, IconButton, Typography, CircularProgress, TreeView, useTheme, Avatar, Tooltip} from '@wso2/oxygen-ui';
 import {Eye, Pencil, Plus, Trash2} from '@wso2/oxygen-ui-icons-react';
 import {useState, useCallback, useEffect, useRef, useMemo} from 'react';
 import type {ReactNode, MouseEvent, KeyboardEvent, SyntheticEvent, JSX} from 'react';
@@ -45,6 +19,7 @@ import useGetOrganizationUnits from '../api/useGetOrganizationUnits';
 import OrganizationUnitQueryKeys from '../constants/organization-unit-query-keys';
 import OrganizationUnitTreeConstants from '../constants/organization-unit-tree-constants';
 import useOrganizationUnit from '../contexts/useOrganizationUnit';
+import useOrganizationUnitRoutes from '../hooks/useOrganizationUnitRoutes';
 import type {OrganizationUnit} from '../models/organization-unit';
 import type {OrganizationUnitTreeItem} from '../models/organization-unit-tree';
 import type {OrganizationUnitListResponse} from '../models/responses';
@@ -301,7 +276,12 @@ function CustomTreeItem(allProps: CustomTreeItemProps): JSX.Element {
             gap: 1.5,
           }}
         >
-          <ResourceAvatar value={itemData?.logoUrl} size={30} fallback="emoji:🏛️" />
+          <ResourceAvatar
+            variant="rounded"
+            value={itemData?.logoUrl}
+            size={30}
+            fallback={OrganizationUnitTreeConstants.DEFAULT_AVATAR}
+          />
           <Box sx={{flexGrow: 1, minWidth: 0}}>
             <Typography variant="body2" sx={{fontWeight: 500, lineHeight: 1.3}}>
               {labelStr}
@@ -372,12 +352,13 @@ function CustomTreeItem(allProps: CustomTreeItemProps): JSX.Element {
 export default function OrganizationUnitsTreeView(): JSX.Element {
   const theme = useTheme();
   const navigate = useNavigate();
+  const routes = useOrganizationUnitRoutes();
   const {t} = useTranslation();
   const logger = useLogger('OrganizationUnitsTreeView');
   const {http} = useThunderID();
   const {getServerUrl} = useConfig();
   const queryClient = useQueryClient();
-  const {data, isLoading, error} = useGetOrganizationUnits();
+  const {data, isLoading, error, refetch} = useGetOrganizationUnits();
   const {treeItems, setTreeItems, expandedItems, setExpandedItems, loadedItems, setLoadedItems, resetTreeState} =
     useOrganizationUnit();
 
@@ -400,11 +381,6 @@ export default function OrganizationUnitsTreeView(): JSX.Element {
   const builtFromDataRef = useRef<unknown>(null);
   const [selectedOU, setSelectedOU] = useState<{id: string; name: string} | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
-  const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: 'success' | 'error'}>({
-    open: false,
-    message: '',
-    severity: 'success',
-  });
 
   const fetchChildPage = useCallback(
     async (parentId: string, offset: number): Promise<OrganizationUnitListResponse> =>
@@ -730,12 +706,12 @@ export default function OrganizationUnitsTreeView(): JSX.Element {
   const handleEditClick = useCallback(
     (_event: MouseEvent<HTMLElement>, ou: {id: string; name: string}): void => {
       (async (): Promise<void> => {
-        await navigate(`/organization-units/${ou.id}`);
+        await navigate(routes.detail(ou.id));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to organization unit', {error: _error, ouId: ou.id});
       });
     },
-    [navigate, logger],
+    [navigate, routes, logger],
   );
 
   const handleDeleteClick = useCallback((_event: MouseEvent<HTMLElement>, ou: {id: string; name: string}): void => {
@@ -749,38 +725,30 @@ export default function OrganizationUnitsTreeView(): JSX.Element {
   };
 
   const handleDeleteSuccess = useCallback((): void => {
+    // useDeleteOrganizationUnit's own onSuccess already toasts the success message.
     resetTreeState();
-    setSnackbar({
-      open: true,
-      message: t('organizationUnits:edit.general.dangerZone.delete.success'),
-      severity: 'success',
-    });
-  }, [resetTreeState, t]);
-
-  const handleDeleteError = useCallback((message: string): void => {
-    setSnackbar({open: true, message, severity: 'error'});
-  }, []);
+  }, [resetTreeState]);
 
   const handleAddChildClick = useCallback(
     (_event: MouseEvent<HTMLElement>, ou: {id: string; name: string; handle: string}): void => {
       (async (): Promise<void> => {
-        await navigate('/organization-units/create', {
+        await navigate(routes.create(), {
           state: {parentId: ou.id, parentName: ou.name, parentHandle: ou.handle},
         });
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to create child organization unit', {error: _error, parentId: ou.id});
       });
     },
-    [navigate, logger],
+    [navigate, routes, logger],
   );
 
   const handleAddRootClick = useCallback((): void => {
     (async (): Promise<void> => {
-      await navigate('/organization-units/create');
+      await navigate(routes.create());
     })().catch((_error: unknown) => {
       logger.error('Failed to navigate to create organization unit page', {error: _error});
     });
-  }, [navigate, logger]);
+  }, [navigate, routes, logger]);
 
   const combinedLoadMoreLoadingItems = useMemo(() => {
     if (!rootLoadMoreLoading) return loadMoreLoadingItems;
@@ -812,14 +780,15 @@ export default function OrganizationUnitsTreeView(): JSX.Element {
 
   if (error) {
     return (
-      <Box sx={{textAlign: 'center', py: 8}}>
-        <Typography variant="h6" color="error" gutterBottom>
-          {t('organizationUnits:listing.error.title')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {error.message ?? t('organizationUnits:listing.error.unknown')}
-        </Typography>
-      </Box>
+      <QueryErrorNotice
+        error={error}
+        t={(key, options) => t(key.includes(':') ? key : `organizationUnits:${key}`, options)}
+        variant="block"
+        title={t('organizationUnits:listing.error.title', 'Failed to load organization units')}
+        fallbackKey="organizationUnits:listing.error.unknown"
+        fallbackDefaultValue="An unknown error occurred"
+        onRetry={() => void refetch()}
+      />
     );
   }
 
@@ -1018,23 +987,7 @@ export default function OrganizationUnitsTreeView(): JSX.Element {
         organizationUnitId={selectedOU?.id ?? null}
         onClose={handleDeleteDialogClose}
         onSuccess={handleDeleteSuccess}
-        onError={handleDeleteError}
       />
-
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
-        anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
-      >
-        <Alert
-          onClose={() => setSnackbar((prev) => ({...prev, open: false}))}
-          severity={snackbar.severity}
-          sx={{width: '100%'}}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
     </>
   );
 }

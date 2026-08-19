@@ -1,43 +1,21 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ciba
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
-	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
-	"github.com/thunder-id/thunderid/internal/system/database/provider"
-	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
-// newCIBAStore returns a Redis-backed store when the runtime transient database is configured for Redis,
-// and falls back to the SQL-backed store otherwise. This mirrors the selection pattern used
-// by the authz package for its authorization request and code stores.
-func newCIBAStore(cfg oauthconfig.Config) CIBARequestStoreInterface {
-	if cfg.RuntimeTransientDBType == provider.DataSourceTypeRedis {
-		return newRedisCIBARequestStore(provider.GetRedisProvider(), cfg.DeploymentID)
-	}
-	return newCIBARequestStore(cfg.DeploymentID)
-}
+// cibaStateField is the JSON field name that guards the atomic state transitions. It must match the
+// marshaled field name of CIBAAuthRequest.State.
+const cibaStateField = "State"
 
 // CIBARequestStoreInterface defines the interface for CIBA authentication request storage.
 type CIBARequestStoreInterface interface {
@@ -50,222 +28,146 @@ type CIBARequestStoreInterface interface {
 	UpdateState(ctx context.Context, authReqID string, state CIBARequestState) error
 }
 
-// cibaRequestStore provides the CIBA authentication request store functionality using database.
-type cibaRequestStore struct {
-	dbProvider   provider.DBProviderInterface
-	deploymentID string
+// cibaStore adapts a runtime store provider to CIBA authentication request storage. Requests are
+// stored under the CIBA namespace, keyed by auth request ID, as a serialized CIBAAuthRequest.
+type cibaStore struct {
+	store providers.RuntimeStoreProvider
 }
 
-// newCIBARequestStore creates a new instance of cibaRequestStore with injected dependencies.
-func newCIBARequestStore(deploymentID string) CIBARequestStoreInterface {
-	return &cibaRequestStore{
-		dbProvider:   provider.GetDBProvider(),
-		deploymentID: deploymentID,
-	}
+// newCIBAStore creates a CIBA request store backed by the given runtime store provider.
+func newCIBAStore(store providers.RuntimeStoreProvider) CIBARequestStoreInterface {
+	return &cibaStore{store: store}
 }
 
-// Add inserts a new CIBA authentication request into the store.
-// UserID is not included at creation — it is populated by MarkAuthenticated once the
-// callback verifies the assertion.
-func (s *cibaRequestStore) Add(ctx context.Context, request *CIBAAuthRequest) error {
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+// Add inserts a new CIBA authentication request with a TTL derived from its expiry time.
+// UserID is empty at creation — it is populated by MarkAuthenticated once the callback verifies
+// the assertion.
+func (s *cibaStore) Add(ctx context.Context, request *CIBAAuthRequest) error {
+	data, err := json.Marshal(request)
 	if err != nil {
-		return fmt.Errorf("failed to get database client: %w", err)
+		return fmt.Errorf("failed to marshal CIBA request: %w", err)
 	}
 
-	encodedResources, err := encodeResources(request.Resources)
-	if err != nil {
-		return err
+	ttl := time.Until(request.ExpiryTime)
+	if ttl <= 0 {
+		return fmt.Errorf("CIBA request already expired")
 	}
 
-	_, err = dbClient.ExecuteContext(ctx, queryInsertCIBAAuthRequest,
-		request.AuthReqID, request.ClientID, request.StandardScopes, encodedResources, string(request.State),
-		request.ExpiryTime.UTC(), s.deploymentID)
-	if err != nil {
-		return fmt.Errorf("failed to insert CIBA authentication request: %w", err)
-	}
-
-	return nil
+	return s.store.Put(ctx, providers.NamespaceCIBA, request.AuthReqID, data, int64(ttl.Seconds()))
 }
 
 // GetByID retrieves a CIBA authentication request by ID. Returns ErrCIBARequestNotFound if absent.
-func (s *cibaRequestStore) GetByID(ctx context.Context, authReqID string) (*CIBAAuthRequest, error) {
+func (s *cibaStore) GetByID(ctx context.Context, authReqID string) (*CIBAAuthRequest, error) {
 	if authReqID == "" {
 		return nil, ErrCIBARequestNotFound
 	}
 
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+	data, err := s.store.Get(ctx, providers.NamespaceCIBA, authReqID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get database client: %w", err)
+		return nil, fmt.Errorf("failed to get CIBA request: %w", err)
 	}
-
-	results, err := dbClient.QueryContext(ctx, queryGetCIBAAuthRequest, authReqID, s.deploymentID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query CIBA authentication request: %w", err)
-	}
-
-	if len(results) == 0 {
+	if data == nil {
 		return nil, ErrCIBARequestNotFound
 	}
 
-	request, err := buildCIBAAuthRequestFromRow(results[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to build CIBA authentication request: %w", err)
+	var request CIBAAuthRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal CIBA request: %w", err)
 	}
-
-	return request, nil
+	return &request, nil
 }
 
-// MarkAuthenticated transitions a pending request to authenticated and records the user ID
-// (from the assertion sub claim), attribute cache ID, completed ACR, and authentication time.
-// The WHERE STATE = 'PENDING' guard in the query prevents a double-callback race condition.
-func (s *cibaRequestStore) MarkAuthenticated(ctx context.Context, authReqID, userID,
+// MarkAuthenticated transitions a pending request to authenticated and records the user ID (from
+// the assertion sub claim), authorized scopes, attribute cache ID, completed ACR, and authentication
+// time. The compare-and-swap on the State field prevents a double-callback race condition.
+func (s *cibaStore) MarkAuthenticated(ctx context.Context, authReqID, userID,
 	authorizedScopes, attributeCacheID, completedACR string, authTime time.Time) error {
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+	record, err := s.GetByID(ctx, authReqID)
 	if err != nil {
-		return fmt.Errorf("failed to get database client: %w", err)
+		return err
+	}
+	if record.State != CIBAStatePending {
+		return fmt.Errorf("CIBA request %s is not pending", authReqID)
 	}
 
-	_, err = dbClient.ExecuteContext(ctx, queryMarkCIBAAuthRequestAuthenticated,
-		string(CIBAStateAuthenticated), userID, authorizedScopes, attributeCacheID, completedACR,
-		authTime.UTC(), authReqID, string(CIBAStatePending), s.deploymentID)
+	record.State = CIBAStateAuthenticated
+	record.UserID = userID
+	record.AuthorizedScopes = authorizedScopes
+	record.AttributeCacheID = attributeCacheID
+	record.CompletedACR = completedACR
+	record.AuthTime = authTime
+
+	data, err := json.Marshal(record)
 	if err != nil {
-		return fmt.Errorf("failed to mark CIBA authentication request as authenticated: %w", err)
+		return fmt.Errorf("failed to marshal CIBA request: %w", err)
 	}
 
+	swapped, err := s.store.CompareFieldAndSwap(ctx, providers.NamespaceCIBA, authReqID,
+		cibaStateField, string(CIBAStatePending), data)
+	if err != nil {
+		return fmt.Errorf("failed to mark CIBA request as authenticated: %w", err)
+	}
+	if !swapped {
+		return fmt.Errorf("CIBA request %s is not pending", authReqID)
+	}
 	return nil
 }
 
 // MarkConsumed atomically transitions an authenticated request to consumed. It returns false when
-// no row was updated (i.e. the request was already consumed or is not authenticated), enabling
-// one-time-use enforcement without a separate read under concurrent polling.
-func (s *cibaRequestStore) MarkConsumed(ctx context.Context, authReqID string) (bool, error) {
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+// the request is not in the AUTHENTICATED state (already consumed or otherwise terminal), enabling
+// one-time-use enforcement under concurrent polling.
+func (s *cibaStore) MarkConsumed(ctx context.Context, authReqID string) (bool, error) {
+	record, err := s.GetByID(ctx, authReqID)
+	if errors.Is(err, ErrCIBARequestNotFound) {
+		return false, nil
+	}
 	if err != nil {
-		return false, fmt.Errorf("failed to get database client: %w", err)
+		return false, err
+	}
+	if record.State != CIBAStateAuthenticated {
+		return false, nil
 	}
 
-	rowsAffected, err := dbClient.ExecuteContext(ctx, queryConsumeCIBAAuthRequest,
-		string(CIBAStateConsumed), authReqID, string(CIBAStateAuthenticated), s.deploymentID)
+	record.State = CIBAStateConsumed
+
+	data, err := json.Marshal(record)
 	if err != nil {
-		return false, fmt.Errorf("failed to consume CIBA authentication request: %w", err)
+		return false, fmt.Errorf("failed to marshal CIBA request: %w", err)
 	}
 
-	return rowsAffected > 0, nil
+	swapped, err := s.store.CompareFieldAndSwap(ctx, providers.NamespaceCIBA, authReqID,
+		cibaStateField, string(CIBAStateAuthenticated), data)
+	if err != nil {
+		return false, fmt.Errorf("failed to consume CIBA request: %w", err)
+	}
+	return swapped, nil
 }
 
 // UpdateLastPolled updates the last polled timestamp of a CIBA authentication request.
-func (s *cibaRequestStore) UpdateLastPolled(ctx context.Context, authReqID string, polledAt time.Time) error {
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+func (s *cibaStore) UpdateLastPolled(ctx context.Context, authReqID string, polledAt time.Time) error {
+	record, err := s.GetByID(ctx, authReqID)
 	if err != nil {
-		return fmt.Errorf("failed to get database client: %w", err)
+		return err
 	}
-
-	_, err = dbClient.ExecuteContext(ctx, queryUpdateCIBALastPolled, polledAt.UTC(), authReqID, s.deploymentID)
-	if err != nil {
-		return fmt.Errorf("failed to update CIBA last polled time: %w", err)
-	}
-
-	return nil
+	record.LastPolledAt = polledAt
+	return s.save(ctx, record)
 }
 
 // UpdateState updates the state of a CIBA authentication request.
-func (s *cibaRequestStore) UpdateState(ctx context.Context, authReqID string, state CIBARequestState) error {
-	dbClient, err := s.dbProvider.GetRuntimeTransientDBClient()
+func (s *cibaStore) UpdateState(ctx context.Context, authReqID string, state CIBARequestState) error {
+	record, err := s.GetByID(ctx, authReqID)
 	if err != nil {
-		return fmt.Errorf("failed to get database client: %w", err)
+		return err
 	}
-
-	_, err = dbClient.ExecuteContext(ctx, queryUpdateCIBAAuthRequestState, string(state), authReqID,
-		s.deploymentID)
-	if err != nil {
-		return fmt.Errorf("failed to update CIBA authentication request state: %w", err)
-	}
-
-	return nil
+	record.State = state
+	return s.save(ctx, record)
 }
 
-// buildCIBAAuthRequestFromRow builds a CIBAAuthRequest from a database result row.
-func buildCIBAAuthRequestFromRow(row map[string]interface{}) (*CIBAAuthRequest, error) {
-	request := &CIBAAuthRequest{
-		AuthReqID:        stringFromRow(row[dbColumnAuthReqID]),
-		ClientID:         stringFromRow(row[dbColumnClientID]),
-		UserID:           stringFromRow(row[dbColumnUserID]),
-		StandardScopes:   stringFromRow(row[dbColumnStandardScopes]),
-		AuthorizedScopes: stringFromRow(row[dbColumnAuthorizedScopes]),
-		State:            CIBARequestState(stringFromRow(row[dbColumnState])),
-		AttributeCacheID: stringFromRow(row[dbColumnAttributeCacheID]),
-		CompletedACR:     stringFromRow(row[dbColumnCompletedACR]),
-	}
-
-	resources, err := decodeResources(row[dbColumnResources])
+// save serializes and writes the record back to the store, preserving its TTL.
+func (s *cibaStore) save(ctx context.Context, record *CIBAAuthRequest) error {
+	data, err := json.Marshal(record)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("failed to marshal CIBA request: %w", err)
 	}
-	request.Resources = resources
-
-	expiryTime, err := sysutils.ParseDBTimeField(row[dbColumnExpiryTime], dbColumnExpiryTime)
-	if err != nil {
-		return nil, err
-	}
-	request.ExpiryTime = expiryTime
-
-	if authTime, ok := parseOptionalTimeField(row[dbColumnAuthTime]); ok {
-		request.AuthTime = authTime
-	}
-	if lastPolled, ok := parseOptionalTimeField(row[dbColumnLastPolledAt]); ok {
-		request.LastPolledAt = lastPolled
-	}
-
-	return request, nil
-}
-
-// encodeResources serializes the effective resource binding for the single RESOURCES text column.
-// An empty binding (an unbound request) yields an empty string.
-func encodeResources(resources []string) (string, error) {
-	if len(resources) == 0 {
-		return "", nil
-	}
-	data, err := json.Marshal(resources)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode CIBA resources: %w", err)
-	}
-	return string(data), nil
-}
-
-// decodeResources parses the stored resource binding. A NULL or empty column yields a nil slice.
-func decodeResources(value interface{}) ([]string, error) {
-	raw := stringFromRow(value)
-	if raw == "" {
-		return nil, nil
-	}
-	var resources []string
-	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
-		return nil, fmt.Errorf("failed to decode CIBA resources: %w", err)
-	}
-	return resources, nil
-}
-
-// stringFromRow extracts a string value from a database row column, handling both string and []byte.
-func stringFromRow(value interface{}) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case []byte:
-		return string(v)
-	default:
-		return ""
-	}
-}
-
-// parseOptionalTimeField parses a nullable time column, returning ok=false when the value is absent.
-func parseOptionalTimeField(value interface{}) (time.Time, bool) {
-	if value == nil {
-		return time.Time{}, false
-	}
-	parsed, err := sysutils.ParseDBTimeField(value, "time")
-	if err != nil {
-		return time.Time{}, false
-	}
-	return parsed, true
+	return s.store.Update(ctx, providers.NamespaceCIBA, record.AuthReqID, data)
 }

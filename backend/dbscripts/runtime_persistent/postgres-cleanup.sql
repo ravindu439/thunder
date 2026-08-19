@@ -1,19 +1,5 @@
--- ----------------------------------------------------------------------------
--- Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
---
--- WSO2 LLC. licenses this file to you under the Apache License,
--- Version 2.0 (the "License"); you may not use this file except
--- in compliance with the License. You may obtain a copy of the License at
---
--- http://www.apache.org/licenses/LICENSE-2.0
---
--- Unless required by applicable law or agreed to in writing,
--- software distributed under the License is distributed on an
--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
--- KIND, either express or implied. See the License for the
--- specific language governing permissions and limitations
--- under the License.
--- ----------------------------------------------------------------------------
+-- Copyright 2026 The ThunderID Authors
+-- SPDX-License-Identifier: Apache-2.0
 
 -- ============================================================
 -- Stored procedure: purge expired runtime_persistent rows in bounded batches.
@@ -73,6 +59,55 @@ BEGIN
         DELETE FROM "REVOKED_TOKEN"
         WHERE ctid IN (
             SELECT ctid FROM "REVOKED_TOKEN" WHERE EXPIRY_TIME < v_now LIMIT p_batch_size
+        );
+        GET DIAGNOSTICS v_deleted = ROW_COUNT;
+        COMMIT;
+        EXIT WHEN v_deleted = 0;
+    END LOOP;
+
+    -- SSO sessions past their absolute deadline, together with their context and participant
+    -- children. A session is live only while now < IDLE_EXPIRES_AT AND now < ABSOLUTE_EXPIRES_AT, so
+    -- a row past ABSOLUTE_EXPIRES_AT can never resume and is safe to delete; idle-expired-but-absolute-
+    -- live rows are left for a later sweep (the resolver already rejects them). Sweeping by
+    -- ABSOLUTE_EXPIRES_AT (immutable and indexed) keeps this an index-backed scan over cold rows and
+    -- leaves the mutable IDLE_EXPIRES_AT unindexed so the hot activity touch stays HOT-eligible.
+    -- There is no FK cascade between the three SSO tables, so each batch deletes the children
+    -- explicitly using the same victim set as the parents; the victim set is located via
+    -- idx_sso_session_absolute_expires_at (ORDER BY drives the index scan) and all data-modifying
+    -- CTEs run against the statement-start snapshot, so delete order among them is irrelevant.
+    LOOP
+        WITH victims AS (
+            SELECT SESSION_ID, DEPLOYMENT_ID
+            FROM "SSO_SESSION"
+            WHERE ABSOLUTE_EXPIRES_AT <= v_now
+            ORDER BY ABSOLUTE_EXPIRES_AT
+            LIMIT p_batch_size
+        ),
+        del_ctx AS (
+            DELETE FROM "SSO_SESSION_CONTEXT" c
+            USING victims v
+            WHERE c.SESSION_ID = v.SESSION_ID AND c.DEPLOYMENT_ID = v.DEPLOYMENT_ID
+        ),
+        del_part AS (
+            DELETE FROM "SSO_SESSION_PARTICIPANT" p
+            USING victims v
+            WHERE p.SESSION_ID = v.SESSION_ID AND p.DEPLOYMENT_ID = v.DEPLOYMENT_ID
+        ),
+        del_sess AS (
+            DELETE FROM "SSO_SESSION" s
+            USING victims v
+            WHERE s.SESSION_ID = v.SESSION_ID AND s.DEPLOYMENT_ID = v.DEPLOYMENT_ID
+            RETURNING 1
+        )
+        SELECT COUNT(*) INTO v_deleted FROM del_sess;
+        COMMIT;
+        EXIT WHEN v_deleted = 0;
+    END LOOP;
+
+    LOOP
+        DELETE FROM "REVOCATION_CRITERIA"
+        WHERE ctid IN (
+            SELECT ctid FROM "REVOCATION_CRITERIA" WHERE EXPIRY_TIME < v_now LIMIT p_batch_size
         );
         GET DIAGNOSTICS v_deleted = ROW_COUNT;
         COMMIT;

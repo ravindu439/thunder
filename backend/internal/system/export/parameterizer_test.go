@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
@@ -289,12 +274,60 @@ func TestPathToVariableName(t *testing.T) {
 		{"TestApp", "ALLCAPS", "TEST_APP_ALLCAPS"},
 		{"My App", "ClientID", "MY_APP_CLIENT_ID"},
 		{"My Test App", "RedirectURI", "MY_TEST_APP_REDIRECT_URI"},
+		{"Wayfinder-Concierge", "ClientID", "WAYFINDER_CONCIERGE_CLIENT_ID"},
+		{"My.App+1", "ClientID", "MY_APP_1_CLIENT_ID"},
+		{"2FA App", "ClientID", "_2FA_APP_CLIENT_ID"},
+		{"My App-", "ClientID", "MY_APP_CLIENT_ID"},
+		{"My App ", "ClientID", "MY_APP_CLIENT_ID"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.appName+"_"+tt.path, func(t *testing.T) {
 			result := parameterizer.pathToVariableName(tt.appName, tt.path)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGeneratePropertyVarName(t *testing.T) {
+	parameterizer := newParameterizer(templatingRules{})
+
+	tests := []struct {
+		resourceName string
+		propertyName string
+		expected     string
+	}{
+		{"Google IDP", "client_id", "GOOGLE_IDP_CLIENT_ID"},
+		{"Google-IDP", "client_id", "GOOGLE_IDP_CLIENT_ID"},
+		{"Google IDP", "client-id", "GOOGLE_IDP_CLIENT_ID"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.resourceName+"_"+tt.propertyName, func(t *testing.T) {
+			result := parameterizer.generatePropertyVarName(tt.resourceName, tt.propertyName)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestVarPrefixMatchesGeneratedVarName asserts the invariant varNameAllocator relies on: the
+// prefix it keys resources by is exactly the prefix of the generated variable name. A resource
+// name ending in a separator used to produce a different prefix ("MY_APP_") from the name it
+// rendered as ("MY_APP_CLIENT_ID"), letting two resources share one variable.
+func TestVarPrefixMatchesGeneratedVarName(t *testing.T) {
+	parameterizer := newParameterizer(templatingRules{})
+
+	names := []string{
+		"My App", "My App-", "My App.", "My App ", "My App!",
+		"2FA App", "Wayfinder-Concierge-", "My.App+1",
+	}
+
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, parameterizer.VarPrefix(name)+"_CLIENT_ID",
+				parameterizer.pathToVariableName(name, "ClientID"))
+			assert.Equal(t, parameterizer.VarPrefix(name)+"_CLIENT_ID",
+				parameterizer.generatePropertyVarName(name, "client_id"))
 		})
 	}
 }

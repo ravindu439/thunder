@@ -1,32 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen, act, fireEvent} from '@thunderid/test-utils';
-import {describe, expect, it, vi, beforeEach, afterEach} from 'vitest';
+import {render, renderHook, screen, act, fireEvent} from '@thunderid/test-utils';
+import {useTranslation} from 'react-i18next';
+import {describe, expect, it, vi, beforeAll, beforeEach, afterEach} from 'vitest';
 import TranslationJsonEditor from '@/components/edit-translation/TranslationJsonEditor';
-
-vi.mock('react-i18next', async () => {
-  const actual = await vi.importActual<typeof import('react-i18next')>('react-i18next');
-  return {
-    ...actual,
-    useTranslation: () => ({t: (key: string) => key}),
-  };
-});
 
 // Monaco Editor is not available in jsdom; replace it with a plain textarea
 // that mirrors the same value/onChange contract.
@@ -51,6 +29,12 @@ function changeEditor(editor: HTMLElement, value: string) {
 }
 
 describe('TranslationJsonEditor', () => {
+  let t: (key: string) => string;
+
+  beforeAll(() => {
+    ({t} = renderHook(() => useTranslation('translations')).result.current);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -89,7 +73,7 @@ describe('TranslationJsonEditor', () => {
         />,
       );
 
-      expect(screen.queryByText('editor.jsonInvalid')).not.toBeInTheDocument();
+      expect(screen.queryByText(t('editor.jsonInvalid'))).not.toBeInTheDocument();
     });
   });
 
@@ -125,7 +109,7 @@ describe('TranslationJsonEditor', () => {
 
       changeEditor(screen.getByTestId('monaco-editor'), '{"key": "value"}');
 
-      expect(screen.queryByText('editor.jsonInvalid')).not.toBeInTheDocument();
+      expect(screen.queryByText(t('editor.jsonInvalid'))).not.toBeInTheDocument();
     });
   });
 
@@ -143,7 +127,7 @@ describe('TranslationJsonEditor', () => {
 
       changeEditor(screen.getByTestId('monaco-editor'), '{not valid json');
 
-      expect(screen.getByText('editor.jsonInvalid')).toBeInTheDocument();
+      expect(screen.getByText(t('editor.jsonInvalid'))).toBeInTheDocument();
     });
 
     it('does not call onChange while JSON is invalid', () => {
@@ -177,7 +161,7 @@ describe('TranslationJsonEditor', () => {
 
       changeEditor(screen.getByTestId('monaco-editor'), '');
 
-      expect(screen.queryByText('editor.jsonInvalid')).not.toBeInTheDocument();
+      expect(screen.queryByText(t('editor.jsonInvalid'))).not.toBeInTheDocument();
     });
   });
 
@@ -208,6 +192,88 @@ describe('TranslationJsonEditor', () => {
       const parsed = JSON.parse((editor as HTMLTextAreaElement).value) as Record<string, string>;
 
       expect(parsed).toEqual(newValues);
+    });
+
+    it('does not reformat the editor text when the values prop echoes back its own onChange call', () => {
+      const onChange = vi.fn();
+
+      const {rerender} = render(
+        <TranslationJsonEditor
+          values={sampleValues}
+          serverKeys={sampleServerKeys}
+          isCustomNamespace
+          colorMode="light"
+          onChange={onChange}
+        />,
+      );
+
+      // A new key typed in the middle of the document, rather than appended at the end.
+      const typed = '{\n  "actions.save": "Save",\n  "new.key": "New Value",\n  "actions.cancel": "Cancel"\n}';
+      changeEditor(screen.getByTestId('monaco-editor'), typed);
+
+      const expectedRecord = {'actions.save': 'Save', 'new.key': 'New Value', 'actions.cancel': 'Cancel'};
+      expect(onChange).toHaveBeenCalledWith(expectedRecord);
+
+      // The parent merges the change and passes a freshly-built object back down, as
+      // `{...serverValues, ...localChanges}` would — a new reference, same shape.
+      rerender(
+        <TranslationJsonEditor
+          values={{...expectedRecord}}
+          serverKeys={sampleServerKeys}
+          isCustomNamespace
+          colorMode="light"
+          onChange={onChange}
+        />,
+      );
+
+      // JSON.stringify would have moved "new.key" to the end (insertion order); the editor
+      // must keep showing exactly what the user typed instead of snapping to that reformat.
+      const editor = screen.getByTestId('monaco-editor');
+      expect((editor as HTMLTextAreaElement).value).toBe(typed);
+    });
+
+    it('still syncs from an external change immediately after a self-triggered one', () => {
+      const onChange = vi.fn();
+
+      const {rerender} = render(
+        <TranslationJsonEditor
+          values={sampleValues}
+          serverKeys={sampleServerKeys}
+          isCustomNamespace
+          colorMode="light"
+          onChange={onChange}
+        />,
+      );
+
+      changeEditor(screen.getByTestId('monaco-editor'), '{"actions.save": "Enregistrer"}');
+      expect(onChange).toHaveBeenCalledWith({'actions.save': 'Enregistrer'});
+
+      // Self-triggered echo — consumes the skip-once flag.
+      rerender(
+        <TranslationJsonEditor
+          values={{'actions.save': 'Enregistrer'}}
+          serverKeys={sampleServerKeys}
+          isCustomNamespace
+          colorMode="light"
+          onChange={onChange}
+        />,
+      );
+
+      // A genuinely external change (e.g. switching namespace) must still sync normally.
+      const externalValues = {'page.title': 'My Page'};
+      rerender(
+        <TranslationJsonEditor
+          values={externalValues}
+          serverKeys={Object.keys(externalValues)}
+          isCustomNamespace
+          colorMode="light"
+          onChange={onChange}
+        />,
+      );
+
+      const editor = screen.getByTestId('monaco-editor');
+      const parsed = JSON.parse((editor as HTMLTextAreaElement).value) as Record<string, string>;
+      expect(parsed).toEqual(externalValues);
     });
   });
 });

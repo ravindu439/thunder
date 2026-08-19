@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type {Application} from '@thunderid/configure-applications';
 import {MemoryRouter} from 'react-router';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import useGetFlows from '../../../../../flows/api/useGetFlows';
-import type {Application} from '../../../../models/application';
 import RegistrationFlowSection from '../RegistrationFlowSection';
 
 // Mock the useGetFlows hook
@@ -89,7 +74,7 @@ describe('RegistrationFlowSection', () => {
         </MemoryRouter>,
       );
 
-      expect(screen.getByTestId('card-title')).toHaveTextContent('Registration Flow');
+      expect(screen.getByTestId('card-title')).toHaveTextContent('Sign-up Flow');
       expect(screen.getByTestId('card-description')).toHaveTextContent(
         'Choose the flow that handles user sign-up and account creation.',
       );

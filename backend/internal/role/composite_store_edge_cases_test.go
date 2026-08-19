@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -447,6 +432,28 @@ func (suite *CompositeRoleStoreEdgeCaseTestSuite) TestGetAuthorizedPermissions_C
 	assert.Contains(suite.T(), result, "p1")
 	assert.Contains(suite.T(), result, "p2")
 	assert.Contains(suite.T(), result, "p3")
+}
+
+// Test GetUserRoles returns the merged roles in a stable order. Callers page over this list by
+// slicing it, so an unstable order would repeat a role on one page and drop it from another.
+func (suite *CompositeRoleStoreEdgeCaseTestSuite) TestGetUserRoles_MergedOrderIsStable() {
+	dbRoles := []string{"role-c", "role-a"}
+	fileRoles := []string{"role-b", "role-a"}
+
+	suite.mockDBStore.On("GetUserRoles", suite.ctx, "user1", []string{"group1"}).Return(dbRoles, nil)
+	suite.mockFileStore.On("GetUserRoles", suite.ctx, "user1", []string{"group1"}).Return(fileRoles, nil)
+
+	first, err := suite.store.GetUserRoles(suite.ctx, "user1", []string{"group1"})
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), []string{"role-a", "role-b", "role-c"}, first,
+		"The merged roles must be deduplicated and sorted")
+
+	// Repeat the call: the same inputs must always produce the same order.
+	for i := 0; i < 20; i++ {
+		repeat, err := suite.store.GetUserRoles(suite.ctx, "user1", []string{"group1"})
+		assert.NoError(suite.T(), err)
+		assert.Equal(suite.T(), first, repeat, "Repeated calls must return the roles in the same order")
+	}
 }
 
 // Test GetAuthorizedPermissions with empty result

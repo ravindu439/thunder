@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {isEmojiUri, extractEmojiFromUri} from '@thunderid/react';
+import {resolveLogoUri, type ResolvedLogo} from '@thunderid/react';
 import {cn} from '@thunderid/utils';
 import {Box} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
@@ -42,7 +27,9 @@ export default function ImageAdapter({
 
   if (!resolvedSrc) return null;
 
-  if (isEmojiUri(resolvedSrc)) {
+  const resolvedIcon: ResolvedLogo = resolveLogoUri(resolvedSrc, resolvedAlt);
+
+  if (resolvedIcon.kind === 'emoji') {
     const cssWidth = component.width ? `${component.width}px` : '100%';
     const cssHeight = component.height ? `${component.height}px` : 'auto';
 
@@ -69,7 +56,7 @@ export default function ImageAdapter({
         }}
       >
         <span aria-label={resolvedAlt} role="img" style={{fontSize: '100cqmin', lineHeight: 1}}>
-          {extractEmojiFromUri(resolvedSrc)}
+          {resolvedIcon.glyph}
         </span>
       </span>
     );
@@ -80,7 +67,7 @@ export default function ImageAdapter({
       component="img"
       id={component.id}
       className={[cn('Flow--image'), component.classes].filter(Boolean).join(' ')}
-      src={resolvedSrc}
+      src={resolvedIcon.imgSrc}
       alt={resolvedAlt}
       sx={{
         width: component.width ? `${component.width}px` : 'auto',

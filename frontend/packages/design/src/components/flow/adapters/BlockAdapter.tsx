@@ -1,31 +1,18 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {EmbeddedFlowComponentType, EmbeddedFlowEventType, type EmbeddedFlowComponent} from '@thunderid/react';
 import {cn} from '@thunderid/utils';
-import {Box, Button, Stack} from '@wso2/oxygen-ui';
+import {Box, Button} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
+import CheckboxAdapter from './CheckboxAdapter';
 import DividerAdapter from './DividerAdapter';
 import OtpInputAdapter from './OtpInputAdapter';
 import PasswordInputAdapter from './PasswordInputAdapter';
 import RichTextAdapter from './RichTextAdapter';
 import SelectAdapter from './SelectAdapter';
+import StackContainer from './StackContainer';
 import TextInputAdapter from './TextInputAdapter';
 import type {FlowComponent, FlowFieldProps} from '../../../models/flow';
 import getIntegrationIcon from '../../../utils/getIntegrationIcon';
@@ -37,20 +24,17 @@ interface BlockContext {
   isLoading: boolean;
   resolve: (template: string | undefined) => string | undefined;
   onInputChange: (field: string, value: string) => void;
+  onBlur?: (field: string) => void;
   onSubmit: (action: EmbeddedFlowComponent, inputs: Record<string, string>) => void;
   onValidate?: (components: EmbeddedFlowComponent[]) => boolean;
   passwordAutoComplete?: 'current-password' | 'new-password';
+  /** Additional step data from the flow response */
+  additionalData?: Record<string, unknown>;
   blockComponents?: EmbeddedFlowComponent[];
   /** When true, non-primary submit buttons use onClick instead of form submit */
   hasMultipleSubmits?: boolean;
   /** ID of the primary submit action that stays as type="submit" */
   primarySubmitId?: string;
-  /** Fallback sign-up URL for RICH_TEXT elements that embed `application.sign_up_url` */
-  signUpFallbackUrl?: string;
-  /** Fallback sign-in URL for RICH_TEXT elements that embed `application.sign_in_url` */
-  signInFallbackUrl?: string;
-  /** Fallback forgot-password URL for RICH_TEXT elements that embed `application.forgot_password_url` */
-  forgotPasswordFallbackUrl?: string;
 }
 
 interface SubmitButtonAdapterProps {
@@ -93,19 +77,22 @@ interface ResendButtonAdapterProps {
   component: FlowComponent;
   isLoading: boolean;
   resolve: (template: string | undefined) => string | undefined;
+  /** Fires the resend action directly, bypassing the form's field validation */
+  onClick: () => void;
 }
 
-function ResendButtonAdapter({component, isLoading, resolve}: ResendButtonAdapterProps): JSX.Element {
+export function ResendButtonAdapter({component, isLoading, resolve, onClick}: ResendButtonAdapterProps): JSX.Element {
   const {t} = useTranslation();
 
   return (
     <Button
       id={component.id}
-      type="submit"
+      type="button"
       fullWidth
       className={cn('Flow--resendButton', 'Button--root')}
       variant="text"
       disabled={isLoading}
+      onClick={onClick}
       sx={{mt: 1}}
     >
       {t(resolve(component.label)!)}
@@ -185,19 +172,11 @@ function renderFormSubComponent(
   // in the form context so nested submit/trigger actions stay wired.
   if (sub.type === 'STACK') {
     return (
-      <Stack
-        key={sub.id ?? compIndex}
-        id={sub.id}
-        className={cn('Flow--stack')}
-        direction={sub.direction ?? 'column'}
-        spacing={sub.gap ?? 2}
-        alignItems={sub.align ?? 'center'}
-        justifyContent={sub.justify ?? 'flex-start'}
-      >
+      <StackContainer key={sub.id ?? compIndex} component={sub}>
         {(sub.components ?? []).map((nested: EmbeddedFlowComponent, nestedIndex: number) =>
           renderFormSubComponent(nested, nestedIndex, ctx),
         )}
-      </Stack>
+      </StackContainer>
     );
   }
   const fieldProps: FlowFieldProps = {
@@ -208,13 +187,16 @@ function renderFormSubComponent(
     isLoading: ctx.isLoading,
     resolve: ctx.resolve,
     onInputChange: ctx.onInputChange,
+    onBlur: ctx.onBlur,
+    additionalData: ctx.additionalData,
   };
 
   if (
     (sub.type as EmbeddedFlowComponentType) === EmbeddedFlowComponentType.TextInput ||
     sub.type === 'TEXT_INPUT' ||
     sub.type === 'EMAIL_INPUT' ||
-    sub.type === 'PHONE_INPUT'
+    sub.type === 'PHONE_INPUT' ||
+    sub.type === 'NUMBER_INPUT'
   ) {
     return <TextInputAdapter key={sub.id ?? compIndex} {...fieldProps} />;
   }
@@ -240,15 +222,18 @@ function renderFormSubComponent(
     return <SelectAdapter key={sub.id ?? compIndex} {...fieldProps} />;
   }
 
+  if (sub.type === 'BOOLEAN_INPUT') {
+    return <CheckboxAdapter key={sub.id ?? compIndex} {...fieldProps} />;
+  }
+
   if (sub.type === 'RICH_TEXT') {
     return (
       <RichTextAdapter
         key={sub.id ?? compIndex}
         component={sub}
         resolve={ctx.resolve}
-        signUpFallbackUrl={ctx.signUpFallbackUrl}
-        signInFallbackUrl={ctx.signInFallbackUrl}
-        forgotPasswordFallbackUrl={ctx.forgotPasswordFallbackUrl}
+        values={ctx.values}
+        onSubmit={ctx.onSubmit}
       />
     );
   }
@@ -277,7 +262,13 @@ function renderFormSubComponent(
 
   if (sub.type === 'RESEND' && sub.eventType === EmbeddedFlowEventType.Submit) {
     return (
-      <ResendButtonAdapter key={sub.id ?? compIndex} component={sub} isLoading={ctx.isLoading} resolve={ctx.resolve} />
+      <ResendButtonAdapter
+        key={sub.id ?? compIndex}
+        component={sub}
+        isLoading={ctx.isLoading}
+        resolve={ctx.resolve}
+        onClick={() => ctx.onSubmit(sub, ctx.values)}
+      />
     );
   }
 
@@ -372,19 +363,11 @@ function TriggerBlockAdapter({component, index, ...ctx}: TriggerBlockAdapterProp
         const sub = actionComponent as FlowComponent;
         if (sub.type === 'STACK') {
           return (
-            <Stack
-              key={sub.id ?? actionIndex}
-              id={sub.id}
-              className={cn('Flow--stack')}
-              direction={sub.direction ?? 'column'}
-              spacing={sub.gap ?? 2}
-              alignItems={sub.align ?? 'center'}
-              justifyContent={sub.justify ?? 'flex-start'}
-            >
+            <StackContainer key={sub.id ?? actionIndex} component={sub}>
               {(sub.components ?? []).map((nested: EmbeddedFlowComponent, nestedIndex: number) =>
                 renderTriggerSub(nested, nestedIndex),
               )}
-            </Stack>
+            </StackContainer>
           );
         }
         if (
@@ -399,6 +382,17 @@ function TriggerBlockAdapter({component, index, ...ctx}: TriggerBlockAdapterProp
               resolve={ctx.resolve}
               onSubmit={ctx.onSubmit}
               values={ctx.values}
+            />
+          );
+        }
+        if (sub.type === 'RICH_TEXT') {
+          return (
+            <RichTextAdapter
+              key={sub.id ?? actionIndex}
+              component={sub}
+              resolve={ctx.resolve}
+              values={ctx.values}
+              onSubmit={ctx.onSubmit}
             />
           );
         }

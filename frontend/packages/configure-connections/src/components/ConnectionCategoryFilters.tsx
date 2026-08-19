@@ -1,38 +1,28 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {Chip, Stack, Typography} from '@wso2/oxygen-ui';
+import {Chip, Stack} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
-import {AVAILABLE_CONNECTION_CATEGORIES} from '../config/connectionVendorMeta';
 import type {ConnectionCategory} from '../models/connection';
 
 export type CategoryFilterValue = ConnectionCategory | 'all';
 
 interface ConnectionCategoryFiltersProps {
+  /** Categories to offer as chips, in display order. Empty renders the `all` chip on its own. */
+  categories: ConnectionCategory[];
   selected: CategoryFilterValue;
   onSelect: (value: CategoryFilterValue) => void;
 }
 
-export default function ConnectionCategoryFilters({selected, onSelect}: ConnectionCategoryFiltersProps): JSX.Element {
+export default function ConnectionCategoryFilters({
+  categories,
+  selected,
+  onSelect,
+}: ConnectionCategoryFiltersProps): JSX.Element {
   const {t} = useTranslation('connections');
 
-  const values: CategoryFilterValue[] = ['all', ...AVAILABLE_CONNECTION_CATEGORIES];
+  const values: CategoryFilterValue[] = ['all', ...categories];
 
   return (
     <Stack
@@ -43,17 +33,14 @@ export default function ConnectionCategoryFilters({selected, onSelect}: Connecti
       useFlexGap
       data-testid="connection-category-filters"
     >
-      <Typography variant="caption" color="text.secondary" sx={{textTransform: 'uppercase', fontWeight: 600, mr: 0.5}}>
-        {t('filters.label')}
-      </Typography>
       {values.map((value) => (
         <Chip
           key={value}
           label={t(`categories.${value}`)}
-          clickable
           color={selected === value ? 'primary' : 'default'}
           variant={selected === value ? 'filled' : 'outlined'}
           onClick={() => onSelect(value)}
+          sx={{borderRadius: '20px', cursor: 'pointer'}}
         />
       ))}
     </Stack>

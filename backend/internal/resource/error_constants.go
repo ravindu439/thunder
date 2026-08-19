@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package resource
 
@@ -102,19 +87,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.resourceservice.cannot_delete_description",
 			DefaultValue: "Cannot delete resource server/resource that has dependencies",
-		},
-	}
-	// ErrorCircularDependency is returned when a circular dependency is detected.
-	ErrorCircularDependency = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "RES-1007",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.resourceservice.circular_dependency_detected",
-			DefaultValue: "Circular dependency detected",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.resourceservice.circular_dependency_detected_description",
-			DefaultValue: "Setting this parent would create a circular dependency",
 		},
 	}
 	// ErrorResourceNotFound is returned when a resource is not found.
@@ -340,4 +312,8 @@ var (
 
 	// errDefaultResourceServerLookupFailed is returned when resource server lookup fails.
 	errDefaultResourceServerLookupFailed = errors.New("failed to resolve default resource server")
+
+	// errDependencyRegistryNotSet is returned when a cascade delete is attempted before the
+	// dependency registry has been injected.
+	errDependencyRegistryNotSet = errors.New("dependency registry not set")
 )

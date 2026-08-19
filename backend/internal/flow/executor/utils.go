@@ -1,34 +1,59 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"strconv"
+	"time"
 
 	authncm "github.com/thunder-id/thunderid/internal/authn/common"
+	entitytypemodel "github.com/thunder-id/thunderid/internal/entitytype/model"
 	"github.com/thunder-id/thunderid/internal/flow/common"
+	"github.com/thunder-id/thunderid/internal/revocation"
 	systemutils "github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
+
+// revocationPlan is the trusted intent a flow's pre-processing node produces and the executors that
+// follow act on. It is never built from request input, so the criteria, breadth and reason recorded
+// here are authoritative for the rest of the flow.
+type revocationPlan struct {
+	Criteria []revocation.Criterion `json:"criteria"`
+	Mode     revocation.Mode        `json:"mode"`
+	Cutoff   time.Time              `json:"cutoff,omitempty"`
+	Reason   revocation.Reason      `json:"reason"`
+}
+
+// encodeRevocationPlan serializes the plan for carriage on the engine context's cross-frame store.
+func encodeRevocationPlan(plan revocationPlan) (string, error) {
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode revocation plan: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// decodeRevocationPlan reads the plan an earlier node published. A missing or empty plan is an error
+// rather than a no-op: an executor that acts on revocation must never proceed without one.
+func decodeRevocationPlan(data map[string]string) (revocationPlan, error) {
+	encoded := data[common.RuntimeKeyRevocationPlan]
+	if encoded == "" {
+		return revocationPlan{}, errors.New("trusted revocation plan is missing")
+	}
+	var plan revocationPlan
+	if err := json.Unmarshal([]byte(encoded), &plan); err != nil {
+		return revocationPlan{}, fmt.Errorf("failed to decode trusted revocation plan: %w", err)
+	}
+	if len(plan.Criteria) == 0 {
+		return revocationPlan{}, errors.New("trusted revocation plan has no criteria")
+	}
+	return plan, nil
+}
 
 // getAuthnServiceName returns the authn service name for an executor.
 // Returns empty string if executor doesn't map to an authn service.
@@ -84,6 +109,50 @@ func findInputByType(inputs []providers.Input, inputType string) (providers.Inpu
 	return providers.Input{}, false
 }
 
+// inputTypeForSchemaType maps an entity type schema attribute type to the flow input type used to
+// prompt for it. Types without a dedicated input type are prompted as text.
+func inputTypeForSchemaType(schemaType string) string {
+	switch schemaType {
+	case entitytypemodel.TypeBoolean:
+		return providers.InputTypeBoolean
+	case entitytypemodel.TypeNumber:
+		return providers.InputTypeNumber
+	default:
+		return providers.InputTypeText
+	}
+}
+
+// schemaTypeForInputType maps a flow input type back to the schema type its collected value should
+// be converted to, for callers whose inputs come from the flow definition rather than from a schema.
+// An empty result means the value needs no conversion.
+func schemaTypeForInputType(inputType string) string {
+	switch inputType {
+	case providers.InputTypeBoolean:
+		return entitytypemodel.TypeBoolean
+	case providers.InputTypeNumber:
+		return entitytypemodel.TypeNumber
+	default:
+		return ""
+	}
+}
+
+// convertToSchemaType converts a collected input value, which the engine always carries as a string,
+// to the type declared by its schema attribute. Values that fail to parse are returned unchanged so
+// that schema validation reports them instead of a zero value being silently substituted.
+func convertToSchemaType(value string, schemaType string) interface{} {
+	switch schemaType {
+	case entitytypemodel.TypeBoolean:
+		if parsed, err := strconv.ParseBool(value); err == nil {
+			return parsed
+		}
+	case entitytypemodel.TypeNumber:
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return parsed
+		}
+	}
+	return value
+}
+
 // isAuthenticationWithoutLocalUserAllowed returns the value of the AllowAuthenticationWithoutLocalUser
 // node property, defaulting to false if absent or not a bool.
 // This is used to determine if authentication flow can proceed without a local user account.
@@ -129,9 +198,12 @@ func isCrossOUProvisioningAllowed(ctx *providers.NodeContext) bool {
 
 // setFederatedEntityState records whether federated authentication resolved a concrete local user
 // (via account linking) into the entityState runtime key.
-func setFederatedEntityState(execResp *providers.ExecutorResponse) {
+func setFederatedEntityState(ctx context.Context, execResp *providers.ExecutorResponse,
+	authnProvider providers.AuthnProviderManager) {
 	execResp.RuntimeData[common.RuntimeKeyEntityState] = entityStateNotExists
-	if execResp.AuthUser.EntityReference() != nil {
+	authUser, entityRef, svcErr := authnProvider.GetEntityReference(ctx, execResp.AuthUser)
+	execResp.AuthUser = authUser
+	if svcErr == nil && entityRef != nil {
 		execResp.RuntimeData[common.RuntimeKeyEntityState] = entityStateExists
 	}
 }
@@ -178,69 +250,4 @@ func validateFederatedIdentifierConsistency(ctx *providers.NodeContext,
 	}
 
 	return true
-}
-
-// buildAppMetadataFromContext constructs application metadata from the node context,
-// including application metadata and OAuth client IDs.
-func buildAppMetadataFromContext(ctx *providers.NodeContext) map[string]interface{} {
-	appMetadata := make(map[string]interface{})
-
-	if ctx.Application.Metadata != nil {
-		for key, value := range ctx.Application.Metadata {
-			appMetadata[key] = value
-		}
-	}
-
-	var clientIDs []string
-	for _, inboundConfig := range ctx.Application.InboundAuthConfig {
-		if inboundConfig.OAuthConfig != nil && inboundConfig.OAuthConfig.ClientID != "" {
-			clientIDs = append(clientIDs, inboundConfig.OAuthConfig.ClientID)
-		}
-	}
-
-	if len(clientIDs) > 0 {
-		appMetadata["client_ids"] = clientIDs
-	}
-
-	return appMetadata
-}
-
-// buildRuntimeMetadata constructs the runtime metadata for authentication.
-func buildRuntimeMetadata(ctx *providers.NodeContext) map[string]string {
-	runtimeMetadata := map[string]string{
-		"authorization_request_id": ctx.RuntimeData[common.RuntimeKeyAuthorizationRequestID],
-		"current_client_id":        ctx.RuntimeData[common.RuntimeKeyClientID],
-	}
-
-	if ctx.RuntimeData != nil {
-		for key, value := range ctx.RuntimeData {
-			// Only the ext_* runtime data keys are passed to the authn provider.
-			if strings.HasPrefix(key, "ext_") {
-				runtimeMetadata[key] = value
-			}
-		}
-	}
-	return runtimeMetadata
-}
-
-// buildAuthnMetadata constructs the metadata for authentication.
-func buildAuthnMetadata(ctx *providers.NodeContext) *providers.AuthnMetadata {
-	return &providers.AuthnMetadata{
-		AppMetadata:     buildAppMetadataFromContext(ctx),
-		RuntimeMetadata: buildRuntimeMetadata(ctx),
-	}
-}
-
-// buildGetAttributesMetadata constructs the metadata for fetching user attributes.
-func buildGetAttributesMetadata(ctx *providers.NodeContext) *providers.GetAttributesMetadata {
-	metadata := &providers.GetAttributesMetadata{
-		AppMetadata:     buildAppMetadataFromContext(ctx),
-		RuntimeMetadata: buildRuntimeMetadata(ctx),
-	}
-
-	if locale, exists := ctx.RuntimeData["required_locales"]; exists && locale != "" {
-		metadata.Locale = locale
-	}
-
-	return metadata
 }

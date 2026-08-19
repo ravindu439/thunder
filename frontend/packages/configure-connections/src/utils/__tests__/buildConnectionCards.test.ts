@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {JSX} from 'react';
 import {describe, expect, it} from 'vitest';
@@ -27,7 +12,7 @@ const VENDORS: ConnectionVendorMeta[] = [
   {
     key: 'google',
     backendType: 'google',
-    displayName: 'Google',
+    displayName: 'Google Login',
     descriptionKey: 'connections:vendor.google.description',
     logo: LOGO,
     categories: ['social-login'],
@@ -36,7 +21,7 @@ const VENDORS: ConnectionVendorMeta[] = [
   {
     key: 'github',
     backendType: 'github',
-    displayName: 'GitHub',
+    displayName: 'GitHub Login',
     descriptionKey: 'connections:vendor.github.description',
     logo: LOGO,
     categories: ['social-login'],
@@ -52,8 +37,17 @@ const VENDORS: ConnectionVendorMeta[] = [
     presentation: 'custom',
   },
   {
+    key: 'sms-gateway',
+    backendType: 'sms-gateway',
+    displayName: 'SMS Gateway',
+    descriptionKey: 'connections:vendor.sms-gateway.description',
+    logo: LOGO,
+    categories: ['sms', 'custom'],
+    presentation: 'custom',
+  },
+  {
     key: 'twilio',
-    displayName: 'Twilio',
+    displayName: 'Twilio SMS',
     descriptionKey: 'connections:vendor.twilio.description',
     logo: LOGO,
     categories: ['sms'],
@@ -91,7 +85,7 @@ describe('buildConnectionCards', () => {
 
     const github = cards.find((c) => c.vendorKey === 'github');
     expect(github).toMatchObject({
-      displayName: 'GitHub',
+      displayName: 'GitHub Login',
       status: 'not-configured',
       navTarget: '/connections/github/configure',
     });
@@ -115,6 +109,21 @@ describe('buildConnectionCards', () => {
     expect(oidcCards[1].navTarget).toBe('/connections/oidc/b2');
   });
 
+  it('renders one card per SMS gateway instance', () => {
+    const instances: ConnectionInstance[] = [
+      {id: 's1', name: 'Prod SMS Gateway', type: 'sms-gateway', categories: ['sms-provider']},
+    ];
+    const cards = buildConnectionCards(instances, VENDORS);
+
+    expect(cards.filter((c) => c.vendorKey === 'sms-gateway')).toHaveLength(1);
+    expect(cards.find((c) => c.vendorKey === 'sms-gateway')).toMatchObject({
+      id: 'sms-gateway:s1',
+      displayName: 'Prod SMS Gateway',
+      status: 'configured',
+      navTarget: '/connections/sms-gateway/s1',
+    });
+  });
+
   it('renders no custom cards when there are no instances', () => {
     const cards = buildConnectionCards([], VENDORS);
     expect(cards.filter((c) => c.vendorKey === 'oidc')).toHaveLength(0);
@@ -122,7 +131,7 @@ describe('buildConnectionCards', () => {
 
   it('ignores instances whose type has no vendor meta', () => {
     const instances: ConnectionInstance[] = [
-      {id: 's1', name: 'Custom Gateway', type: 'sms-gateway', categories: ['sms-provider']},
+      {id: 's1', name: 'Custom Gateway', type: 'vonage', categories: ['sms-provider']},
     ];
     const cards = buildConnectionCards(instances, VENDORS);
     expect(cards.some((c) => c.displayName === 'Custom Gateway')).toBe(false);
@@ -159,7 +168,7 @@ describe('buildConnectionCards', () => {
       status: 'configured',
       comingSoon: false,
       navTarget: '/trusted-issuers/t1',
-      categories: ['trusted-idp'],
+      categories: ['trusted-idp', 'custom'],
     });
   });
 

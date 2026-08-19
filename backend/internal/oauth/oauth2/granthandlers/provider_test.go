@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -36,7 +21,6 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/oauth/oauth2/tokenservicemock"
 	"github.com/thunder-id/thunderid/tests/mocks/oumock"
 	"github.com/thunder-id/thunderid/tests/mocks/resourcemock"
-	"github.com/thunder-id/thunderid/tests/mocks/serverconfigmock"
 	"github.com/thunder-id/thunderid/tests/testhelpers"
 )
 
@@ -52,7 +36,6 @@ type GrantHandlerProviderTestSuite struct {
 	mockRBACAuthzService *rbacauthzmock.AuthorizationProviderMock
 	mockEntityProvider   *actorprovidermock.ActorProviderMock
 	mockResourceService  *resourcemock.ResourceServiceInterfaceMock
-	mockServerConfig     *serverconfigmock.ServerConfigServiceMock
 	mockCIBAService      *cibamock.CIBAServiceInterfaceMock
 }
 
@@ -70,7 +53,6 @@ func (suite *GrantHandlerProviderTestSuite) SetupTest() {
 	suite.mockRBACAuthzService = rbacauthzmock.NewAuthorizationProviderMock(suite.T())
 	suite.mockEntityProvider = actorprovidermock.NewActorProviderMock(suite.T())
 	suite.mockResourceService = resourcemock.NewResourceServiceInterfaceMock(suite.T())
-	suite.mockServerConfig = serverconfigmock.NewServerConfigServiceMock(suite.T())
 	suite.mockCIBAService = cibamock.NewCIBAServiceInterfaceMock(suite.T())
 	suite.provider = newGrantHandlerProvider(
 		suite.mockJWTService,
@@ -82,9 +64,9 @@ func (suite *GrantHandlerProviderTestSuite) SetupTest() {
 		suite.mockRBACAuthzService,
 		suite.mockEntityProvider,
 		suite.mockResourceService,
-		suite.mockServerConfig,
 		suite.mockCIBAService,
 		revocationmock.NewRefreshTokenRevokerInterfaceMock(suite.T()),
+		revocationmock.NewCriteriaRevokerInterfaceMock(suite.T()),
 		testhelpers.OAuthConfig(),
 	)
 }
@@ -100,9 +82,9 @@ func (suite *GrantHandlerProviderTestSuite) TestNewGrantHandlerProvider() {
 		suite.mockRBACAuthzService,
 		suite.mockEntityProvider,
 		suite.mockResourceService,
-		suite.mockServerConfig,
 		suite.mockCIBAService,
 		revocationmock.NewRefreshTokenRevokerInterfaceMock(suite.T()),
+		revocationmock.NewCriteriaRevokerInterfaceMock(suite.T()),
 		testhelpers.OAuthConfig(),
 	)
 	assert.NotNil(suite.T(), provider)
@@ -132,6 +114,14 @@ func (suite *GrantHandlerProviderTestSuite) TestGetGrantHandler_RefreshToken() {
 	assert.NotNil(suite.T(), handler)
 	assert.Implements(suite.T(), (*GrantHandlerInterface)(nil), handler)
 	assert.Implements(suite.T(), (*RefreshTokenGrantHandlerInterface)(nil), handler)
+}
+
+func (suite *GrantHandlerProviderTestSuite) TestGetGrantHandler_TokenExchange() {
+	handler, err := suite.provider.GetGrantHandler(providers.GrantTypeTokenExchange)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), handler)
+	assert.Implements(suite.T(), (*GrantHandlerInterface)(nil), handler)
 }
 
 func (suite *GrantHandlerProviderTestSuite) TestGetGrantHandler_CIBA() {
@@ -175,6 +165,7 @@ func (suite *GrantHandlerProviderTestSuite) TestGetGrantHandler_AllSupportedType
 		providers.GrantTypeClientCredentials,
 		providers.GrantTypeAuthorizationCode,
 		providers.GrantTypeRefreshToken,
+		providers.GrantTypeTokenExchange,
 		providers.GrantTypeCIBA,
 		providers.GrantTypeJWTBearer,
 	}

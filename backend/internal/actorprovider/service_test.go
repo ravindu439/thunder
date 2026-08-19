@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package actorprovider
 
@@ -35,6 +20,7 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/authnprovider/managermock"
 	"github.com/thunder-id/thunderid/tests/mocks/entityprovidermock"
 	"github.com/thunder-id/thunderid/tests/mocks/inboundclientmock"
+	"github.com/thunder-id/thunderid/tests/mocks/rolemock"
 )
 
 type ActorProviderTestSuite struct {
@@ -42,6 +28,7 @@ type ActorProviderTestSuite struct {
 	mockInbound *inboundclientmock.InboundClientServiceInterfaceMock
 	mockEntity  *entityprovidermock.EntityProviderInterfaceMock
 	mockAuthn   *managermock.AuthnProviderManagerMock
+	mockRole    *rolemock.RoleServiceInterfaceMock
 	provider    providers.ActorProvider
 }
 
@@ -53,7 +40,8 @@ func (s *ActorProviderTestSuite) SetupTest() {
 	s.mockInbound = inboundclientmock.NewInboundClientServiceInterfaceMock(s.T())
 	s.mockEntity = entityprovidermock.NewEntityProviderInterfaceMock(s.T())
 	s.mockAuthn = managermock.NewAuthnProviderManagerMock(s.T())
-	s.provider = Initialize(s.mockInbound, s.mockEntity, s.mockAuthn)
+	s.mockRole = rolemock.NewRoleServiceInterfaceMock(s.T())
+	s.provider = Initialize(s.mockInbound, s.mockEntity, s.mockAuthn, s.mockRole)
 }
 
 func (s *ActorProviderTestSuite) TestGetOAuthClientByClientID_Delegates() {
@@ -163,4 +151,38 @@ func (s *ActorProviderTestSuite) TestGetActorGroups_Delegates() {
 
 	s.Nil(err)
 	s.Equal(expected, groups)
+}
+
+func (s *ActorProviderTestSuite) TestGetActorRoles_Delegates() {
+	expected := []string{"admin", "editor"}
+	groupIDs := []string{"group-1"}
+	s.mockRole.On("GetUserRoles", mock.Anything, "app-1", groupIDs).
+		Return(expected, (*tidcommon.ServiceError)(nil))
+
+	roles, err := s.provider.GetActorRoles("app-1", groupIDs)
+
+	s.Nil(err)
+	s.Equal(expected, roles)
+}
+
+func (s *ActorProviderTestSuite) TestGetActorRoles_PropagatesError() {
+	svcErr := &tidcommon.ServiceError{
+		Code:  "ROLE-0001",
+		Error: tidcommon.I18nMessage{Key: "error.test.role", DefaultValue: "role lookup failed"},
+	}
+	s.mockRole.On("GetUserRoles", mock.Anything, "app-1", []string{"group-1"}).Return(nil, svcErr)
+
+	roles, err := s.provider.GetActorRoles("app-1", []string{"group-1"})
+
+	s.Nil(roles)
+	s.Equal(svcErr, err)
+}
+
+func (s *ActorProviderTestSuite) TestGetActorRoles_NilRoleService_ReturnsNil() {
+	provider := Initialize(s.mockInbound, s.mockEntity, s.mockAuthn, nil)
+
+	roles, err := provider.GetActorRoles("app-1", []string{"group-1"})
+
+	s.Nil(err)
+	s.Nil(roles)
 }

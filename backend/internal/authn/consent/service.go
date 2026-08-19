@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package consent implements the consent enforcer authn service for runtime consent collection.
 package consent
@@ -70,7 +55,7 @@ func (s *consentEnforcerService) SetConsentService(consentService consent.Consen
 func (s *consentEnforcerService) ResolveConsent(ctx context.Context, ouID, appID, appName, userID string,
 	essentialAttributes, optionalAttributes, authorizedPermissions []string,
 	availableAttributes *providers.AttributesResponse, forceReprompt bool,
-	runtimeMetadata map[string]string) (
+	runtimeMetadata map[string][]string) (
 	*providers.ConsentPromptData, *tidcommon.ServiceError) {
 	logger := s.logger.With(log.String("appID", appID), log.MaskedString(log.LoggerKeyUserID, userID))
 	logger.Debug(ctx, "Resolving consent for user")
@@ -156,7 +141,7 @@ func (s *consentEnforcerService) ResolveConsent(ctx context.Context, ouID, appID
 // attribute denials, and then persists the consent record.
 func (s *consentEnforcerService) RecordConsent(ctx context.Context, ouID, appID, userID string,
 	decisions *providers.ConsentDecisions, sessionToken string,
-	validityPeriod int64, runtimeMetadata map[string]string) (*providers.Consent, *tidcommon.ServiceError) {
+	validityPeriod int64, runtimeMetadata map[string][]string) (*providers.Consent, *tidcommon.ServiceError) {
 	logger := s.logger.With(log.String("appID", appID), log.MaskedString(log.LoggerKeyUserID, userID))
 	logger.Debug(ctx, "Recording consent for user")
 
@@ -169,6 +154,9 @@ func (s *consentEnforcerService) RecordConsent(ctx context.Context, ouID, appID,
 
 	// Fill in any missing purposes as denied so incomplete submissions are treated as non-consented
 	fillMissingDecisions(sessionData, decisions)
+
+	// Push denials down the decision hierarchy so everything below reads the effective value
+	applyDecisionHierarchy(decisions)
 
 	// Build essential element lookup and check whether any essential attribute was denied
 	essentialElements := buildEssentialElementSet(sessionData)
@@ -367,16 +355,21 @@ func (s *consentEnforcerService) verifyAndDecodeConsentSession(
 	return &sessionData, nil
 }
 
-// fillMissingDecisions adds denied decision entries for any prompted purposes that are absent
-// from the user's decisions. This treats missing purposes as non-consented rather than rejecting the request.
+// fillMissingDecisions treats an incomplete submission as non-consented rather than rejecting the
+// request. A purpose entirely absent from the user's decisions is added as denied with every prompted
+// element denied. A purpose that is present but denied at the root or at its own level has any
+// omitted prompted elements added as denied too, so a minimal deny payload (e.g. root approved=false
+// with no elements listed) still persists the individual denials and lets the essential-denial check
+// see them.
 func fillMissingDecisions(session *consentSessionData, decisions *providers.ConsentDecisions) {
-	decisionMap := make(map[string]bool, len(decisions.Purposes))
-	for _, pd := range decisions.Purposes {
-		decisionMap[pd.PurposeName] = true
+	decisionIdx := make(map[string]int, len(decisions.Purposes))
+	for i, pd := range decisions.Purposes {
+		decisionIdx[pd.PurposeName] = i
 	}
 
 	for _, sp := range session.Purposes {
-		if !decisionMap[sp.PurposeName] {
+		idx, present := decisionIdx[sp.PurposeName]
+		if !present {
 			// Build element decisions marking all elements as denied
 			elements := make([]providers.ElementDecision, 0, len(sp.Essential)+len(sp.Optional))
 			for _, elem := range sp.Essential {
@@ -390,6 +383,51 @@ func fillMissingDecisions(session *consentSessionData, decisions *providers.Cons
 				Approved:    false,
 				Elements:    elements,
 			})
+			continue
+		}
+
+		// Purpose present and approved at both levels: leave the client's element list untouched.
+		// Approval is not propagated down (see applyDecisionHierarchy), so an omitted element under
+		// an approved parent stays omitted and is treated as not-consented on subsequent reads.
+		if decisions.Approved && decisions.Purposes[idx].Approved {
+			continue
+		}
+
+		// Purpose present but denied at the root or at its own level: fill in any prompted elements
+		// the client omitted so the deny is recorded explicitly against each element.
+		existing := make(map[string]bool, len(decisions.Purposes[idx].Elements))
+		for _, ed := range decisions.Purposes[idx].Elements {
+			existing[ed.Name] = true
+		}
+		for _, elem := range sp.Essential {
+			if !existing[elem] {
+				decisions.Purposes[idx].Elements = append(decisions.Purposes[idx].Elements,
+					providers.ElementDecision{Name: elem, Approved: false})
+			}
+		}
+		for _, elem := range sp.Optional {
+			if !existing[elem] {
+				decisions.Purposes[idx].Elements = append(decisions.Purposes[idx].Elements,
+					providers.ElementDecision{Name: elem, Approved: false})
+			}
+		}
+	}
+}
+
+// applyDecisionHierarchy denies every purpose and element sitting under a denied level, so callers
+// can read the leaf Approved values directly instead of walking back up. Approval is not propagated
+// downwards: an approved parent leaves its children's own decisions untouched.
+func applyDecisionHierarchy(decisions *providers.ConsentDecisions) {
+	for i := range decisions.Purposes {
+		purpose := &decisions.Purposes[i]
+		if !decisions.Approved {
+			purpose.Approved = false
+		}
+		if purpose.Approved {
+			continue
+		}
+		for j := range purpose.Elements {
+			purpose.Elements[j].Approved = false
 		}
 	}
 }

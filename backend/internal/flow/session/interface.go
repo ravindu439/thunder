@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -33,6 +18,8 @@ type sessionStore interface {
 	// GetByExecutionID fetches the session established by the given flow execution, or (nil, nil)
 	// when that execution has not established one.
 	GetByExecutionID(ctx context.Context, flowExecutionID string) (*Session, error)
+	// ListBySubject returns every SSO session belonging to the subject.
+	ListBySubject(ctx context.Context, subjectID string) ([]Session, error)
 	// Update writes the mutable fields of an existing session under an optimistic-lock guard. It
 	// returns errVersionConflict when the stored version no longer matches, and bumps the in-memory
 	// Version on success.
@@ -46,9 +33,6 @@ type sessionStore interface {
 	Delete(ctx context.Context, sessionID string) error
 	// DeleteSession removes the session row itself.
 	DeleteSession(ctx context.Context, sessionID string) error
-	// ListCheckpointIDs returns the checkpoint ids a session has saved, without loading any context
-	// payload — the existence check the SSO-Check node uses to decide checkpoint availability.
-	ListCheckpointIDs(ctx context.Context, sessionID string) ([]string, error)
 
 	// Record inserts the participant, or refreshes its LAST_ACTIVE_AT (preserving FIRST_JOINED_AT)
 	// when the application has already joined the session.

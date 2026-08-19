@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {type Node, Position} from '@xyflow/react';
 
@@ -828,10 +813,16 @@ export function calculateAllEdgePaths(
     initialPaths.set(edge.id, fullPath);
   });
 
-  // Step 2: Extract all segments
+  // Step 2: Extract the interior segments. The first and last segments are
+  // anchored to the node handles — offsetting them would detach the path from
+  // its endpoints — so only segments between them participate in separation.
   const allSegments: Segment[] = [];
   initialPaths.forEach((path, edgeId) => {
-    allSegments.push(...extractSegments(edgeId, path));
+    allSegments.push(
+      ...extractSegments(edgeId, path).filter(
+        (segment) => segment.segmentIndex > 0 && segment.segmentIndex < path.length - 2,
+      ),
+    );
   });
 
   // Step 3: Find overlapping groups

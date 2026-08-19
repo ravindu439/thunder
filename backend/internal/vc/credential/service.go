@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package credential
 
@@ -356,6 +341,33 @@ func validateConfiguration(dto *CredentialConfigurationDTO) *tidcommon.ServiceEr
 	}
 	if dto.ValiditySeconds != nil && *dto.ValiditySeconds <= 0 {
 		return &ErrorConfigurationInvalidRequest
+	}
+	return validateClaims(dto.Claims)
+}
+
+// reservedClaimNames are the claim names that cannot be selectively disclosed.
+var reservedClaimNames = map[string]bool{
+	"iss": true, "nbf": true, "exp": true, "cnf": true, "vct": true, "status": true,
+	"_sd": true, "_sd_alg": true, "...": true,
+	"sub": true, "iat": true,
+}
+
+// validateClaims enforces non-empty, unique and non-reserved claim names. Claim names are compared
+// case-sensitively because they become JSON object keys in the issued credential.
+func validateClaims(claims []ClaimMapping) *tidcommon.ServiceError {
+	seen := make(map[string]bool, len(claims))
+	for _, claim := range claims {
+		name := strings.TrimSpace(claim.Name)
+		if name == "" {
+			return &ErrorConfigurationEmptyClaimName
+		}
+		if reservedClaimNames[name] {
+			return ErrorConfigurationReservedClaim.WithParams(map[string]string{"claim": name})
+		}
+		if seen[name] {
+			return ErrorConfigurationDuplicateClaim.WithParams(map[string]string{"claim": name})
+		}
+		seen[name] = true
 	}
 	return nil
 }

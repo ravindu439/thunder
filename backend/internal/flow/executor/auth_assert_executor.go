@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -126,9 +111,6 @@ func (a *authAssertExecutor) Execute(ctx *providers.NodeContext) (*providers.Exe
 
 		execResp.Status = providers.ExecComplete
 		execResp.Assertion = token
-		if callbackType, ok := ctx.NodeProperties[propertyKeyCallbackType].(string); ok && callbackType != "" {
-			execResp.AdditionalData[propertyKeyCallbackType] = callbackType
-		}
 	} else {
 		execResp.Status = providers.ExecFailure
 		execResp.Error = &ErrUserNotAuthenticated
@@ -230,9 +212,15 @@ func (a *authAssertExecutor) generateAuthAssertion(
 		jwtClaims[oauth2const.ClaimAuthorizationRequestID] = authReqID
 	}
 
+	// Carry the token family id (minted by the Session node) so the authorization code, and in turn
+	// the grant's access and refresh tokens, are stamped with it for family-scoped revocation.
+	if tokenFamilyID, exists := ctx.RuntimeData[common.RuntimeKeyTokenFamilyID]; exists && tokenFamilyID != "" {
+		jwtClaims[oauth2const.ClaimTokenFamilyID] = tokenFamilyID
+	}
+
 	requiredAttributes := a.getRequiredUserAttributes(ctx)
 
-	metadata := buildGetAttributesMetadata(ctx)
+	metadata := core.BuildGetAttributesMetadata(ctx)
 
 	// Convert requested attributes from []string to *RequestedAttributes
 	reqAttrs := &providers.RequestedAttributes{
@@ -252,6 +240,13 @@ func (a *authAssertExecutor) generateAuthAssertion(
 		return "", errors.New("failed to fetch entity references: " + svcErr.ErrorDescription.DefaultValue)
 	}
 
+	// Ensure the configured subject attribute for this user type is fetched
+	if mappedAttr := ctx.Application.SubjectAttribute[entityRef.EntityType]; mappedAttr != "" {
+		if _, ok := reqAttrs.Attributes[mappedAttr]; !ok {
+			reqAttrs.Attributes[mappedAttr] = nil
+		}
+	}
+
 	authUser, attrResp, svcErr := a.authnProvider.GetUserAttributes(ctx.Context, reqAttrs, metadata, execResp.AuthUser)
 	execResp.AuthUser = authUser
 	if svcErr != nil {
@@ -260,8 +255,6 @@ func (a *authAssertExecutor) generateAuthAssertion(
 		}
 		return "", errors.New("failed to fetch user attributes: " + svcErr.ErrorDescription.DefaultValue)
 	}
-
-	tokenSub = entityRef.EntityID
 
 	fetchedAttributes := make(map[string]interface{})
 
@@ -272,6 +265,9 @@ func (a *authAssertExecutor) generateAuthAssertion(
 			}
 		}
 	}
+
+	tokenSub = resolveSubject(ctx.Application.SubjectAttribute, entityRef.EntityType, fetchedAttributes,
+		entityRef.EntityID)
 
 	resolvedAttributes, attrErr := a.resolveUserAttributes(ctx, requiredAttributes, fetchedAttributes,
 		entityRef.EntityID, entityRef.EntityType, entityRef.OUID)
@@ -320,6 +316,22 @@ func (a *authAssertExecutor) generateAuthAssertion(
 	}
 
 	return token, nil
+}
+
+// resolveSubject returns the token subject for the user: the value of the attribute mapped for the
+// user's type in the application's subject-attribute config, or defaultSub when there is no mapping
+// for the type or the mapped attribute has no string value in attrs.
+func resolveSubject(
+	mapping map[string]string, userType string, attrs map[string]interface{}, defaultSub string,
+) string {
+	mappedAttr := mapping[userType]
+	if mappedAttr == "" {
+		return defaultSub
+	}
+	if value, ok := attrs[mappedAttr].(string); ok && value != "" {
+		return value
+	}
+	return defaultSub
 }
 
 // extractAuthenticatorReferences extracts authenticator references from execution history.

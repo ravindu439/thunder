@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -77,14 +62,15 @@ func (ah *applicationHandler) HandleApplicationPostRequest(w http.ResponseWriter
 			RecoveryFlowID:            appRequest.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     appRequest.IsRecoveryFlowEnabled,
 			SignOutFlowID:             appRequest.SignOutFlowID,
-			IsSignOutFlowEnabled:      appRequest.IsSignOutFlowEnabled,
 			ThemeID:                   appRequest.ThemeID,
 			LayoutID:                  appRequest.LayoutID,
 			Assertion:                 appRequest.Assertion,
-			AllowedUserTypes:          appRequest.AllowedUserTypes,
 			LoginConsent:              appRequest.LoginConsent,
+			AllowedUserTypes:          appRequest.AllowedUserTypes,
+			PasskeyAllowedOrigins:     appRequest.PasskeyAllowedOrigins,
 			Attestation:               appRequest.Attestation,
 		},
+		Type:       appRequest.Type,
 		Template:   appRequest.Template,
 		FlowSecret: appRequest.FlowSecret,
 		URL:        appRequest.URL,
@@ -108,21 +94,22 @@ func (ah *applicationHandler) HandleApplicationPostRequest(w http.ResponseWriter
 		OUID:        createdAppDTO.OUID,
 		Name:        createdAppDTO.Name,
 		Description: createdAppDTO.Description,
-		InboundAuthProfile: providers.InboundAuthProfile{
+		InboundAuthProfileReq: inboundmodel.InboundAuthProfileReq{
 			AuthFlowID:                createdAppDTO.AuthFlowID,
 			RegistrationFlowID:        createdAppDTO.RegistrationFlowID,
 			IsRegistrationFlowEnabled: createdAppDTO.IsRegistrationFlowEnabled,
 			RecoveryFlowID:            createdAppDTO.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     createdAppDTO.IsRecoveryFlowEnabled,
 			SignOutFlowID:             createdAppDTO.SignOutFlowID,
-			IsSignOutFlowEnabled:      createdAppDTO.IsSignOutFlowEnabled,
 			ThemeID:                   createdAppDTO.ThemeID,
 			LayoutID:                  createdAppDTO.LayoutID,
 			Assertion:                 createdAppDTO.Assertion,
-			AllowedUserTypes:          createdAppDTO.AllowedUserTypes,
 			LoginConsent:              createdAppDTO.LoginConsent,
+			AllowedUserTypes:          createdAppDTO.AllowedUserTypes,
+			PasskeyAllowedOrigins:     createdAppDTO.PasskeyAllowedOrigins,
 			Attestation:               createdAppDTO.Attestation,
 		},
+		Type:       createdAppDTO.Type,
 		Template:   createdAppDTO.Template,
 		FlowSecret: createdAppDTO.FlowSecret,
 		URL:        createdAppDTO.URL,
@@ -189,21 +176,22 @@ func (ah *applicationHandler) HandleApplicationGetRequest(w http.ResponseWriter,
 		OUID:        appDTO.OUID,
 		Name:        appDTO.Name,
 		Description: appDTO.Description,
-		InboundAuthProfile: providers.InboundAuthProfile{
+		InboundAuthProfileReq: inboundmodel.InboundAuthProfileReq{
 			AuthFlowID:                appDTO.AuthFlowID,
 			RegistrationFlowID:        appDTO.RegistrationFlowID,
 			IsRegistrationFlowEnabled: appDTO.IsRegistrationFlowEnabled,
 			RecoveryFlowID:            appDTO.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     appDTO.IsRecoveryFlowEnabled,
 			SignOutFlowID:             appDTO.SignOutFlowID,
-			IsSignOutFlowEnabled:      appDTO.IsSignOutFlowEnabled,
 			ThemeID:                   appDTO.ThemeID,
 			LayoutID:                  appDTO.LayoutID,
 			Assertion:                 appDTO.Assertion,
-			AllowedUserTypes:          appDTO.AllowedUserTypes,
 			LoginConsent:              appDTO.LoginConsent,
+			AllowedUserTypes:          appDTO.AllowedUserTypes,
+			PasskeyAllowedOrigins:     appDTO.PasskeyAllowedOrigins,
 			Attestation:               appDTO.Attestation,
 		},
+		Type:      model.ApplicationType(appDTO.Type),
 		Template:  appDTO.Template,
 		URL:       appDTO.URL,
 		LogoURL:   appDTO.LogoURL,
@@ -339,14 +327,15 @@ func (ah *applicationHandler) HandleApplicationPutRequest(w http.ResponseWriter,
 			RecoveryFlowID:            appRequest.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     appRequest.IsRecoveryFlowEnabled,
 			SignOutFlowID:             appRequest.SignOutFlowID,
-			IsSignOutFlowEnabled:      appRequest.IsSignOutFlowEnabled,
 			ThemeID:                   appRequest.ThemeID,
 			LayoutID:                  appRequest.LayoutID,
 			Assertion:                 appRequest.Assertion,
-			AllowedUserTypes:          appRequest.AllowedUserTypes,
 			LoginConsent:              appRequest.LoginConsent,
+			AllowedUserTypes:          appRequest.AllowedUserTypes,
+			PasskeyAllowedOrigins:     appRequest.PasskeyAllowedOrigins,
 			Attestation:               appRequest.Attestation,
 		},
+		Type:       appRequest.Type,
 		Template:   appRequest.Template,
 		FlowSecret: appRequest.FlowSecret,
 		URL:        appRequest.URL,
@@ -370,21 +359,22 @@ func (ah *applicationHandler) HandleApplicationPutRequest(w http.ResponseWriter,
 		OUID:        updatedAppDTO.OUID,
 		Name:        updatedAppDTO.Name,
 		Description: updatedAppDTO.Description,
-		InboundAuthProfile: providers.InboundAuthProfile{
+		InboundAuthProfileReq: inboundmodel.InboundAuthProfileReq{
 			AuthFlowID:                updatedAppDTO.AuthFlowID,
 			RegistrationFlowID:        updatedAppDTO.RegistrationFlowID,
 			IsRegistrationFlowEnabled: updatedAppDTO.IsRegistrationFlowEnabled,
 			RecoveryFlowID:            updatedAppDTO.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     updatedAppDTO.IsRecoveryFlowEnabled,
 			SignOutFlowID:             updatedAppDTO.SignOutFlowID,
-			IsSignOutFlowEnabled:      updatedAppDTO.IsSignOutFlowEnabled,
 			ThemeID:                   updatedAppDTO.ThemeID,
 			LayoutID:                  updatedAppDTO.LayoutID,
 			Assertion:                 updatedAppDTO.Assertion,
-			AllowedUserTypes:          updatedAppDTO.AllowedUserTypes,
 			LoginConsent:              updatedAppDTO.LoginConsent,
+			AllowedUserTypes:          updatedAppDTO.AllowedUserTypes,
+			PasskeyAllowedOrigins:     updatedAppDTO.PasskeyAllowedOrigins,
 			Attestation:               updatedAppDTO.Attestation,
 		},
+		Type:      updatedAppDTO.Type,
 		Template:  updatedAppDTO.Template,
 		URL:       updatedAppDTO.URL,
 		LogoURL:   updatedAppDTO.LogoURL,

@@ -1,28 +1,15 @@
-/**
- * Copyright (c) 2023-2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2023-2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useNodeId} from '@xyflow/react';
 import {memo, useMemo, type ReactElement} from 'react';
+import ExecutionCompact from './ExecutionCompact';
 import ExecutionMinimal from './ExecutionMinimal';
 import ValidationErrorBoundary from '../../../validation-panel/ValidationErrorBoundary';
 import type {CommonStepFactoryPropsInterface} from '../CommonStepFactory';
 import View from '../view/View';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
+import useFlowConfig from '@/features/flows/hooks/useFlowConfig';
 import useInteractionState from '@/features/flows/hooks/useInteractionState';
 import type {Element} from '@/features/flows/models/elements';
 import {ResourceTypes} from '@/features/flows/models/resources';
@@ -46,6 +33,7 @@ export type ExecutionPropsInterface = CommonStepFactoryPropsInterface;
 function Execution({data, resources}: ExecutionPropsInterface): ReactElement | null {
   const stepId: string | null = useNodeId();
   const {setLastInteractedResource, setLastInteractedStepId} = useInteractionState();
+  const {isVerboseMode} = useFlowConfig();
 
   const executorName = (data?.action as StepAction | undefined)?.executor?.name ?? 'Executor';
   // Get display metadata from data (set by resolveStepMetadata)
@@ -99,8 +87,12 @@ function Execution({data, resources}: ExecutionPropsInterface): ReactElement | n
   );
 
   return (
-    <ValidationErrorBoundary resource={resource}>
-      {hasComponents ? (
+    // The compact chip is a circle, so the boundary is rounded to match it
+    // instead of boxing it in the default rounded rectangle.
+    <ValidationErrorBoundary borderRadius={isVerboseMode ? undefined : '50%'} resource={resource}>
+      {!isVerboseMode ? (
+        <ExecutionCompact resource={resource} />
+      ) : hasComponents ? (
         <View
           heading={executorName}
           data={data}

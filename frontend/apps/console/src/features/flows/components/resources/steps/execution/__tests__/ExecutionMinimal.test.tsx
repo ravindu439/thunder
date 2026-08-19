@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -31,18 +16,18 @@ vi.mock('@xyflow/react', () => ({
     type,
     position,
     id = '',
-    className = '',
+    'data-handle': dataHandle = '',
   }: {
     type: string;
     position: string;
     id?: string;
-    className?: string;
+    'data-handle'?: string;
   }) => (
     <div
-      data-testid={`handle-${type}${className ? `-${className}` : ''}`}
+      data-testid={`handle-${type}${dataHandle ? `-${dataHandle}` : ''}`}
       data-position={position}
       data-id={id}
-      data-classname={className}
+      data-handle={dataHandle}
     />
   ),
   Position: {
@@ -198,7 +183,7 @@ describe('ExecutionMinimal', () => {
       const resource = createMockResource({id: 'test-execution'});
       render(<ExecutionMinimal resource={resource} />);
 
-      // When no branching support, the handle doesn't have a className
+      // When no branching support, the handle carries no outcome marker
       const sourceHandle = screen.getByTestId('handle-source');
       expect(sourceHandle).toHaveAttribute('data-position', 'right');
       expect(sourceHandle).toHaveAttribute('data-id', 'test-execution-next');
@@ -217,7 +202,7 @@ describe('ExecutionMinimal', () => {
       });
       render(<ExecutionMinimal resource={resource} />);
 
-      // Success handle should be present (no className when no branching)
+      // Success handle should be present (no outcome marker when no branching)
       expect(screen.getByTestId('handle-source')).toBeInTheDocument();
       // Failure handle should NOT be present
       expect(screen.queryByTestId('handle-source-execution-handle-failure')).not.toBeInTheDocument();
@@ -296,7 +281,7 @@ describe('ExecutionMinimal', () => {
       expect(screen.getByTestId('handle-source-execution-handle-failure')).toBeInTheDocument();
     });
 
-    it('should add has-branching class when onFailure exists', () => {
+    it('should give the content a minimum height when onFailure exists', () => {
       const resource = createMockResource({
         data: {
           action: {
@@ -306,13 +291,12 @@ describe('ExecutionMinimal', () => {
           },
         },
       });
-      const {container} = render(<ExecutionMinimal resource={resource} />);
+      render(<ExecutionMinimal resource={resource} />);
 
-      const stepElement = container.querySelector('.execution-minimal-step');
-      expect(stepElement).toHaveClass('has-branching');
+      expect(screen.getByTestId('execution-minimal-step-content')).toHaveStyle({minHeight: '60px'});
     });
 
-    it('should not add has-branching class when onFailure does not exist', () => {
+    it('should not give the content a minimum height when onFailure does not exist', () => {
       const resource = createMockResource({
         data: {
           action: {
@@ -321,10 +305,9 @@ describe('ExecutionMinimal', () => {
           },
         },
       });
-      const {container} = render(<ExecutionMinimal resource={resource} />);
+      render(<ExecutionMinimal resource={resource} />);
 
-      const stepElement = container.querySelector('.execution-minimal-step');
-      expect(stepElement).not.toHaveClass('has-branching');
+      expect(screen.getByTestId('execution-minimal-step-content')).not.toHaveStyle({minHeight: '60px'});
     });
 
     it('should render incomplete handle when onIncomplete property exists', () => {

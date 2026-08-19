@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen} from '@testing-library/react';
+import {fireEvent, render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {describe, it, expect, beforeEach, vi} from 'vitest';
 import FlowsListView, {type FlowsListViewProps} from '../FlowsListView';
@@ -28,8 +13,9 @@ vi.mock('react-i18next', () => ({
     t: (key: string) => {
       const translations: Record<string, string> = {
         'common:or': 'or',
-        'applications:onboarding.configure.SignInOptions.preConfiguredFlows.selectFlow': 'Select a flow',
         'applications:onboarding.configure.SignInOptions.preConfiguredFlows.searchFlows': 'Search flows...',
+        'applications:onboarding.configure.SignInOptions.preConfiguredFlows.toggleLabel':
+          'Use a pre-configured flow instead',
       };
       return translations[key] || key;
     },
@@ -83,6 +69,14 @@ describe('FlowsListView', () => {
 
   const renderComponent = (props: Partial<FlowsListViewProps> = {}) =>
     render(<FlowsListView {...defaultProps} {...props} />);
+
+  // The card is collapsed by default; expand it by clicking its header row so tests can reach
+  // the autocomplete inside.
+  const renderExpanded = (props: Partial<FlowsListViewProps> = {}) => {
+    const result = renderComponent(props);
+    fireEvent.click(screen.getByRole('button', {name: /pre-configured flow instead/i}));
+    return result;
+  };
 
   describe('rendering', () => {
     it('should return null when no selectable flows available', () => {
@@ -139,16 +133,22 @@ describe('FlowsListView', () => {
       expect(screen.getByText('or')).toBeInTheDocument();
     });
 
-    it('should render autocomplete component', () => {
+    it('should render the pre-configured flow card title', () => {
       renderComponent();
 
-      expect(screen.getByRole('combobox')).toBeInTheDocument();
+      expect(screen.getByText('Use a pre-configured flow instead')).toBeInTheDocument();
     });
 
-    it('should render with proper label text', () => {
+    it('should be collapsed by default, with the autocomplete not shown', () => {
       renderComponent();
 
-      expect(screen.getByLabelText('Select a flow')).toBeInTheDocument();
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    });
+
+    it('should reveal the autocomplete once expanded', () => {
+      renderExpanded();
+
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
   });
 
@@ -167,7 +167,7 @@ describe('FlowsListView', () => {
         },
       ];
 
-      renderComponent({availableFlows: mixedFlows});
+      renderExpanded({availableFlows: mixedFlows});
 
       // The component should render since there are selectable flows
       expect(screen.getByRole('combobox')).toBeInTheDocument();
@@ -187,7 +187,7 @@ describe('FlowsListView', () => {
         },
       ];
 
-      renderComponent({availableFlows: mixedFlows});
+      renderExpanded({availableFlows: mixedFlows});
 
       expect(screen.getByRole('combobox')).toBeInTheDocument();
     });
@@ -196,7 +196,7 @@ describe('FlowsListView', () => {
   describe('autocomplete interaction', () => {
     it('should call onFlowSelect when a flow is selected', async () => {
       const user = userEvent.setup();
-      renderComponent();
+      renderExpanded();
 
       const autocomplete = screen.getByRole('combobox');
       await user.click(autocomplete);
@@ -209,36 +209,32 @@ describe('FlowsListView', () => {
 
     it('should call onClearSelection when selection is cleared', async () => {
       const user = userEvent.setup();
+      // The card is already expanded because selectedAuthFlow is set, so use renderComponent
+      // directly; renderExpanded would toggle it back closed.
       renderComponent({
         selectedAuthFlow: mockFlows[0],
       });
 
       const autocomplete = screen.getByRole('combobox');
-      await user.click(autocomplete);
+      const clearButton = autocomplete.parentElement?.querySelector('[aria-label="Clear"]');
 
-      // Clear the selection by clicking outside or selecting null
-      await user.clear(autocomplete);
-      await user.tab(); // blur to trigger onChange with null
+      expect(clearButton).not.toBeNull();
+      await user.click(clearButton!);
 
       expect(mockOnClearSelection).toHaveBeenCalled();
     });
 
-    it('should show selected flow value in autocomplete', async () => {
-      const user = userEvent.setup();
+    it('should show selected flow value in autocomplete', () => {
       renderComponent({
         selectedAuthFlow: mockFlows[1],
       });
 
-      const autocomplete = screen.getByRole('combobox');
-      await user.click(autocomplete);
-
-      // Open the dropdown to see options
-      expect(screen.getByText('Google OAuth Flow')).toBeInTheDocument();
+      expect(screen.getByRole('combobox')).toHaveValue('Google OAuth Flow');
     });
 
     it('should display flow options when opened', async () => {
       const user = userEvent.setup();
-      renderComponent();
+      renderExpanded();
 
       const autocomplete = screen.getByRole('combobox');
       await user.click(autocomplete);
@@ -252,14 +248,14 @@ describe('FlowsListView', () => {
 
   describe('disabled state', () => {
     it('should disable autocomplete when disabled prop is true', () => {
-      renderComponent({disabled: true});
+      renderExpanded({disabled: true});
 
       const autocomplete = screen.getByRole('combobox');
       expect(autocomplete).toBeDisabled();
     });
 
     it('should enable autocomplete when disabled prop is false', () => {
-      renderComponent({disabled: false});
+      renderExpanded({disabled: false});
 
       const autocomplete = screen.getByRole('combobox');
       expect(autocomplete).not.toBeDisabled();
@@ -272,7 +268,7 @@ describe('FlowsListView', () => {
       const specialFlows: BasicFlowDefinition[] = [
         {
           id: 'special-flow',
-          name: 'OAuth 2.0 & OIDC Flow',
+          name: 'OAuth 2 & OIDC Flow',
           activeVersion: 1,
           handle: 'oauth-oidc-flow',
           flowType: 'AUTHENTICATION',
@@ -281,12 +277,12 @@ describe('FlowsListView', () => {
         },
       ];
 
-      renderComponent({availableFlows: specialFlows});
+      renderExpanded({availableFlows: specialFlows});
 
       const autocomplete = screen.getByRole('combobox');
       await user.click(autocomplete);
 
-      expect(screen.getByText('OAuth 2.0 & OIDC Flow')).toBeInTheDocument();
+      expect(screen.getByText('OAuth 2 & OIDC Flow')).toBeInTheDocument();
     });
 
     it('should handle flows with very long names', async () => {
@@ -303,7 +299,7 @@ describe('FlowsListView', () => {
         },
       ];
 
-      renderComponent({availableFlows: longNameFlows});
+      renderExpanded({availableFlows: longNameFlows});
 
       const autocomplete = screen.getByRole('combobox');
       await user.click(autocomplete);
@@ -322,7 +318,7 @@ describe('FlowsListView', () => {
         updatedAt: '',
       };
 
-      renderComponent({
+      renderExpanded({
         selectedAuthFlow: unknownFlow,
       });
 
@@ -333,7 +329,7 @@ describe('FlowsListView', () => {
 
   describe('accessibility', () => {
     it('should have proper ARIA attributes for autocomplete', () => {
-      renderComponent();
+      renderExpanded();
 
       const combobox = screen.getByRole('combobox');
       expect(combobox).toHaveAttribute('aria-autocomplete', 'list');
@@ -341,19 +337,19 @@ describe('FlowsListView', () => {
 
     it('should be keyboard navigable', async () => {
       const user = userEvent.setup();
-      renderComponent();
+      renderExpanded();
 
       const combobox = screen.getByRole('combobox');
-      await user.tab();
+      await user.click(combobox);
       expect(combobox).toHaveFocus();
     });
 
     it('should expand dropdown on Enter key', async () => {
       const user = userEvent.setup();
-      renderComponent();
+      renderExpanded();
 
       const combobox = screen.getByRole('combobox');
-      await user.tab();
+      await user.click(combobox);
       await user.keyboard('{ArrowDown}');
 
       // Dropdown should be expanded

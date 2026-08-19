@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable react/require-default-props */
 
@@ -63,9 +48,6 @@ vi.mock('@/features/flows/hooks/useInteractionState', () => ({
   }),
 }));
 
-// Mock SCSS
-vi.mock('../Rule.scss', () => ({}));
-
 // Default mock props for Rule component
 const createMockProps = (overrides: Partial<CommonStepFactoryPropsInterface> = {}): CommonStepFactoryPropsInterface =>
   ({
@@ -99,10 +81,10 @@ describe('Rule', () => {
       expect(screen.getByText('Conditional Rule')).toBeInTheDocument();
     });
 
-    it('should render with flow-builder-rule class', () => {
-      const {container} = render(<Rule {...createMockProps({id: 'rule-1', data: {}})} />);
+    it('should render the rule node surface', () => {
+      render(<Rule {...createMockProps({id: 'rule-1', data: {}})} />);
 
-      expect(container.querySelector('.flow-builder-rule')).toBeInTheDocument();
+      expect(screen.getByTestId('rule-node')).toBeInTheDocument();
     });
   });
 
@@ -167,9 +149,7 @@ describe('Rule', () => {
     it('should set lastInteractedResource when action panel is clicked', () => {
       render(<Rule {...createMockProps({id: 'rule-1', data: {someData: 'value'}})} />);
 
-      const actionPanel = screen.getByText('Conditional Rule').closest('.flow-builder-rule-action-panel');
-      expect(actionPanel).not.toBeNull();
-      fireEvent.click(actionPanel!);
+      fireEvent.click(screen.getByTestId('rule-action-panel'));
       expect(mockSetLastInteractedResource).toHaveBeenCalled();
     });
 
@@ -177,9 +157,7 @@ describe('Rule', () => {
       const testData = {name: 'Test Rule', condition: 'true'};
       render(<Rule {...createMockProps({id: 'custom-rule-id', data: testData})} />);
 
-      const actionPanel = screen.getByText('Conditional Rule').closest('.flow-builder-rule-action-panel');
-      expect(actionPanel).not.toBeNull();
-      fireEvent.click(actionPanel!);
+      fireEvent.click(screen.getByTestId('rule-action-panel'));
 
       expect(mockSetLastInteractedResource).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -195,11 +173,10 @@ describe('Rule', () => {
     it('should handle drag event and set dropEffect to move', () => {
       render(<Rule {...createMockProps({id: 'rule-1', data: {}})} />);
 
-      const ruleElement = screen.getByText('Conditional Rule').closest('.flow-builder-rule');
-      expect(ruleElement).toBeInTheDocument();
+      const ruleElement = screen.getByTestId('rule-node');
 
       const dataTransfer = {dropEffect: ''};
-      fireEvent.drag(ruleElement!, {dataTransfer});
+      fireEvent.drag(ruleElement, {dataTransfer});
 
       expect(dataTransfer.dropEffect).toBe('move');
     });
@@ -207,20 +184,14 @@ describe('Rule', () => {
     it('should handle drag event when dataTransfer is not provided', () => {
       render(<Rule {...createMockProps({id: 'rule-1', data: {}})} />);
 
-      const ruleElement = screen.getByText('Conditional Rule').closest('.flow-builder-rule');
-      expect(ruleElement).toBeInTheDocument();
-
       // Should not throw when dataTransfer is undefined
-      fireEvent.drag(ruleElement!);
+      expect(() => fireEvent.drag(screen.getByTestId('rule-node'))).not.toThrow();
     });
 
     it('should handle drop event', () => {
       render(<Rule {...createMockProps({id: 'rule-1', data: {}})} />);
 
-      const ruleElement = screen.getByText('Conditional Rule').closest('.flow-builder-rule');
-      expect(ruleElement).toBeInTheDocument();
-
-      fireEvent.drop(ruleElement!);
+      expect(() => fireEvent.drop(screen.getByTestId('rule-node'))).not.toThrow();
     });
   });
 
@@ -228,9 +199,7 @@ describe('Rule', () => {
     it('should use id from props when nodeId is available', () => {
       render(<Rule {...createMockProps({id: 'props-id', data: {}})} />);
 
-      const actionPanel = screen.getByText('Conditional Rule').closest('.flow-builder-rule-action-panel');
-      expect(actionPanel).not.toBeNull();
-      fireEvent.click(actionPanel!);
+      fireEvent.click(screen.getByTestId('rule-action-panel'));
 
       expect(mockSetLastInteractedResource).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -242,9 +211,7 @@ describe('Rule', () => {
     it('should fall back to nodeId when id prop is not provided', () => {
       render(<Rule {...createMockProps({data: {}})} />);
 
-      const actionPanel = screen.getByText('Conditional Rule').closest('.flow-builder-rule-action-panel');
-      expect(actionPanel).not.toBeNull();
-      fireEvent.click(actionPanel!);
+      fireEvent.click(screen.getByTestId('rule-action-panel'));
 
       expect(mockSetLastInteractedResource).toHaveBeenCalledWith(
         expect.objectContaining({

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Application Edit E2E Tests
@@ -25,138 +10,113 @@
  *
  * Required environment variables:
  * - BASE_URL: Console base URL
- * - SERVER_URL: Server API base URL (defaults to https://localhost:8090)
  * - ADMIN_USERNAME: Admin username (defaults to admin)
  * - ADMIN_PASSWORD: Admin password (defaults to admin)
- * - SAMPLE_APP_ID: Application ID used to obtain admin token
- * - DEFAULT_OU_ID: (optional) OU ID for the test application; fetched from the API when not set
+ *
+ * Optional:
+ * - SERVER_URL: backend base URL (default https://localhost:8090)
  */
 
-import { test, expect } from "../../fixtures/console";
+import { test, expect, ApplicationsApi, UserTypesApi } from "../../fixtures/console";
 import { TestDataFactory } from "../../utils/test-data";
-import { getAdminToken } from "../../utils/authentication";
-
-const serverUrl = process.env.SERVER_URL || "https://localhost:8090";
-const defaultOuId = process.env.DEFAULT_OU_ID || "";
 
 test.describe("Application Edit", () => {
   let testAppId: string;
   let testAppName: string;
   let suiteOuId: string;
+  /** TC012's own application, cleared once the UI delete succeeds; the hook removes it otherwise. */
+  let deleteTestAppId: string | undefined;
 
   test.beforeAll(async ({ request }) => {
-    if (!process.env.SAMPLE_APP_ID) throw new Error("SAMPLE_APP_ID env var is required for Application Edit tests");
-
     console.log("\n=== Application Edit Suite Setup ===");
     const appData = TestDataFactory.createApplication({ name: `TestApp_EDIT_${Date.now()}` });
     testAppName = appData.name;
 
-    const adminToken = await getAdminToken(request);
+    // Reuse the Person user type's organization unit, the same way UsersApi.createUser
+    // resolves one, rather than re-deriving it from the organization-units list.
+    const personType = await new UserTypesApi(request).findByName("Person");
+    if (!personType?.ouId) throw new Error("Person user type not found or missing organization unit");
+    suiteOuId = personType.ouId;
 
-    let resolvedOuId = defaultOuId;
-    if (!resolvedOuId) {
-      const ouResponse = await request.get(`${serverUrl}/organization-units?limit=1`, {
-        headers: { Authorization: `Bearer ${adminToken}` },
-        ignoreHTTPSErrors: true,
-      });
-      if (ouResponse.ok()) {
-        const ouData = await ouResponse.json();
-        resolvedOuId = ouData.organizationUnits?.[0]?.id ?? "";
-      }
-    }
-    if (!resolvedOuId) throw new Error("Could not determine an OU ID for Application Edit tests");
-    suiteOuId = resolvedOuId;
-
-    const createResponse = await request.post(`${serverUrl}/applications`, {
-      data: {
-        name: appData.name,
-        description: appData.description,
-        ouId: resolvedOuId,
-        inboundAuthConfig: [
-          {
-            type: "oauth2",
-            config: { clientType: "PUBLIC", redirectUris: ["http://localhost:3000/callback"] },
-          },
-        ],
-      },
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-        "Content-Type": "application/json",
-      },
-      ignoreHTTPSErrors: true,
+    const created = await new ApplicationsApi(request).create({
+      name: appData.name,
+      description: appData.description,
+      ouId: suiteOuId,
+      type: "fullstack",
+      inboundAuthConfig: [
+        {
+          type: "oauth2",
+          config: { clientType: "PUBLIC", redirectUris: ["http://localhost:3000/callback"] },
+        },
+      ],
     });
-
-    if (!createResponse.ok()) {
-      throw new Error(`Failed to create test application: ${await createResponse.text()}`);
-    }
-
-    const created = await createResponse.json();
     testAppId = created.id;
     console.log(`Test application created: ${testAppName} (${testAppId})`);
   });
 
   test.afterAll(async ({ request }) => {
     console.log("\n=== Application Edit Suite Cleanup ===");
+
+    if (deleteTestAppId) {
+      const deleted = await new ApplicationsApi(request).deleteById(deleteTestAppId).catch(() => false);
+      if (deleted) {
+        console.log(`Test application deleted: ${deleteTestAppId}`);
+      } else {
+        console.warn(`Failed to delete test application ${deleteTestAppId}`);
+      }
+    }
+
     if (!testAppId) return;
 
-    const adminToken = await getAdminToken(request);
-
-    const deleteResponse = await request.delete(`${serverUrl}/applications/${testAppId}`, {
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-      },
-      ignoreHTTPSErrors: true,
-    });
-
-    if (deleteResponse.ok()) {
+    const deleted = await new ApplicationsApi(request).deleteById(testAppId);
+    if (deleted) {
       console.log(`Test application deleted: ${testAppId}`);
     } else {
-      console.warn(`Failed to delete test application ${testAppId}: ${await deleteResponse.text()}`);
+      console.warn(`Failed to delete test application ${testAppId}`);
     }
   });
 
-  /** TC006: Edit page - General tab is default and shows Quick Copy fields */
-  test("TC006: Edit page - General tab is default and shows Quick Copy fields", async ({ applicationsPage }) => {
+  /** TC004: Edit page - Overview tab shows application details */
+  test("TC004: Edit page - Overview tab shows application details", async ({ applicationsPage }) => {
     await test.step("Navigate to application edit page", async () => {
       console.log(`Navigating to edit page for app: ${testAppId}`);
       await applicationsPage.gotoEdit(testAppId);
-      await applicationsPage.screenshot("tc006-edit-page");
     });
 
-    await test.step("Verify General tab is selected by default", async () => {
-      const generalTab = applicationsPage.page.getByRole("tab", { name: /general/i });
-      await expect(generalTab).toBeVisible();
-      await expect(generalTab).toHaveAttribute("aria-selected", "true");
-      console.log("General tab is active by default");
+    await test.step("Click Overview tab", async () => {
+      await applicationsPage.clickTab("Overview");
+      const overviewTab = applicationsPage.page.getByRole("tab", { name: /overview/i });
+      await expect(overviewTab).toHaveAttribute("aria-selected", "true");
+      console.log("Overview tab is active");
     });
 
-    await test.step("Verify Application ID field is visible in Quick Copy section", async () => {
+    await test.step("Verify Application ID field is visible in application details", async () => {
       await expect(applicationsPage.applicationIdField).toBeVisible();
       console.log("Application ID field visible");
-      await applicationsPage.screenshot("tc006-quick-copy-fields");
     });
   });
 
-  /** TC007: Edit page - Add and save a redirect URI */
-  test("TC007: Edit page - Add and save a redirect URI", async ({ applicationsPage }) => {
+  /** TC005: Edit page - Add and save a redirect URI */
+  test("TC005: Edit page - Add and save a redirect URI", async ({ applicationsPage }) => {
     const testUri = "https://example.com/callback";
 
     await test.step("Navigate to application edit page", async () => {
       await applicationsPage.gotoEdit(testAppId);
-      await applicationsPage.screenshot("tc007-edit-page");
+    });
+
+    await test.step("Click Advanced tab", async () => {
+      await applicationsPage.clickTab("Advanced");
     });
 
     await test.step("Add a redirect URI", async () => {
       console.log("Adding redirect URI:", testUri);
       await applicationsPage.addRedirectUri(testUri);
-      await applicationsPage.screenshot("tc007-uri-added");
     });
 
     await test.step("Save changes and verify no error alert", async () => {
       await applicationsPage.saveChanges();
       await expect(applicationsPage.errorAlert).not.toBeVisible();
       console.log("Saved successfully with no error");
-      await applicationsPage.screenshot("tc007-saved");
     });
 
     await test.step("Verify URI remains after save", async () => {
@@ -166,10 +126,14 @@ test.describe("Application Edit", () => {
     });
   });
 
-  /** TC008: Edit page - Application URL rejects invalid URL */
-  test("TC008: Edit page - Application URL rejects invalid URL", async ({ applicationsPage }) => {
+  /** TC006: Edit page - Application URL rejects invalid URL */
+  test("TC006: Edit page - Application URL rejects invalid URL", async ({ applicationsPage }) => {
     await test.step("Navigate to application edit page", async () => {
       await applicationsPage.gotoEdit(testAppId);
+    });
+
+    await test.step("Click Access tab", async () => {
+      await applicationsPage.clickTab("Access");
     });
 
     await test.step("Type an invalid URL into Application URL field", async () => {
@@ -177,7 +141,6 @@ test.describe("Application Edit", () => {
       await applicationsPage.applicationUrlInput.fill("not-a-valid-url");
       await applicationsPage.applicationUrlInput.blur();
       console.log("Entered invalid URL value");
-      await applicationsPage.screenshot("tc008-invalid-url");
     });
 
     await test.step("Verify inline validation error is shown for invalid URL", async () => {
@@ -186,12 +149,11 @@ test.describe("Application Edit", () => {
         .or(applicationsPage.page.getByText(/invalid url/i));
       await expect(validationError.first()).toBeVisible();
       console.log("Inline validation error shown for invalid URL — correct");
-      await applicationsPage.screenshot("tc008-validation-error");
     });
   });
 
-  /** TC009: Edit page - Flows tab renders flow selectors */
-  test("TC009: Edit page - Flows tab renders flow selectors", async ({ applicationsPage }) => {
+  /** TC007: Edit page - Flows tab renders flow selectors */
+  test("TC007: Edit page - Flows tab renders flow selectors", async ({ applicationsPage }) => {
     await test.step("Navigate to application edit page", async () => {
       await applicationsPage.gotoEdit(testAppId);
     });
@@ -199,26 +161,24 @@ test.describe("Application Edit", () => {
     await test.step("Click Flows tab", async () => {
       await applicationsPage.clickTab("Flows");
       console.log("Clicked Flows tab");
-      await applicationsPage.screenshot("tc009-flows-tab");
     });
 
-    await test.step("Verify authentication and registration flow selectors are visible", async () => {
+    await test.step("Verify sign-in and sign-up flow selectors are visible", async () => {
       const authFlowSelector = applicationsPage.page
-        .getByText(/authentication flow/i)
-        .or(applicationsPage.page.getByLabel(/authentication flow/i));
+        .getByText(/sign-in flow/i)
+        .or(applicationsPage.page.getByLabel(/sign-in flow/i));
       const registrationFlowSelector = applicationsPage.page
-        .getByText(/registration flow/i)
-        .or(applicationsPage.page.getByLabel(/registration flow/i));
+        .getByText(/sign-up flow/i)
+        .or(applicationsPage.page.getByLabel(/sign-up flow/i));
 
       await expect(authFlowSelector.first()).toBeVisible();
       await expect(registrationFlowSelector.first()).toBeVisible();
-      console.log("Authentication and Registration flow selectors visible");
-      await applicationsPage.screenshot("tc009-flow-selectors");
+      console.log("Sign-in and Sign-up flow selectors visible");
     });
   });
 
-  /** TC010: Edit page - Customization tab renders contact fields */
-  test("TC010: Edit page - Customization tab renders contact fields", async ({ applicationsPage }) => {
+  /** TC008: Edit page - Customization tab renders contact fields */
+  test("TC008: Edit page - Customization tab renders contact fields", async ({ applicationsPage }) => {
     await test.step("Navigate to application edit page", async () => {
       await applicationsPage.gotoEdit(testAppId);
     });
@@ -226,7 +186,6 @@ test.describe("Application Edit", () => {
     await test.step("Click Customization tab", async () => {
       await applicationsPage.clickTab("Customization");
       console.log("Clicked Customization tab");
-      await applicationsPage.screenshot("tc010-customization-tab");
     });
 
     await test.step("Verify Terms of Service and Privacy Policy URI fields are visible", async () => {
@@ -240,17 +199,15 @@ test.describe("Application Edit", () => {
       await expect(tosField.first()).toBeVisible();
       await expect(privacyField.first()).toBeVisible();
       console.log("Terms of Service and Privacy Policy URI fields visible");
-      await applicationsPage.screenshot("tc010-fields-visible");
     });
   });
 
-  /** TC011: Edit page - Inline name edit persists */
-  test("TC011: Edit page - Inline name edit persists", async ({ applicationsPage }) => {
+  /** TC009: Edit page - Inline name edit persists */
+  test("TC009: Edit page - Inline name edit persists", async ({ applicationsPage }) => {
     const newName = `TestApp_RENAMED_${Date.now()}`;
 
     await test.step("Navigate to application edit page", async () => {
       await applicationsPage.gotoEdit(testAppId);
-      await applicationsPage.screenshot("tc011-edit-page");
     });
 
     await test.step("Click the edit icon next to the application name and rename it", async () => {
@@ -266,7 +223,6 @@ test.describe("Application Edit", () => {
       await nameInput.fill(newName);
       await nameInput.press("Enter");
       console.log("Renamed application to:", newName);
-      await applicationsPage.screenshot("tc011-renamed");
     });
 
     await test.step("Verify heading shows new name", async () => {
@@ -278,89 +234,62 @@ test.describe("Application Edit", () => {
     await test.step("Save changes", async () => {
       await applicationsPage.saveChanges();
       console.log("Saved name change");
-      await applicationsPage.screenshot("tc011-saved");
     });
 
     await test.step("Reload page and verify new name persists", async () => {
-      await applicationsPage.page.reload({ waitUntil: "networkidle" });
+      await applicationsPage.page.reload();
       const persistedHeading = applicationsPage.page.locator("h3").filter({ hasText: newName });
       await expect(persistedHeading.first()).toBeVisible();
       console.log("New name persists after page reload:", newName);
-      await applicationsPage.screenshot("tc011-name-persisted");
       testAppName = newName;
     });
   });
 
-  /** TC012: Delete application from Danger Zone */
-  test("TC012: Delete application from Danger Zone", async ({ applicationsPage, request }) => {
-    let deleteTestAppId: string | undefined;
+  /** TC010: Delete application from Danger Zone */
+  test("TC010: Delete application from Danger Zone", async ({ applicationsPage, applicationsApi }) => {
     let deleteTestAppName: string = "";
 
-    try {
-      await test.step("Create a dedicated application for delete test", async () => {
-        const appData = TestDataFactory.createApplication({ name: `TestApp_DELETE_${Date.now()}` });
-        deleteTestAppName = appData.name;
-        const adminToken = await getAdminToken(request);
+    await test.step("Create a dedicated application for delete test", async () => {
+      const appData = TestDataFactory.createApplication({ name: `TestApp_DELETE_${Date.now()}` });
+      deleteTestAppName = appData.name;
 
-        const createResponse = await request.post(`${serverUrl}/applications`, {
-          data: {
-            name: appData.name,
-            description: appData.description,
-            ouId: suiteOuId,
-          },
-          headers: {
-            Authorization: `Bearer ${adminToken}`,
-            "Content-Type": "application/json",
-          },
-          ignoreHTTPSErrors: true,
-        });
-
-        expect(createResponse.ok()).toBeTruthy();
-
-        const created = await createResponse.json();
-        deleteTestAppId = created.id;
-        if (!deleteTestAppId) throw new Error("Delete test app creation failed — cannot proceed with delete test");
-        console.log(`Created delete test app: ${deleteTestAppId}`);
+      const created = await applicationsApi.create({
+        name: appData.name,
+        description: appData.description,
+        ouId: suiteOuId,
+        type: "fullstack",
       });
+      deleteTestAppId = created.id;
+      console.log(`Created delete test app: ${deleteTestAppId}`);
+    });
 
-      await test.step("Navigate to application edit page", async () => {
-        await applicationsPage.gotoEdit(deleteTestAppId!);
-        await applicationsPage.screenshot("tc012-before-delete");
-      });
+    await test.step("Navigate to application edit page", async () => {
+      await applicationsPage.gotoEdit(deleteTestAppId!);
+    });
 
-      await test.step("Click Delete Application and confirm", async () => {
-        await applicationsPage.clickDeleteApplication();
-        await applicationsPage.confirmDelete();
-        console.log("Delete confirmed");
-        deleteTestAppId = undefined;
-      });
+    await test.step("Click Advanced tab", async () => {
+      await applicationsPage.clickTab("Advanced");
+    });
 
-      await test.step("Verify redirected to applications list", async () => {
-        await applicationsPage.page.waitForURL(/\/console\/applications$/, { timeout: 15000 });
-        await applicationsPage.verifyPageLoaded();
-        console.log("Redirected to applications list after delete");
-        await applicationsPage.screenshot("tc012-after-delete");
-      });
+    await test.step("Click Delete Application and confirm", async () => {
+      await applicationsPage.clickDeleteApplication();
+      await applicationsPage.confirmDelete();
+      console.log("Delete confirmed");
+    });
 
-      await test.step("Verify deleted app no longer appears in list", async () => {
-        const deletedRow = applicationsPage.page
-          .locator('[data-testid="applications-list"]')
-          .getByText(deleteTestAppName);
-        await expect(deletedRow).not.toBeVisible();
-        console.log("Deleted app not found in list — correct");
-      });
-    } finally {
-      if (deleteTestAppId) {
-        const adminToken = await getAdminToken(request).catch(() => null);
-        if (adminToken) {
-          await request
-            .delete(`${serverUrl}/applications/${deleteTestAppId}`, {
-              headers: { Authorization: `Bearer ${adminToken}` },
-              ignoreHTTPSErrors: true,
-            })
-            .catch(() => {});
-        }
-      }
-    }
+    await test.step("Verify redirected to applications list", async () => {
+      await applicationsPage.page.waitForURL(/\/console\/applications$/, { timeout: 15000 });
+      await applicationsPage.verifyPageLoaded();
+      console.log("Redirected to applications list after delete");
+    });
+
+    await test.step("Verify deleted app no longer appears in list", async () => {
+      const deletedRow = applicationsPage.page
+        .locator('[data-testid="applications-list"]')
+        .getByText(deleteTestAppName);
+      await expect(deletedRow).not.toBeVisible();
+      console.log("Deleted app not found in list, correct");
+      deleteTestAppId = undefined;
+    });
   });
 });

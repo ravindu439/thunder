@@ -5,6 +5,8 @@ type: default
 name: Declarative Confidential Test Agent
 description: A declarative confidential test agent for integration testing
 authFlowId: decl-flow-1
+registrationFlowId: decl-reg-flow-1
+recoveryFlowId: decl-recovery-flow-1
 inboundAuthConfig:
   - type: "oauth2"
     config:

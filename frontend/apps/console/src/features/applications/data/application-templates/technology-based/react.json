@@ -1,7 +1,33 @@
 {
   "id": "react",
+  "type": "browser",
   "displayName": "React",
   "description": "Single Page Application built with React",
+  "quickstarts": [
+    {
+      "label": "React",
+      "docsUrl": "{{applications.templates.react.docs}}"
+    }
+  ],
+  "playgrounds": [
+    {
+      "label": "React",
+      "environment": "stackblitz",
+      "url": "{{applications.templates.react.playground}}"
+    }
+  ],
+  "capabilities": {
+    "cors": true
+  },
+  "devServer": {
+    "id": "vite",
+    "label": "Vite",
+    "url": "http://localhost:5173"
+  },
+  "creationFlow": {
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "SECURITY", "DESIGN", "CONFIGURE", "COMPLETE"],
+    "previewSteps": ["DETAILS", "SECURITY", "DESIGN"]
+  },
   "defaults": {
     "name": "React Application",
     "inboundAuthConfig": [
@@ -36,133 +62,10 @@
     }
   },
   "integrationGuides": {
-    "INBUILT": {
+    "REDIRECT_BASED": {
       "llm_prompt": {
-        "id": "llm-prompt",
-        "title": "Integrate with a Coding Agent Prompt",
-        "description": "Use AI to generate integration code for your React application",
-        "type": "llm",
-        "icon": "sparkles",
-        "content": "# Integrate {{productName}} Authentication in React Application (Inbuilt Mode)\n\n## Context\nI have a React application and I want to integrate {{productName}}'s authentication system using the ThunderID React SDK with {{productName}}-hosted login pages.\n\n## Requirements\n- Use @thunderid/react SDK for authentication\n- Configure {{productName}}-hosted login, registration, and account management UIs\n- Implement sign-in and sign-out functionality using prebuilt components\n- Display signed-in user's profile information\n- Handle authentication state automatically\n\n## Configuration\n- **Client ID**: {{clientId}}\n- **Base URL**: https://localhost:8090 (or your {{productName}} instance URL)\n- **SDK**: @thunderid/react\n\n## IMPORTANT Configuration Rules\n- DO NOT create a separate config object - pass all configuration as individual props directly to <ThunderIDProvider>\n- Required props: `clientId` and `baseUrl`\n- Optional props: `afterSignInUrl`, `afterSignOutUrl`, `scopes` (string array)\n- NEVER use property names like `signInRedirectURL` or `signOutRedirectURL`\n- Example: <ThunderIDProvider clientId=\"xxx\" baseUrl=\"xxx\">\n\n## Implementation Steps\n1. Create a React app using Vite by running: `npm create vite@latest my-react-app -- --template react`\n2. Navigate into the project directory: `cd my-react-app`\n3. Install dependencies: `npm install`\n4. Install @thunderid/react package: `npm install @thunderid/react`\n5. Wrap your app with <ThunderIDProvider /> and configure clientId and baseUrl\n6. Build with ThunderID components: use <SignedIn>, <SignedOut>, <SignInButton />, and <UserDropdown /> to control what signed-in and signed-out users see\n7. Run the development server: `npm run dev`\n\nPlease provide complete, working code with proper configuration for {{productName}} authentication using the ThunderID React SDK."
-      },
-      "manual_steps": [
-        {
-          "step": 1,
-          "title": "Create a React app using Vite",
-          "description": "Run the following command to create a new React app with Vite:",
-          "code": {
-            "language": "terminal",
-            "content": "npm create vite@latest my-react-app -- --template react\ncd my-react-app\nnpm install"
-          }
-        },
-        {
-          "step": 2,
-          "title": "Install @thunderid/react",
-          "description": "The ThunderID React SDK provides prebuilt components, hooks, and helpers for {{productName}} authentication.",
-          "subDescription": "Run the following command to install the SDK:",
-          "code": {
-            "language": "terminal",
-            "content": "npm install @thunderid/react"
-          }
-        },
-        {
-          "step": 3,
-          "title": "Add <ThunderIDProvider /> to your app",
-          "description": "In your main.jsx or index.jsx, wrap your application with the ThunderIDProvider component:",
-          "code": {
-            "language": "javascript",
-            "filename": "src/main.jsx",
-            "content": "import { StrictMode } from 'react'\nimport { createRoot } from 'react-dom/client'\nimport { ThunderIDProvider } from '@thunderid/react'\nimport App from './App.jsx'\nimport './index.css'\n\ncreateRoot(document.getElementById('root')).render(\n  <StrictMode>\n    <ThunderIDProvider\n      clientId=\"{{clientId}}\"\n      baseUrl=\"https://localhost:8090\"\n    >\n      <App />\n    </ThunderIDProvider>\n  </StrictMode>\n)"
-          }
-        },
-        {
-          "step": 4,
-          "title": "Build with ThunderID components",
-          "description": "You can control which content signed-in and signed-out users can see with the prebuilt control components. Replace the existing content of App.jsx with the following:",
-          "code": {
-            "language": "javascript",
-            "filename": "src/App.jsx",
-            "content": "import {\n  SignedIn,\n  SignedOut,\n  SignInButton,\n  UserDropdown\n} from '@thunderid/react'\nimport './App.css'\n\nfunction App() {\n  return (\n    <>\n      <section id=\"center\">\n        <SignedIn>\n          <UserDropdown />\n        </SignedIn>\n        <SignedOut>\n          <SignInButton>Sign In</SignInButton>\n        </SignedOut>\n      </section>\n    </>\n  )\n}\n\nexport default App"
-          }
-        },
-        {
-          "step": 5,
-          "title": "Run the app",
-          "description": "Start your development server and test the authentication flow:",
-          "code": {
-            "language": "terminal",
-            "content": "npm run dev"
-          }
-        }
-      ]
-    },
-    "EMBEDDED": {
-      "llm_prompt": {
-        "id": "llm-prompt",
-        "title": "Integrate with a Coding Agent Prompt",
-        "description": "Use AI to generate integration code for your React application",
-        "type": "llm",
-        "icon": "sparkles",
-        "content": "# Integrate {{productName}} Authentication in React Application (Custom Mode)\n\n## Context\nI have a React application and I want to integrate {{productName}}'s authentication system using the ThunderID React SDK with a custom login UI instead of {{productName}}-hosted pages.\n\n## Requirements\n- Use @thunderid/react SDK for authentication\n- Build custom login UI with the <SignIn /> component\n- Use react-router-dom for routing to the custom sign-in page\n- Configure custom signInUrl in ThunderIDProvider\n- Implement sign-in and sign-out functionality\n- Display signed-in user's profile information\n- Handle authentication state automatically\n\n## Configuration\n- **Application ID**: {{applicationId}}\n- **Base URL**: https://localhost:8090 (or your {{productName}} instance URL)\n- **Sign In URL**: http://localhost:5173/signin (custom route)\n- **SDK**: @thunderid/react\n- **Router**: react-router-dom\n\n## IMPORTANT Configuration Rules\n- DO NOT create a separate config object - pass all configuration as individual props directly to <ThunderIDProvider>\n- Required props: `baseUrl`, `signInUrl`, and `applicationId`\n- Optional props: `afterSignInUrl`, `afterSignOutUrl`, `scopes`\n- NEVER use property names like `signInRedirectURL` or `signOutRedirectURL`\n- Example: <ThunderIDProvider baseUrl=\"xxx\" signInUrl=\"xxx\" applicationId=\"xxx\">\n\n## Available SDK APIs\n\n### Hook: useThunderID (ONLY hook available)\n- The SDK provides ONLY ONE hook: `useThunderID`\n- No other hooks like useAuth, useSession, useUser, etc. exist\n- Use this hook to access authentication state and methods\n\nExample:\n```javascript\nimport { useThunderID } from '@thunderid/react';\n\nconst MyComponent = () => {\n  const { isSignedIn, user, signIn, signOut } = useThunderID();\n\n  return (\n    <div>\n      {isSignedIn ? (\n        <>\n          <p>Welcome, {user.displayName}!</p>\n          <button onClick={signOut}>Sign Out</button>\n        </>\n      ) : (\n        <button onClick={signIn}>Sign In</button>\n      )}\n    </div>\n  );\n};\n```\n\n### User Data Components (use if needed)\n\n1. **User Component** - Render props for user data:\n```javascript\nimport { User } from '@thunderid/react'\n\n<User fallback={<p>Please sign in</p>}>\n  {(user) => (\n    <div>\n      <h1>Welcome, {user?.displayName}!</h1>\n      <p>Email: {user?.email}</p>\n    </div>\n  )}\n</User>\n```\n\n2. **UserProfile Component** - Pre-built user profile UI:\n```javascript\nimport { UserProfile } from '@thunderid/react'\n\n<UserProfile />\n```\n\n## Implementation Steps\n1. Create a React app using Vite by running: `npm create vite@latest my-react-app -- --template react`\n2. Navigate into the project directory: `cd my-react-app`\n3. Install dependencies: `npm install`\n4. Install react-router-dom package: `npm install react-router-dom`\n5. Install @thunderid/react package: `npm install @thunderid/react`\n6. Wrap your app with <ThunderIDProvider /> and configure baseUrl, signInUrl, and applicationId\n7. Build with ThunderID components: set up React Router with BrowserRouter, create a /signin route with the <SignIn /> component, and use <SignedIn>, <SignedOut>, <SignInButton />, <SignOutButton />, and <UserDropdown /> for authentication UI\n8. Run the development server: `npm run dev`\n\nPlease provide complete, working code with:\n- Proper routing configuration\n- Custom sign-in page integration\n- Proper integration with the ThunderID React SDK\n- Use of useThunderID hook if programmatic access to auth state is needed"
-      },
-      "manual_steps": [
-        {
-          "step": 1,
-          "title": "Create a React app using Vite",
-          "description": "Run the following command to create a new React app with Vite:",
-          "code": {
-            "language": "terminal",
-            "content": "npm create vite@latest my-react-app -- --template react\ncd my-react-app\nnpm install"
-          }
-        },
-        {
-          "step": 2,
-          "title": "Install react-router",
-          "description": "Install react-router-dom for routing to the custom sign-in page:",
-          "code": {
-            "language": "terminal",
-            "content": "npm install react-router-dom"
-          }
-        },
-        {
-          "step": 3,
-          "title": "Install @thunderid/react",
-          "description": "The ThunderID React SDK provides prebuilt components, hooks, and helpers for {{productName}} authentication:",
-          "code": {
-            "language": "terminal",
-            "content": "npm install @thunderid/react"
-          }
-        },
-        {
-          "step": 4,
-          "title": "Add <ThunderIDProvider /> to your app",
-          "description": "In your main.jsx or index.jsx, wrap your application with the ThunderIDProvider component and configure the signInUrl:",
-          "code": {
-            "language": "javascript",
-            "filename": "src/main.jsx",
-            "content": "import { StrictMode } from 'react'\nimport { createRoot } from 'react-dom/client'\nimport './index.css'\nimport App from './App.jsx'\nimport { ThunderIDProvider } from '@thunderid/react'\n\ncreateRoot(document.getElementById('root')).render(\n  <StrictMode>\n    <ThunderIDProvider\n      baseUrl=\"https://localhost:8090\"\n      signInUrl=\"http://localhost:5173/signin\"\n      applicationId=\"{{applicationId}}\"\n    >\n      <App />\n    </ThunderIDProvider>\n  </StrictMode>\n)"
-          }
-        },
-        {
-          "step": 5,
-          "title": "Build with ThunderID components",
-          "description": "You can control which content signed-in and signed-out users can see with the prebuilt control components. Replace the existing content of App.jsx with the following. This sets up routing, a dedicated sign-in page using the <SignIn /> component, and uses <UserDropdown /> for the signed-in user:",
-          "code": {
-            "language": "javascript",
-            "filename": "src/App.jsx",
-            "content": "import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'\nimport { SignIn, SignedIn, SignedOut, SignInButton, SignOutButton, UserDropdown } from '@thunderid/react'\nimport './App.css'\n\nfunction App() {\n  return (\n    <Router>\n      <header>\n        <SignedIn>\n          <UserDropdown />\n          <SignOutButton />\n        </SignedIn>\n        <SignedOut>\n          <SignInButton />\n        </SignedOut>\n      </header>\n      <Routes>\n        <Route path=\"/signin\" element={<SignIn />} />\n      </Routes>\n    </Router>\n  )\n}\n\nexport default App"
-          }
-        },
-        {
-          "step": 6,
-          "title": "Run the app",
-          "description": "Start your development server and test the authentication flow with custom sign-in page:",
-          "code": {
-            "language": "terminal",
-            "content": "npm run dev"
-          }
-        }
-      ]
+        "docsUrl": "{{applications.templates.react.llmPrompt.redirectBased}}"
+      }
     }
   }
 }

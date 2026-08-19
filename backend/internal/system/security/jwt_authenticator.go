@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package security
 
@@ -22,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/internal/system/constants"
@@ -32,6 +18,27 @@ import (
 // claimJTI is the JWT ID claim (RFC 7519 §4.1.7); its value is recorded as the token's revocation
 // identifier for the enforcement step.
 const claimJTI = "jti"
+
+// claimTokenFamilyID is the token family id claim (tfid); its value lets the enforcement step reject a
+// token whose whole authorization grant has been revoked. It is defined here (not imported from the
+// OAuth package) to keep the security layer decoupled from OAuth internals.
+const claimTokenFamilyID = "tfid"
+
+// The remaining claims consulted during authentication. Like the two above, they are declared here
+// rather than imported from the OAuth package so the security layer stays decoupled from it.
+const (
+	// claimIssuer is the issuer claim (RFC 7519 §4.1.1), used to tell a self-issued token from a
+	// federated one before any of its subject values are trusted for revocation.
+	claimIssuer = "iss"
+
+	// claimIssuedAt is the issued-at claim (RFC 7519 §4.1.6); it establishes when the token was minted
+	// so boundary revocations can decide whether it predates the revoked action.
+	claimIssuedAt = "iat"
+
+	// claimAccessTokenSubject carries the end user behind a token minted for a delegated call. When
+	// present it, not sub, is the subject the deny list is evaluated against.
+	claimAccessTokenSubject = "access_token_sub"
+)
 
 // jwtAuthenticator handles authentication and authorization using JWT Bearer tokens.
 type jwtAuthenticator struct {
@@ -94,6 +101,18 @@ func (h *jwtAuthenticator) Authenticate(r *http.Request) (*SecurityContext, erro
 	// the enforcement step; it may be empty.
 	securityCtx := newSecurityContext(subject, ouID, token, scopes, attributes)
 	securityCtx.revocationID = extractAttribute(attributes, claimJTI)
+	securityCtx.tokenFamilyID = extractAttribute(attributes, claimTokenFamilyID)
+	// Subject-dimension revocation is only meaningful for subjects this deployment issued, so a
+	// federated token contributes no revocation subject and is enforced on jti and tfid alone.
+	if issuer, _ := attributes[claimIssuer].(string); issuer == config.GetServerRuntime().Config.JWT.Issuer {
+		securityCtx.revocationSubject = subject
+		if accessTokenSubject, _ := attributes[claimAccessTokenSubject].(string); accessTokenSubject != "" {
+			securityCtx.revocationSubject = accessTokenSubject
+		}
+		if issuedAt, ok := attributes[claimIssuedAt].(float64); ok {
+			securityCtx.establishedAt = time.Unix(int64(issuedAt), 0).UTC()
+		}
+	}
 	return securityCtx, nil
 }
 

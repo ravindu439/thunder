@@ -1,24 +1,10 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {Edge, Node} from '@xyflow/react';
 import {MarkerType} from '@xyflow/react';
 import VisualFlowConstants from '../constants/VisualFlowConstants';
+import executors from '../data/executors.json';
 import type {Element} from '../models/elements';
 import {ElementTypes} from '../models/elements';
 import type {FlowDefinitionResponse, FlowNode, FlowNodeAction, FlowPrompt} from '../models/responses';
@@ -43,10 +29,10 @@ const INPUT_ELEMENT_TYPES = new Set<string>([
 /**
  * Extended node type with custom properties used by the canvas
  */
-type CanvasNode = Node<StepData> & {
+interface CanvasNode extends Node<StepData> {
   resourceType?: string;
   category?: string;
-};
+}
 
 /**
  * React Flow canvas data structure
@@ -81,6 +67,77 @@ const DEFAULT_LAYOUT = {
   height: 100,
   position: {x: 0, y: 0},
 };
+
+/**
+ * Branching outcomes whose presence on a node's action drives the failure/incomplete output handles
+ */
+const BRANCHING_OUTCOME_KEYS = ['onFailure', 'onIncomplete'] as const;
+
+/**
+ * Shape of an executor definition read from the resource catalog
+ */
+interface ExecutorDefinition {
+  data?: {
+    action?: {
+      executor?: {name?: string; mode?: string};
+      onFailure?: string;
+      onIncomplete?: string;
+    };
+  };
+}
+
+/**
+ * Builds the catalog lookup key for an executor. Mode is part of the key because the same executor
+ * can declare different outcomes per mode (e.g. `OTPExecutor` generate vs verify).
+ */
+function getExecutorKey(name?: string, mode?: string): string {
+  return `${name ?? ''}::${mode ?? ''}`;
+}
+
+/**
+ * Branching outcomes each executor declares, keyed by executor name and mode.
+ *
+ * Supporting an outcome is a property of the executor definition, not of whichever edges happened
+ * to be connected when the flow was saved, so this is the authoritative source on load.
+ */
+const EXECUTOR_DECLARED_OUTCOMES = new Map<string, string[]>(
+  (executors as ExecutorDefinition[]).map((definition: ExecutorDefinition) => {
+    const action = definition.data?.action;
+
+    return [
+      getExecutorKey(action?.executor?.name, action?.executor?.mode),
+      BRANCHING_OUTCOME_KEYS.filter((key: string) => action?.[key as 'onFailure' | 'onIncomplete'] !== undefined),
+    ];
+  }),
+);
+
+/**
+ * Resolves the branching outcome keys for a TASK_EXECUTION node.
+ *
+ * A flow only persists an outcome key when it was wired to an edge at save time, so a node saved
+ * without a failure/incomplete connection loses the key and the canvas stops rendering its handle.
+ * Re-deriving the keys the executor declares keeps those handles available on every load, while
+ * persisted targets still win over the empty defaults. Nodes whose executor is not in the catalog
+ * keep exactly the keys the flow persisted.
+ */
+function resolveBranchingOutcomes(apiNode: FlowNode): Record<string, string> {
+  const outcomes: Record<string, string> = {};
+  const declaredOutcomes = EXECUTOR_DECLARED_OUTCOMES.get(
+    getExecutorKey(apiNode.executor?.name, apiNode.executor?.mode as string | undefined),
+  );
+
+  declaredOutcomes?.forEach((key: string) => {
+    outcomes[key] = '';
+  });
+
+  BRANCHING_OUTCOME_KEYS.forEach((key: 'onFailure' | 'onIncomplete') => {
+    if (apiNode[key] !== undefined) {
+      outcomes[key] = apiNode[key];
+    }
+  });
+
+  return outcomes;
+}
 
 /**
  * Normalizes INPUT element properties to top-level format.
@@ -123,6 +180,13 @@ function restoreButtonAction(
   if (matchingAction) {
     return {
       ...component,
+      // Backfill the prompt action's type onto the element, which is where the property panel reads
+      // it from and where serialization projects it back out of. Only when the element does not
+      // already carry one: an unwired button keeps its type on the element alone, since a prompt
+      // action is only emitted once the button has a nextNode. Clearing the selector writes an empty
+      // string rather than dropping the key, and that empty string is persisted, so treat it as no
+      // type rather than as a type worth preserving.
+      ...(matchingAction.type && !component.actionType ? {actionType: matchingAction.type} : {}),
       action: {
         type: matchingAction.executor ? 'EXECUTOR' : 'NEXT',
         onSuccess: matchingAction.nextNode,
@@ -146,7 +210,7 @@ function findRichTextComponentByActionRef(components: Element[] | undefined, act
   }
 
   for (const component of components) {
-    const richAction = (component as Element & {action?: {ref?: string}}).action;
+    const richAction = (component as {action?: {ref?: string}}).action;
     if (component.type === ElementTypes.RichText && richAction?.ref === actionRef) {
       return component;
     }
@@ -272,11 +336,10 @@ function transformNodeToCanvas(apiNode: FlowNode): CanvasNode {
         type: 'EXECUTOR',
         executor: apiNode.executor,
         onSuccess: apiNode.onSuccess,
-        // Only carry the branching outcomes the node actually declares. Their presence drives
-        // the failure/incomplete output handles, so a node without them stays single-outcome
-        // rather than showing a dangling handle.
-        ...(apiNode.onFailure !== undefined ? {onFailure: apiNode.onFailure} : {}),
-        ...(apiNode.onIncomplete !== undefined ? {onIncomplete: apiNode.onIncomplete} : {}),
+        // Carry the branching outcomes the executor declares, not just the ones the flow
+        // persisted. Their presence drives the failure/incomplete output handles, so an executor
+        // that supports them keeps its handles even when they were never connected.
+        ...resolveBranchingOutcomes(apiNode),
       },
     };
 
@@ -338,7 +401,7 @@ function transformNodeToCanvas(apiNode: FlowNode): CanvasNode {
  */
 function generateEdgesFromNodes(apiNodes: FlowNode[]): Edge[] {
   const edges: Edge[] = [];
-  const nodeIds = new Set(apiNodes.map((node) => node.id));
+  const nodeIds = new Set<string>(apiNodes.map((node) => node.id));
 
   apiNodes.forEach((node) => {
     const stepType = NODE_TO_STEP_TYPE_MAP[node.type] ?? node.type;

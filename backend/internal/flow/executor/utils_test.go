@@ -1,37 +1,38 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	authncm "github.com/thunder-id/thunderid/internal/authn/common"
+	entitytypemodel "github.com/thunder-id/thunderid/internal/entitytype/model"
 	"github.com/thunder-id/thunderid/internal/flow/common"
+	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 	"github.com/thunder-id/thunderid/tests/mocks/authnprovider/managermock"
 	"github.com/thunder-id/thunderid/tests/mocks/flow/coremock"
 	"github.com/thunder-id/thunderid/tests/mocks/idp/idpmock"
 )
+
+// expectEntityReferenceResolved stubs GetEntityReference to resolve authUser to an existing local
+// user, modeling account linking that matched an existing local account.
+func expectEntityReferenceResolved(m *managermock.AuthnProviderManagerMock, authUser providers.AuthUser) {
+	m.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "local-user-123"}, (*tidcommon.ServiceError)(nil))
+}
+
+// expectEntityReferenceNotFound stubs GetEntityReference to report no matching local user,
+// modeling account linking that did not resolve to an existing local account.
+func expectEntityReferenceNotFound(m *managermock.AuthnProviderManagerMock, authUser providers.AuthUser) {
+	m.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, (*providers.EntityReference)(nil),
+			&tidcommon.ServiceError{Type: tidcommon.ClientErrorType, Code: "USER_NOT_FOUND"})
+}
 
 // setupSocialAuthExecutorMock creates the shared mocks for social auth executor constructor tests
 // (GitHub, Google) and wires the CreateExecutor expectation for the given executor name.
@@ -81,6 +82,70 @@ func (s *UtilsTestSuite) TestGetAuthnServiceName() {
 		s.Run(tt.name, func() {
 			result := getAuthnServiceName(tt.executorName)
 			s.Equal(tt.expectedName, result)
+		})
+	}
+}
+
+func (s *UtilsTestSuite) TestInputTypeForSchemaType() {
+	tests := []struct {
+		name         string
+		schemaType   string
+		expectedType string
+	}{
+		{"Boolean attribute is prompted as a checkbox", entitytypemodel.TypeBoolean, providers.InputTypeBoolean},
+		{"Number attribute is prompted as a number input", entitytypemodel.TypeNumber, providers.InputTypeNumber},
+		{"String attribute is prompted as text", entitytypemodel.TypeString, providers.InputTypeText},
+		{"Unknown type falls back to text", "geo", providers.InputTypeText},
+		{"Empty type falls back to text", "", providers.InputTypeText},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.Equal(tt.expectedType, inputTypeForSchemaType(tt.schemaType))
+		})
+	}
+}
+
+func (s *UtilsTestSuite) TestSchemaTypeForInputType() {
+	tests := []struct {
+		name         string
+		inputType    string
+		expectedType string
+	}{
+		{"Checkbox maps to boolean", providers.InputTypeBoolean, entitytypemodel.TypeBoolean},
+		{"Number input maps to number", providers.InputTypeNumber, entitytypemodel.TypeNumber},
+		{"Text input needs no conversion", providers.InputTypeText, ""},
+		{"Unset input type needs no conversion", "", ""},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.Equal(tt.expectedType, schemaTypeForInputType(tt.inputType))
+		})
+	}
+}
+
+func (s *UtilsTestSuite) TestConvertToSchemaType() {
+	tests := []struct {
+		name          string
+		value         string
+		schemaType    string
+		expectedValue interface{}
+	}{
+		{"Checked box becomes true", "true", entitytypemodel.TypeBoolean, true},
+		{"Unchecked box becomes false", "false", entitytypemodel.TypeBoolean, false},
+		{"Boolean accepts alternate spellings", "TRUE", entitytypemodel.TypeBoolean, true},
+		{"Unparseable boolean is left for schema validation to reject", "yes", entitytypemodel.TypeBoolean, "yes"},
+		{"Number becomes a float", "42", entitytypemodel.TypeNumber, float64(42)},
+		{"Fractional number becomes a float", "1.5", entitytypemodel.TypeNumber, 1.5},
+		{"Unparseable number is left for schema validation to reject", "many", entitytypemodel.TypeNumber, "many"},
+		{"String attribute is untouched", "true", entitytypemodel.TypeString, "true"},
+		{"Unknown schema type is untouched", "true", "", "true"},
+	}
+
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			s.Equal(tt.expectedValue, convertToSchemaType(tt.value, tt.schemaType))
 		})
 	}
 }
@@ -606,263 +671,4 @@ func (s *UtilsTestSuite) TestValidateFederatedIdentifierConsistency() {
 			s.Equal(tt.expectedValid, valid)
 		})
 	}
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithAllFields() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			Metadata: map[string]interface{}{
-				"tenant_id": "tenant-123",
-				"region":    "us-west",
-			},
-			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "oauth-client-1",
-					},
-				},
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "oauth-client-2",
-					},
-				},
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	assert.NotNil(s.T(), metadata.AppMetadata)
-	assert.Equal(s.T(), "tenant-123", metadata.AppMetadata["tenant_id"])
-	assert.Equal(s.T(), "us-west", metadata.AppMetadata["region"])
-
-	clientIDs, ok := metadata.AppMetadata["client_ids"].([]string)
-	assert.True(s.T(), ok)
-	assert.Len(s.T(), clientIDs, 2)
-	assert.Contains(s.T(), clientIDs, "oauth-client-1")
-	assert.Contains(s.T(), clientIDs, "oauth-client-2")
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithNoMetadata() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	assert.NotNil(s.T(), metadata.AppMetadata)
-	assert.Len(s.T(), metadata.AppMetadata, 0)
-	assert.NotNil(s.T(), metadata.RuntimeMetadata)
-	assert.Equal(s.T(), "", metadata.RuntimeMetadata["authorization_request_id"])
-	assert.Equal(s.T(), "", metadata.RuntimeMetadata["current_client_id"])
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithOnlyAppMetadata() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			Metadata: map[string]interface{}{
-				"environment": "production",
-				"version":     "1.0.0",
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	assert.Equal(s.T(), "production", metadata.AppMetadata["environment"])
-	assert.Equal(s.T(), "1.0.0", metadata.AppMetadata["version"])
-	_, hasClientIDs := metadata.AppMetadata["client_ids"]
-	assert.False(s.T(), hasClientIDs)
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithOnlyClientIDs() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "single-oauth-client",
-					},
-				},
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	clientIDs, ok := metadata.AppMetadata["client_ids"].([]string)
-	assert.True(s.T(), ok)
-	assert.Len(s.T(), clientIDs, 1)
-	assert.Equal(s.T(), "single-oauth-client", clientIDs[0])
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithNilOAuthConfig() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
-				{
-					Type:        providers.OAuthInboundAuthType,
-					OAuthConfig: nil,
-				},
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	_, hasClientIDs := metadata.AppMetadata["client_ids"]
-	assert.False(s.T(), hasClientIDs)
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithEmptyClientID() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "",
-					},
-				},
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	_, hasClientIDs := metadata.AppMetadata["client_ids"]
-	assert.False(s.T(), hasClientIDs)
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithMixedInboundConfigs() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "valid-client",
-					},
-				},
-				{
-					Type:        providers.OAuthInboundAuthType,
-					OAuthConfig: nil,
-				},
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "",
-					},
-				},
-				{
-					Type: providers.OAuthInboundAuthType,
-					OAuthConfig: &providers.OAuthConfigWithSecret{
-						ClientID: "another-valid-client",
-					},
-				},
-			},
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	clientIDs, ok := metadata.AppMetadata["client_ids"].([]string)
-	assert.True(s.T(), ok)
-	assert.Len(s.T(), clientIDs, 2)
-	assert.Contains(s.T(), clientIDs, "valid-client")
-	assert.Contains(s.T(), clientIDs, "another-valid-client")
-}
-
-func (s *UtilsTestSuite) TestBuildGetAttributesMetadata_WithLocale() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			Metadata: map[string]interface{}{
-				"tenant_id": "tenant-123",
-			},
-		},
-		RuntimeData: map[string]string{
-			"required_locales": "en-US",
-		},
-	}
-
-	metadata := buildGetAttributesMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	assert.Equal(s.T(), "en-US", metadata.Locale)
-	assert.Equal(s.T(), "tenant-123", metadata.AppMetadata["tenant_id"])
-}
-
-func (s *UtilsTestSuite) TestBuildGetAttributesMetadata_WithoutLocale() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{},
-		RuntimeData: map[string]string{},
-	}
-
-	metadata := buildGetAttributesMetadata(ctx)
-
-	assert.NotNil(s.T(), metadata)
-	assert.Empty(s.T(), metadata.Locale)
-	assert.NotNil(s.T(), metadata.AppMetadata)
-	assert.Len(s.T(), metadata.AppMetadata, 0)
-	assert.NotNil(s.T(), metadata.RuntimeMetadata)
-	assert.Equal(s.T(), "", metadata.RuntimeMetadata["authorization_request_id"])
-	assert.Equal(s.T(), "", metadata.RuntimeMetadata["current_client_id"])
-}
-
-func (s *UtilsTestSuite) TestBuildAuthnMetadata_WithRuntimeMetadata() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{},
-		RuntimeData: map[string]string{
-			common.RuntimeKeyAuthorizationRequestID: "auth-req-123",
-			common.RuntimeKeyClientID:               "oauth-client-abc",
-			"ext_customKey":                         "custom-value",
-			"non_ext_key":                           "should-be-excluded",
-		},
-	}
-
-	metadata := buildAuthnMetadata(ctx)
-
-	assert.NotContains(s.T(), metadata.AppMetadata, "current_client_id")
-	assert.Equal(s.T(), "oauth-client-abc", metadata.RuntimeMetadata["current_client_id"])
-	assert.Equal(s.T(), "auth-req-123", metadata.RuntimeMetadata["authorization_request_id"])
-	assert.Equal(s.T(), "custom-value", metadata.RuntimeMetadata["ext_customKey"])
-	assert.NotContains(s.T(), metadata.RuntimeMetadata, "non_ext_key")
-}
-
-func (s *UtilsTestSuite) TestBuildGetAttributesMetadata_WithRuntimeMetadata() {
-	ctx := &providers.NodeContext{
-		Application: providers.Application{
-			Metadata: map[string]interface{}{
-				"tenant_id": "tenant-123",
-			},
-		},
-		RuntimeData: map[string]string{
-			common.RuntimeKeyAuthorizationRequestID: "auth-req-456",
-			common.RuntimeKeyClientID:               "oauth-client-xyz",
-			"ext_tenantHint":                        "hint-value",
-			"required_locales":                      "en-GB",
-			"internal_key":                          "ignored",
-		},
-	}
-
-	metadata := buildGetAttributesMetadata(ctx)
-
-	assert.Equal(s.T(), "en-GB", metadata.Locale)
-	assert.Equal(s.T(), "tenant-123", metadata.AppMetadata["tenant_id"])
-	assert.NotContains(s.T(), metadata.AppMetadata, "current_client_id")
-	assert.Equal(s.T(), "oauth-client-xyz", metadata.RuntimeMetadata["current_client_id"])
-	assert.Equal(s.T(), "auth-req-456", metadata.RuntimeMetadata["authorization_request_id"])
-	assert.Equal(s.T(), "hint-value", metadata.RuntimeMetadata["ext_tenantHint"])
-	assert.NotContains(s.T(), metadata.RuntimeMetadata, "internal_key")
-	assert.NotContains(s.T(), metadata.RuntimeMetadata, "required_locales")
 }

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package template
 
@@ -105,6 +90,79 @@ func (suite *TemplateServiceTestSuite) TestRender_UnknownPlaceholder() {
 	res, err := suite.service.Render(context.Background(), ScenarioUserInvite, TemplateTypeEmail, TemplateData{})
 	suite.Nil(err)
 	suite.Equal("Unknown: {{ctx(unknownKey)}}", res.Body)
+}
+
+func (suite *TemplateServiceTestSuite) TestRender_EscapesHTMLInBody() {
+	dto := &TemplateDTO{
+		ID:          "1",
+		Scenario:    ScenarioCIBANotification,
+		Subject:     "Authentication Request from {{ctx(appName)}}",
+		ContentType: "text/html",
+		Body:        "<p>{{ctx(bindingMessage)}}</p>",
+	}
+	suite.mockStore.On("GetTemplateByScenario", mock.Anything, ScenarioCIBANotification, TemplateTypeEmail).
+		Return(dto, nil)
+
+	res, err := suite.service.Render(context.Background(), ScenarioCIBANotification, TemplateTypeEmail,
+		TemplateData{
+			"appName":        "Acme",
+			"bindingMessage": `<img src=x onerror=alert(1)>`,
+		})
+	suite.Nil(err)
+	suite.Equal("<p>&lt;img src=x onerror=alert(1)&gt;</p>", res.Body)
+}
+
+func (suite *TemplateServiceTestSuite) TestRender_DoesNotEscapeSubject() {
+	dto := &TemplateDTO{
+		ID:          "1",
+		Scenario:    ScenarioCIBANotification,
+		Subject:     "Request from {{ctx(appName)}}",
+		ContentType: "text/html",
+		Body:        "<p>body</p>",
+	}
+	suite.mockStore.On("GetTemplateByScenario", mock.Anything, ScenarioCIBANotification, TemplateTypeEmail).
+		Return(dto, nil)
+
+	res, err := suite.service.Render(context.Background(), ScenarioCIBANotification, TemplateTypeEmail,
+		TemplateData{"appName": "AT&T"})
+	suite.Nil(err)
+	suite.Equal("Request from AT&T", res.Subject)
+}
+
+func (suite *TemplateServiceTestSuite) TestRender_DoesNotEscapePlainTextBody() {
+	dto := &TemplateDTO{
+		ID:          "1",
+		Scenario:    ScenarioCIBANotification,
+		Subject:     "Code",
+		Type:        TemplateTypeSMS,
+		ContentType: "text/plain",
+		Body:        "{{ctx(appName)}}: approve?",
+	}
+	suite.mockStore.On("GetTemplateByScenario", mock.Anything, ScenarioCIBANotification, TemplateTypeSMS).
+		Return(dto, nil)
+
+	res, err := suite.service.Render(context.Background(), ScenarioCIBANotification, TemplateTypeSMS,
+		TemplateData{"appName": "AT&T"})
+	suite.Nil(err)
+	suite.Equal("AT&T: approve?", res.Body)
+	suite.False(res.IsHTML)
+}
+
+func (suite *TemplateServiceTestSuite) TestRender_PreservesURLQuerySeparators() {
+	dto := &TemplateDTO{
+		ID:          "1",
+		Scenario:    ScenarioMagicLink,
+		Subject:     "Sign in",
+		ContentType: "text/html",
+		Body:        `<a href="{{ctx(magicLink)}}">Sign in</a>`,
+	}
+	suite.mockStore.On("GetTemplateByScenario", mock.Anything, ScenarioMagicLink, TemplateTypeEmail).
+		Return(dto, nil)
+
+	res, err := suite.service.Render(context.Background(), ScenarioMagicLink, TemplateTypeEmail,
+		TemplateData{"magicLink": "https://localhost:9090/gate/magic?id=abc&token=xyz"})
+	suite.Nil(err)
+	suite.Equal(`<a href="https://localhost:9090/gate/magic?id=abc&amp;token=xyz">Sign in</a>`, res.Body)
 }
 
 func (suite *TemplateServiceTestSuite) TestRender_SubjectPlaceholderReplaced() {

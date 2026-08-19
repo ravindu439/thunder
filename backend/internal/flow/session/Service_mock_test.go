@@ -38,23 +38,25 @@ func (_m *ServiceMock) EXPECT() *ServiceMock_Expecter {
 	return &ServiceMock_Expecter{mock: &_m.Mock}
 }
 
-// HasCheckpoint provides a mock function for the type ServiceMock
-func (_mock *ServiceMock) HasCheckpoint(ctx context.Context, sessionID string, checkpoint string) (bool, error) {
+// FindCheckpoint provides a mock function for the type ServiceMock
+func (_mock *ServiceMock) FindCheckpoint(ctx context.Context, sessionID string, checkpoint string) (*SessionContext, error) {
 	ret := _mock.Called(ctx, sessionID, checkpoint)
 
 	if len(ret) == 0 {
-		panic("no return value specified for HasCheckpoint")
+		panic("no return value specified for FindCheckpoint")
 	}
 
-	var r0 bool
+	var r0 *SessionContext
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (bool, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (*SessionContext, error)); ok {
 		return returnFunc(ctx, sessionID, checkpoint)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) bool); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) *SessionContext); ok {
 		r0 = returnFunc(ctx, sessionID, checkpoint)
 	} else {
-		r0 = ret.Get(0).(bool)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*SessionContext)
+		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
 		r1 = returnFunc(ctx, sessionID, checkpoint)
@@ -64,20 +66,20 @@ func (_mock *ServiceMock) HasCheckpoint(ctx context.Context, sessionID string, c
 	return r0, r1
 }
 
-// ServiceMock_HasCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HasCheckpoint'
-type ServiceMock_HasCheckpoint_Call struct {
+// ServiceMock_FindCheckpoint_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FindCheckpoint'
+type ServiceMock_FindCheckpoint_Call struct {
 	*mock.Call
 }
 
-// HasCheckpoint is a helper method to define mock.On call
+// FindCheckpoint is a helper method to define mock.On call
 //   - ctx context.Context
 //   - sessionID string
 //   - checkpoint string
-func (_e *ServiceMock_Expecter) HasCheckpoint(ctx interface{}, sessionID interface{}, checkpoint interface{}) *ServiceMock_HasCheckpoint_Call {
-	return &ServiceMock_HasCheckpoint_Call{Call: _e.mock.On("HasCheckpoint", ctx, sessionID, checkpoint)}
+func (_e *ServiceMock_Expecter) FindCheckpoint(ctx interface{}, sessionID interface{}, checkpoint interface{}) *ServiceMock_FindCheckpoint_Call {
+	return &ServiceMock_FindCheckpoint_Call{Call: _e.mock.On("FindCheckpoint", ctx, sessionID, checkpoint)}
 }
 
-func (_c *ServiceMock_HasCheckpoint_Call) Run(run func(ctx context.Context, sessionID string, checkpoint string)) *ServiceMock_HasCheckpoint_Call {
+func (_c *ServiceMock_FindCheckpoint_Call) Run(run func(ctx context.Context, sessionID string, checkpoint string)) *ServiceMock_FindCheckpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -100,19 +102,19 @@ func (_c *ServiceMock_HasCheckpoint_Call) Run(run func(ctx context.Context, sess
 	return _c
 }
 
-func (_c *ServiceMock_HasCheckpoint_Call) Return(b bool, err error) *ServiceMock_HasCheckpoint_Call {
-	_c.Call.Return(b, err)
+func (_c *ServiceMock_FindCheckpoint_Call) Return(sessionContext *SessionContext, err error) *ServiceMock_FindCheckpoint_Call {
+	_c.Call.Return(sessionContext, err)
 	return _c
 }
 
-func (_c *ServiceMock_HasCheckpoint_Call) RunAndReturn(run func(ctx context.Context, sessionID string, checkpoint string) (bool, error)) *ServiceMock_HasCheckpoint_Call {
+func (_c *ServiceMock_FindCheckpoint_Call) RunAndReturn(run func(ctx context.Context, sessionID string, checkpoint string) (*SessionContext, error)) *ServiceMock_FindCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // LoadCheckpoint provides a mock function for the type ServiceMock
-func (_mock *ServiceMock) LoadCheckpoint(ctx context.Context, handle string, checkpoint string, appID string) (*Session, *SessionContext, error) {
-	ret := _mock.Called(ctx, handle, checkpoint, appID)
+func (_mock *ServiceMock) LoadCheckpoint(ctx context.Context, in LoadCheckpointInput) (*Session, *SessionContext, error) {
+	ret := _mock.Called(ctx, in)
 
 	if len(ret) == 0 {
 		panic("no return value specified for LoadCheckpoint")
@@ -121,25 +123,25 @@ func (_mock *ServiceMock) LoadCheckpoint(ctx context.Context, handle string, che
 	var r0 *Session
 	var r1 *SessionContext
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (*Session, *SessionContext, error)); ok {
-		return returnFunc(ctx, handle, checkpoint, appID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, LoadCheckpointInput) (*Session, *SessionContext, error)); ok {
+		return returnFunc(ctx, in)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) *Session); ok {
-		r0 = returnFunc(ctx, handle, checkpoint, appID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, LoadCheckpointInput) *Session); ok {
+		r0 = returnFunc(ctx, in)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*Session)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) *SessionContext); ok {
-		r1 = returnFunc(ctx, handle, checkpoint, appID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, LoadCheckpointInput) *SessionContext); ok {
+		r1 = returnFunc(ctx, in)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(*SessionContext)
 		}
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
-		r2 = returnFunc(ctx, handle, checkpoint, appID)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, LoadCheckpointInput) error); ok {
+		r2 = returnFunc(ctx, in)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -153,36 +155,24 @@ type ServiceMock_LoadCheckpoint_Call struct {
 
 // LoadCheckpoint is a helper method to define mock.On call
 //   - ctx context.Context
-//   - handle string
-//   - checkpoint string
-//   - appID string
-func (_e *ServiceMock_Expecter) LoadCheckpoint(ctx interface{}, handle interface{}, checkpoint interface{}, appID interface{}) *ServiceMock_LoadCheckpoint_Call {
-	return &ServiceMock_LoadCheckpoint_Call{Call: _e.mock.On("LoadCheckpoint", ctx, handle, checkpoint, appID)}
+//   - in LoadCheckpointInput
+func (_e *ServiceMock_Expecter) LoadCheckpoint(ctx interface{}, in interface{}) *ServiceMock_LoadCheckpoint_Call {
+	return &ServiceMock_LoadCheckpoint_Call{Call: _e.mock.On("LoadCheckpoint", ctx, in)}
 }
 
-func (_c *ServiceMock_LoadCheckpoint_Call) Run(run func(ctx context.Context, handle string, checkpoint string, appID string)) *ServiceMock_LoadCheckpoint_Call {
+func (_c *ServiceMock_LoadCheckpoint_Call) Run(run func(ctx context.Context, in LoadCheckpointInput)) *ServiceMock_LoadCheckpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 LoadCheckpointInput
 		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		var arg2 string
-		if args[2] != nil {
-			arg2 = args[2].(string)
-		}
-		var arg3 string
-		if args[3] != nil {
-			arg3 = args[3].(string)
+			arg1 = args[1].(LoadCheckpointInput)
 		}
 		run(
 			arg0,
 			arg1,
-			arg2,
-			arg3,
 		)
 	})
 	return _c
@@ -193,7 +183,7 @@ func (_c *ServiceMock_LoadCheckpoint_Call) Return(session *Session, sessionConte
 	return _c
 }
 
-func (_c *ServiceMock_LoadCheckpoint_Call) RunAndReturn(run func(ctx context.Context, handle string, checkpoint string, appID string) (*Session, *SessionContext, error)) *ServiceMock_LoadCheckpoint_Call {
+func (_c *ServiceMock_LoadCheckpoint_Call) RunAndReturn(run func(ctx context.Context, in LoadCheckpointInput) (*Session, *SessionContext, error)) *ServiceMock_LoadCheckpoint_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -420,6 +410,63 @@ func (_c *ServiceMock_Terminate_Call) Return(session *Session, err error) *Servi
 }
 
 func (_c *ServiceMock_Terminate_Call) RunAndReturn(run func(ctx context.Context, handle string, flowID string) (*Session, error)) *ServiceMock_Terminate_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TerminateBySubject provides a mock function for the type ServiceMock
+func (_mock *ServiceMock) TerminateBySubject(ctx context.Context, subjectID string) error {
+	ret := _mock.Called(ctx, subjectID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for TerminateBySubject")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, subjectID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// ServiceMock_TerminateBySubject_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TerminateBySubject'
+type ServiceMock_TerminateBySubject_Call struct {
+	*mock.Call
+}
+
+// TerminateBySubject is a helper method to define mock.On call
+//   - ctx context.Context
+//   - subjectID string
+func (_e *ServiceMock_Expecter) TerminateBySubject(ctx interface{}, subjectID interface{}) *ServiceMock_TerminateBySubject_Call {
+	return &ServiceMock_TerminateBySubject_Call{Call: _e.mock.On("TerminateBySubject", ctx, subjectID)}
+}
+
+func (_c *ServiceMock_TerminateBySubject_Call) Run(run func(ctx context.Context, subjectID string)) *ServiceMock_TerminateBySubject_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *ServiceMock_TerminateBySubject_Call) Return(err error) *ServiceMock_TerminateBySubject_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *ServiceMock_TerminateBySubject_Call) RunAndReturn(run func(ctx context.Context, subjectID string) error) *ServiceMock_TerminateBySubject_Call {
 	_c.Call.Return(run)
 	return _c
 }

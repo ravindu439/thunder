@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
@@ -24,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -108,8 +94,8 @@ func (suite *AuthorizeHandlerTestSuite) TestGetOAuthMessageForGetRequest_Success
 	assert.NotNil(suite.T(), msg)
 	if msg != nil {
 		assert.Equal(suite.T(), oauth2const.TypeInitialAuthorizationRequest, msg.RequestType)
-		assert.Equal(suite.T(), "test-client", msg.RequestQueryParams["client_id"])
-		assert.Equal(suite.T(), "https://example.com", msg.RequestQueryParams["redirect_uri"])
+		assert.Equal(suite.T(), "test-client", url.Values(msg.RequestQueryParams).Get("client_id"))
+		assert.Equal(suite.T(), "https://example.com", url.Values(msg.RequestQueryParams).Get("redirect_uri"))
 		assert.Empty(suite.T(), msg.AuthID)
 	}
 }
@@ -133,8 +119,8 @@ func (suite *AuthorizeHandlerTestSuite) TestGetOAuthMessageForGetRequest_WithCla
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), msg)
 	if msg != nil {
-		assert.Equal(suite.T(), "test-client", msg.RequestQueryParams["client_id"])
-		assert.Equal(suite.T(), "en-US fr-CA ja", msg.RequestQueryParams["claims_locales"])
+		assert.Equal(suite.T(), "test-client", url.Values(msg.RequestQueryParams).Get("client_id"))
+		assert.Equal(suite.T(), "en-US fr-CA ja", url.Values(msg.RequestQueryParams).Get("claims_locales"))
 	}
 }
 
@@ -165,7 +151,7 @@ func (suite *AuthorizeHandlerTestSuite) TestGetOAuthMessageForGetRequest_Multipl
 		assert.Equal(suite.T(), 2, len(msg.Resources))
 		assert.Contains(suite.T(), msg.Resources, "https://rs1.example.com")
 		assert.Contains(suite.T(), msg.Resources, "https://rs2.example.com")
-		assert.Equal(suite.T(), "test-client", msg.RequestQueryParams["client_id"])
+		assert.Equal(suite.T(), "test-client", url.Values(msg.RequestQueryParams).Get("client_id"))
 	}
 }
 

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package par
 
@@ -81,7 +66,11 @@ func (s *ServiceTestSuite) newTestApp() *providers.OAuthClient {
 		GrantTypes:              []providers.GrantType{providers.GrantTypeAuthorizationCode},
 		ResponseTypes:           []providers.ResponseType{providers.ResponseTypeCode},
 		TokenEndpointAuthMethod: providers.TokenEndpointAuthMethodClientSecretBasic,
-		Scopes:                  []string{"openid", "profile", "email"},
+		ScopeClaims: map[string][]string{
+			"openid":  {"sub"},
+			"profile": {"name"},
+			"email":   {"email", "email_verified"},
+		},
 	}
 }
 
@@ -336,7 +325,7 @@ func (s *ServiceTestSuite) TestHandlePAR_ResourceResolutionServerError() {
 	assert.Equal(s.T(), oauth2const.ErrorServerError, errCode)
 }
 
-func (s *ServiceTestSuite) TestHandlePAR_ScopesDownscopedAgainstResourceServers() {
+func (s *ServiceTestSuite) TestHandlePAR_ValidatesResourceAndStoresRawScopes() {
 	store := newParStoreInterfaceMock(s.T())
 	var captured pushedAuthorizationRequest
 	store.EXPECT().Store(mock.Anything, mock.Anything, mock.Anything).
@@ -348,12 +337,6 @@ func (s *ServiceTestSuite) TestHandlePAR_ScopesDownscopedAgainstResourceServers(
 	rsMock.On("GetResourceServerByIdentifier", mock.Anything, "https://api.example.com").
 		Return(&providers.ResourceServer{ID: "rs-1", Identifier: "https://api.example.com"},
 			(*tidcommon.ServiceError)(nil))
-	// "write" is not a permission on rs-1, so the helper should drop it.
-	rsMock.On("ValidatePermissions", mock.Anything, "rs-1",
-		mock.MatchedBy(func(scopes []string) bool {
-			return len(scopes) == 2 && scopes[0] == "read" && scopes[1] == "write"
-		})).
-		Return([]string{"write"}, (*tidcommon.ServiceError)(nil))
 
 	svc := newPARService(store, rsMock, s.testCfg)
 	app := s.newTestApp()
@@ -365,10 +348,62 @@ func (s *ServiceTestSuite) TestHandlePAR_ScopesDownscopedAgainstResourceServers(
 
 	assert.Empty(s.T(), errCode)
 	assert.NotNil(s.T(), resp)
-	assert.Equal(s.T(), []string{"read"}, captured.OAuthParameters.PermissionScopes)
+	// The single target resource server, downscoping, and audience binding are resolved when the
+	// pushed request is redeemed at the authorization endpoint, so raw non-OIDC scopes are stored.
+	assert.Equal(s.T(), []string{"read", "write"}, captured.OAuthParameters.PermissionScopes)
 }
 
-func (s *ServiceTestSuite) TestHandlePAR_FiltersOIDCScopesByAppScopes() {
+func (s *ServiceTestSuite) TestHandlePAR_NoResourceNoDefaultRejectsAtPush() {
+	store := newParStoreInterfaceMock(s.T())
+	// No default resource server configured: resolving the empty identifier reports not found.
+	rsMock := resourcemock.NewResourceServiceInterfaceMock(s.T())
+	rsMock.On("GetResourceServerByIdentifier", mock.Anything, "").
+		Return((*providers.ResourceServer)(nil), &tidcommon.ServiceError{
+			Type: tidcommon.ClientErrorType,
+			Code: "RES-1003",
+		})
+
+	svc := newPARService(store, rsMock, s.testCfg)
+	app := s.newTestApp()
+	params := s.newValidParams()
+	// Permission scope with no explicit resource and no default configured: reject up front.
+	params[oauth2const.RequestParamScope] = "read"
+
+	resp, errCode, _ := svc.HandlePushedAuthorizationRequest(s.ctx, params, nil, app, "")
+
+	assert.Nil(s.T(), resp)
+	assert.Equal(s.T(), oauth2const.ErrorInvalidTarget, errCode)
+}
+
+func (s *ServiceTestSuite) TestHandlePAR_NoResourceWithDefaultSucceedsAtPush() {
+	store := newParStoreInterfaceMock(s.T())
+	var captured pushedAuthorizationRequest
+	store.EXPECT().Store(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, req pushedAuthorizationRequest, _ int64) { captured = req }).
+		Return("test-uri", nil)
+
+	// Default resource server configured: resolving the empty identifier returns it.
+	rsMock := resourcemock.NewResourceServiceInterfaceMock(s.T())
+	rsMock.On("GetResourceServerByIdentifier", mock.Anything, "").
+		Return(&providers.ResourceServer{ID: "rs-default", Identifier: "https://default.example.com"},
+			(*tidcommon.ServiceError)(nil))
+
+	svc := newPARService(store, rsMock, s.testCfg)
+	app := s.newTestApp()
+	params := s.newValidParams()
+	params[oauth2const.RequestParamScope] = "openid read"
+
+	resp, errCode, _ := svc.HandlePushedAuthorizationRequest(s.ctx, params, nil, app, "")
+
+	assert.Empty(s.T(), errCode)
+	assert.NotNil(s.T(), resp)
+	// Binding and downscoping are deferred to redeem, so the raw non-OIDC scope is stored and the
+	// resource is not materialized at push.
+	assert.Equal(s.T(), []string{"read"}, captured.OAuthParameters.PermissionScopes)
+	assert.Empty(s.T(), captured.OAuthParameters.Resources)
+}
+
+func (s *ServiceTestSuite) TestHandlePAR_NarrowsOIDCClaimsByScopeClaims() {
 	store := newParStoreInterfaceMock(s.T())
 	var captured pushedAuthorizationRequest
 	store.EXPECT().Store(mock.Anything, mock.Anything, mock.Anything).
@@ -378,7 +413,7 @@ func (s *ServiceTestSuite) TestHandlePAR_FiltersOIDCScopesByAppScopes() {
 
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 	app := s.newTestApp()
-	app.Scopes = []string{"profile"}
+	app.ScopeClaims = map[string][]string{"profile": {"name"}}
 	params := s.newValidParams()
 	params[oauth2const.RequestParamScope] = "openid email profile"
 
@@ -386,7 +421,8 @@ func (s *ServiceTestSuite) TestHandlePAR_FiltersOIDCScopesByAppScopes() {
 
 	assert.Empty(s.T(), errCode)
 	assert.NotNil(s.T(), resp)
-	assert.Equal(s.T(), []string{"profile"}, captured.OAuthParameters.StandardScopes)
+	// email stays OIDC on its standard claims; the mapping only narrows profile.
+	assert.Equal(s.T(), []string{"openid", "email", "profile"}, captured.OAuthParameters.StandardScopes)
 }
 
 func (s *ServiceTestSuite) TestHandlePAR_AcrValuesPropagated() {
@@ -409,6 +445,26 @@ func (s *ServiceTestSuite) TestHandlePAR_AcrValuesPropagated() {
 	assert.Equal(s.T(),
 		"urn:thunder:acr:password urn:thunder:acr:generated-code",
 		captured.OAuthParameters.AcrValues)
+}
+
+func (s *ServiceTestSuite) TestHandlePAR_MaxAgePropagated() {
+	store := newParStoreInterfaceMock(s.T())
+	var captured pushedAuthorizationRequest
+	store.EXPECT().Store(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, req pushedAuthorizationRequest, _ int64) {
+			captured = req
+		}).Return("test-uri", nil)
+
+	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
+	app := s.newTestApp()
+	params := s.newValidParams()
+	params[oauth2const.RequestParamMaxAge] = "1"
+
+	resp, errCode, _ := svc.HandlePushedAuthorizationRequest(s.ctx, params, nil, app, "")
+
+	assert.Empty(s.T(), errCode)
+	assert.NotNil(s.T(), resp)
+	assert.Equal(s.T(), "1", captured.OAuthParameters.MaxAge)
 }
 
 func (s *ServiceTestSuite) TestHandlePAR_DPoPHeaderJkt_PersistedOnRequest() {
@@ -474,6 +530,34 @@ func (s *ServiceTestSuite) TestHandlePAR_NonceTooLong() {
 	assert.Equal(s.T(), oauth2const.ErrorInvalidRequest, errCode)
 }
 
+func (s *ServiceTestSuite) TestHandlePAR_StripsCredentialsFromInitiatorQueryParams() {
+	store := newParStoreInterfaceMock(s.T())
+	var captured pushedAuthorizationRequest
+	store.EXPECT().Store(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, req pushedAuthorizationRequest, _ int64) {
+			captured = req
+		}).Return("test-uri", nil)
+
+	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
+	app := s.newTestApp()
+	params := s.newValidParams()
+	params[oauth2const.RequestParamClientSecret] = "super-secret"
+	params[oauth2const.RequestParamClientAssertion] = "signed-jwt"
+	params[oauth2const.RequestParamClientAssertionType] = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+	resources := []string{"https://api.example.com"}
+
+	resp, errCode, _ := svc.HandlePushedAuthorizationRequest(s.ctx, params, resources, app, "")
+
+	assert.Empty(s.T(), errCode)
+	assert.NotNil(s.T(), resp)
+	queryParams := captured.InitiatorRequest.QueryParams
+	assert.NotContains(s.T(), queryParams, oauth2const.RequestParamClientSecret)
+	assert.NotContains(s.T(), queryParams, oauth2const.RequestParamClientAssertion)
+	assert.NotContains(s.T(), queryParams, oauth2const.RequestParamClientAssertionType)
+	assert.Equal(s.T(), []string{"code"}, queryParams[oauth2const.RequestParamResponseType])
+	assert.Equal(s.T(), resources, queryParams[oauth2const.RequestParamResource])
+}
+
 func (s *ServiceTestSuite) TestResolvePAR_Success() {
 	storedRequest := pushedAuthorizationRequest{
 		ClientID: "test-client",
@@ -487,7 +571,7 @@ func (s *ServiceTestSuite) TestResolvePAR_Success() {
 	store.EXPECT().Consume(mock.Anything, mock.Anything).Return(storedRequest, true, nil)
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 
-	result, err := svc.ResolvePushedAuthorizationRequest(
+	result, _, err := svc.ResolvePushedAuthorizationRequest(
 		s.ctx, requestURIPrefix+"test-uri", "test-client")
 
 	assert.NoError(s.T(), err)
@@ -500,7 +584,7 @@ func (s *ServiceTestSuite) TestResolvePAR_InvalidURIFormat() {
 	store := newParStoreInterfaceMock(s.T())
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 
-	result, err := svc.ResolvePushedAuthorizationRequest(s.ctx, "invalid-uri", "test-client")
+	result, _, err := svc.ResolvePushedAuthorizationRequest(s.ctx, "invalid-uri", "test-client")
 
 	assert.Nil(s.T(), result)
 	assert.ErrorIs(s.T(), err, errInvalidRequestURI)
@@ -511,7 +595,7 @@ func (s *ServiceTestSuite) TestResolvePAR_NotFound() {
 	store.EXPECT().Consume(mock.Anything, mock.Anything).Return(pushedAuthorizationRequest{}, false, nil)
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 
-	result, err := svc.ResolvePushedAuthorizationRequest(
+	result, _, err := svc.ResolvePushedAuthorizationRequest(
 		s.ctx, requestURIPrefix+"nonexistent", "test-client")
 
 	assert.Nil(s.T(), result)
@@ -529,7 +613,7 @@ func (s *ServiceTestSuite) TestResolvePAR_ClientIDMismatch() {
 	store.EXPECT().Consume(mock.Anything, mock.Anything).Return(storedRequest, true, nil)
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 
-	result, err := svc.ResolvePushedAuthorizationRequest(
+	result, _, err := svc.ResolvePushedAuthorizationRequest(
 		s.ctx, requestURIPrefix+"test-uri", "client-b")
 
 	assert.Nil(s.T(), result)
@@ -542,7 +626,7 @@ func (s *ServiceTestSuite) TestResolvePAR_ConsumeError() {
 		Return(pushedAuthorizationRequest{}, false, errors.New("cache error"))
 	svc := newPARService(store, s.newPermissiveResourceMock(), s.testCfg)
 
-	result, err := svc.ResolvePushedAuthorizationRequest(
+	result, _, err := svc.ResolvePushedAuthorizationRequest(
 		s.ctx, requestURIPrefix+"test-uri", "test-client")
 
 	assert.Nil(s.T(), result)

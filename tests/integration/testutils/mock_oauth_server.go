@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -74,6 +59,10 @@ type MockOAuthServer struct {
 	clientSecret  string
 	baseURL       string
 	authorizeFunc func(userID string) (string, error)
+
+	// Response overrides drive the transport failures a well-behaved provider never produces.
+	tokenOverride    func() (int, string)
+	userInfoOverride func() (int, string)
 
 	// Configurable endpoints
 	authorizePath string
@@ -152,6 +141,40 @@ func (m *MockOAuthServer) SetAuthorizeFunc(fn func(userID string) (string, error
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.authorizeFunc = fn
+}
+
+// SetTokenResponseOverride replaces the whole token response with the given status and body.
+func (m *MockOAuthServer) SetTokenResponseOverride(fn func() (int, string)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.tokenOverride = fn
+}
+
+// SetUserInfoResponseOverride replaces the whole userinfo response with the given status and body.
+func (m *MockOAuthServer) SetUserInfoResponseOverride(fn func() (int, string)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.userInfoOverride = fn
+}
+
+// ClearOverrides restores normal behaviour on both endpoints between tests.
+func (m *MockOAuthServer) ClearOverrides() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.tokenOverride = nil
+	m.userInfoOverride = nil
+}
+
+// writeOAuthOverride serves an override response and reports whether it handled the request.
+func writeOAuthOverride(w http.ResponseWriter, fn func() (int, string)) bool {
+	if fn == nil {
+		return false
+	}
+	status, body := fn()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+	return true
 }
 
 // AddUser adds a user to the mock server
@@ -256,6 +279,13 @@ func (m *MockOAuthServer) handleAuthorize(w http.ResponseWriter, r *http.Request
 
 // handleToken handles the OAuth token endpoint
 func (m *MockOAuthServer) handleToken(w http.ResponseWriter, r *http.Request) {
+	m.mutex.RLock()
+	override := m.tokenOverride
+	m.mutex.RUnlock()
+	if writeOAuthOverride(w, override) {
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -357,6 +387,13 @@ func (m *MockOAuthServer) handleToken(w http.ResponseWriter, r *http.Request) {
 
 // handleUserInfo handles the OAuth userinfo endpoint
 func (m *MockOAuthServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+	m.mutex.RLock()
+	override := m.userInfoOverride
+	m.mutex.RUnlock()
+	if writeOAuthOverride(w, override) {
+		return
+	}
+
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

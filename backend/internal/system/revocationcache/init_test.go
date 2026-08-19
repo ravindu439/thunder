@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package revocationcache
 
@@ -27,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/thunder-id/thunderid/internal/system/security"
+
 	"github.com/thunder-id/thunderid/internal/system/config"
 )
 
@@ -36,7 +23,7 @@ func TestInitialize_DisabledReturnsNoops(t *testing.T) {
 	assert.NoError(t, err)
 	assert.IsType(t, noopEnforcer{}, enforcer)
 	assert.IsType(t, noopSyncer{}, syncer)
-	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), "anything"))
+	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), security.RevocationIdentity{JTI: "anything"}))
 }
 
 func TestInitialize_UnsupportedSource(t *testing.T) {
@@ -53,8 +40,9 @@ func TestInitializeWithSource_InitialLoadPopulatesCache(t *testing.T) {
 	enforcer, syncer := initializeWithSource(Config{Enabled: true, SyncInterval: time.Minute}, source)
 
 	assert.Equal(t, 1, source.callCount(), "the initial snapshot is loaded synchronously")
-	assert.ErrorIs(t, enforcer.EnsureNotRevoked(context.Background(), "jti-1"), errTokenRevoked)
-	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), "other"))
+	assert.ErrorIs(t, enforcer.EnsureNotRevoked(context.Background(),
+		security.RevocationIdentity{JTI: "jti-1"}), errTokenRevoked)
+	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), security.RevocationIdentity{JTI: "other"}))
 	assert.NotNil(t, syncer, "initializeWithSource returns a syncer whose loop the caller starts")
 }
 
@@ -66,7 +54,7 @@ func TestInitializeWithSource_InitialLoadFailureStartsWithEmptyDenyList(t *testi
 	require.NotNil(t, enforcer, "a failed initial load must not stop startup")
 	require.NotNil(t, syncer)
 	// With no snapshot loaded, the deny list is empty and nothing is treated as revoked.
-	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), "jti-1"))
+	assert.NoError(t, enforcer.EnsureNotRevoked(context.Background(), security.RevocationIdentity{JTI: "jti-1"}))
 }
 
 func TestSelectSource(t *testing.T) {

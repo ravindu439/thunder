@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package user
 
@@ -76,19 +61,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.userservice.organization_unit_not_found_description",
 			DefaultValue: "The specified organization unit does not exist",
-		},
-	}
-	// ErrorInvalidGroupID is the error returned when group ID is invalid.
-	ErrorInvalidGroupID = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "USR-1007",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.userservice.invalid_group_id",
-			DefaultValue: "Invalid group ID",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.userservice.invalid_group_id_description",
-			DefaultValue: "One or more group IDs in the request do not exist",
 		},
 	}
 	// ErrorHandlePathRequired is the error returned when handle path is missing.
@@ -154,19 +126,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.userservice.attribute_conflict_description",
 			DefaultValue: "A user with the same unique attribute value already exists",
-		},
-	}
-	// ErrorEmailConflict is the error returned when email already exists.
-	ErrorEmailConflict = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "USR-1015",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.userservice.email_conflict",
-			DefaultValue: "Email conflict",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.userservice.email_conflict_description",
-			DefaultValue: "A user with the same email already exists",
 		},
 	}
 	// ErrorMissingRequiredFields is the error returned when required fields are missing.

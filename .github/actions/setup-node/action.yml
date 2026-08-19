@@ -15,7 +15,7 @@ inputs:
   dependency-path:
     description: 'Path to the dependency file (package-lock.json, yarn.lock, pnpm-lock.yaml)'
     required: false
-    default: 'samples/apps/react-vanilla-sample'
+    default: '.'
 
 runs:
   using: "composite"

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package openid4vp
 
@@ -29,10 +14,10 @@ import (
 
 	authncommon "github.com/thunder-id/thunderid/internal/authn/common"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/vc/presentation"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // OpenID4VPServiceInterface is the external contract for the OpenID4VP verifier.
@@ -55,8 +40,8 @@ type openid4vpService struct {
 	store          openID4VPStoreInterface
 	defStore       presentation.PresentationDefinitionServiceInterface
 	clientID       string
-	cryptoProvider kmprovider.RuntimeCryptoProvider
-	signingKeyRef  kmprovider.KeyRef
+	cryptoProvider providers.RuntimeCryptoProvider
+	signingKeyRef  providers.KeyRef
 	signingAlg     string
 	x5c            []string
 	jwtSvc         jwt.JWTServiceInterface
@@ -68,7 +53,7 @@ type openid4vpService struct {
 // newOpenID4VPService creates an OpenID4VP verifier engine.
 func newOpenID4VPService(
 	cfg serviceConfig, store openID4VPStoreInterface, clientID string,
-	cryptoProvider kmprovider.RuntimeCryptoProvider, signingKeyRef kmprovider.KeyRef, signingAlg string, x5c []string,
+	cryptoProvider providers.RuntimeCryptoProvider, signingKeyRef providers.KeyRef, signingAlg string, x5c []string,
 	trust *trustAnchorStore, defStore presentation.PresentationDefinitionServiceInterface,
 	jwtSvc jwt.JWTServiceInterface, issuerURL string,
 ) (*openid4vpService, error) {

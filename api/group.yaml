@@ -416,16 +416,6 @@ paths:
                     description:
                       key: "error.groupservice.missing_group_id_description"
                       defaultValue: "Group ID is required"
-                cannot-delete-group:
-                  summary: Cannot delete group
-                  value:
-                    code: "GRP-1006"
-                    message:
-                      key: "error.groupservice.cannot_delete_group"
-                      defaultValue: "Cannot delete group"
-                    description:
-                      key: "error.groupservice.cannot_delete_group_description"
-                      defaultValue: "Cannot delete group with child groups"
         "404":
           description: Group not found
           content:
@@ -624,6 +614,20 @@ paths:
                     description:
                       key: "error.groupservice.invalid_group_member_id_description"
                       defaultValue: "One or more group member IDs in the request do not exist"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "SAZ-4030"
+                message:
+                  key: "error.sysauthz.grant_not_permitted"
+                  defaultValue: "Insufficient privileges to grant these permissions"
+                description:
+                  key: "error.sysauthz.grant_not_permitted_description"
+                  defaultValue: "The operation would grant permissions that the caller does not hold"
         "404":
           description: Group not found
           content:
@@ -737,6 +741,20 @@ paths:
                     description:
                       key: "error.groupservice.invalid_group_member_id_description"
                       defaultValue: "One or more group member IDs in the request do not exist"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: "SAZ-4030"
+                message:
+                  key: "error.sysauthz.grant_not_permitted"
+                  defaultValue: "Insufficient privileges to grant these permissions"
+                description:
+                  key: "error.sysauthz.grant_not_permitted_description"
+                  defaultValue: "The operation would grant permissions that the caller does not hold"
         "404":
           description: Group not found
           content:
@@ -1218,7 +1236,7 @@ components:
       properties:
         code:
           type: string
-          description: "Error code. Codes follow the GRP-XXXX convention."
+          description: "Error code. The prefix identifies the service that produced the error, for example GRP for group management or SAZ for system authorization."
           example: "GRP-1001"
         message:
           $ref: '#/components/schemas/I18nMessage'

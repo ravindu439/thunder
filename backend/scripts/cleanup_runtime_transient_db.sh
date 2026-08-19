@@ -1,22 +1,7 @@
 #!/bin/bash
 set -euo pipefail
-# ----------------------------------------------------------------------------
-# Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
-#
-# WSO2 LLC. licenses this file to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file except
-# in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations
-# under the License.
-# ----------------------------------------------------------------------------
+# Copyright 2025-2026 The ThunderID Authors
+# SPDX-License-Identifier: Apache-2.0
 
 # =============================================================================
 # Runtime-transient Database Cleanup Script
@@ -24,13 +9,8 @@ set -euo pipefail
 # Deletes expired rows from runtime transient database tables. Designed to be run
 # manually (one-shot) or scheduled via cron for periodic cleanup.
 #
-# Tables cleaned (in order):
-#   1. AUTHORIZATION_CODE
-#   2. AUTHORIZATION_REQUEST
-#   3. WEBAUTHN_SESSION
-#   4. PAR_REQUEST
-#   5. JTI_RECORD
-#   6. RUNTIME_STORE
+# Tables cleaned:
+#   1. RUNTIME_STORE
 #
 # Usage examples:
 #   # SQLite (local development)
@@ -70,7 +50,7 @@ USERNAME=""
 PASSWORD=""
 
 # Tables to clean
-TABLES=("AUTHORIZATION_CODE" "AUTHORIZATION_REQUEST" "WEBAUTHN_SESSION" "PAR_REQUEST" "JTI_RECORD" "RUNTIME_STORE")
+TABLES=("RUNTIME_STORE")
 
 # Totals for summary.
 TOTAL_DELETED=0

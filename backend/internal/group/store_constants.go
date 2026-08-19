@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -59,6 +44,54 @@ var (
 		ORDER BY G.NAME`,
 	}
 )
+
+// buildGetDirectGroupParentsQuery returns the query and args to retrieve the IDs of groups directly
+// containing any of the given groups. Callers walk the chain level by level (see
+// resolveTransitiveGroupAncestors) so that nesting edges spanning both stores resolve.
+//
+// It does not join "GROUP": a declarative parent has no row there, so joining would omit it.
+func buildGetDirectGroupParentsQuery(
+	groupIDs []string, deploymentID string,
+) (dbmodel.DBQuery, []interface{}) {
+	if len(groupIDs) == 0 {
+		return dbmodel.DBQuery{
+			ID:            "GRQ-GROUP_MGT-24",
+			Query:         `SELECT GROUP_ID FROM "GROUP_MEMBER_REFERENCE" WHERE 1=0`,
+			PostgresQuery: `SELECT GROUP_ID FROM "GROUP_MEMBER_REFERENCE" WHERE 1=0`,
+			SQLiteQuery:   `SELECT GROUP_ID FROM "GROUP_MEMBER_REFERENCE" WHERE 1=0`,
+		}, []interface{}{}
+	}
+
+	postgresPlaceholders := make([]string, len(groupIDs))
+	sqlitePlaceholders := make([]string, len(groupIDs))
+	for i := range groupIDs {
+		postgresPlaceholders[i] = fmt.Sprintf("$%d", i+1)
+		sqlitePlaceholders[i] = "?"
+	}
+	deploymentIDIdx := len(groupIDs) + 1
+
+	postgresQuery := fmt.Sprintf(
+		`SELECT DISTINCT GROUP_ID FROM "GROUP_MEMBER_REFERENCE" `+
+			`WHERE MEMBER_TYPE = 'group' AND MEMBER_ID IN (%s) AND DEPLOYMENT_ID = $%d`,
+		strings.Join(postgresPlaceholders, ","), deploymentIDIdx)
+	sqliteQuery := fmt.Sprintf(
+		`SELECT DISTINCT GROUP_ID FROM "GROUP_MEMBER_REFERENCE" `+
+			`WHERE MEMBER_TYPE = 'group' AND MEMBER_ID IN (%s) AND DEPLOYMENT_ID = ?`,
+		strings.Join(sqlitePlaceholders, ","))
+
+	args := make([]interface{}, 0, len(groupIDs)+1)
+	for _, id := range groupIDs {
+		args = append(args, id)
+	}
+	args = append(args, deploymentID)
+
+	return dbmodel.DBQuery{
+		ID:            "GRQ-GROUP_MGT-24",
+		Query:         postgresQuery,
+		PostgresQuery: postgresQuery,
+		SQLiteQuery:   sqliteQuery,
+	}, args
+}
 
 // buildGetGroupsCountByOUIDsQuery returns the query and args to count groups
 // belonging to the specified list of organization unit IDs.

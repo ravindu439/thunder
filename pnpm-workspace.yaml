@@ -15,8 +15,6 @@ verifyDepsBeforeRun: false
 allowBuilds:
   '@parcel/watcher': false
   '@swc/core': false
-  # JUSTIFICATION: Wayfinder uses better-sqlite3 as the Node 18/20 fallback for node:sqlite.
-  better-sqlite3: true
   core-js: false
   core-js-pure: false
   # JUSTIFICATION: The `esbuild` package is not directly and might be coming from a transitive dependency. Not required to be built as part of the workspace.
@@ -38,8 +36,8 @@ catalog:
   '@testing-library/jest-dom': 6.9.1
   '@testing-library/react': 16.3.0
   '@testing-library/user-event': 14.6.1
-  '@thunderid/react': 0.6.1
-  '@thunderid/react-router': 0.5.1
+  '@thunderid/react': 1.0.3
+  '@thunderid/react-router': 1.0.3
   '@types/lodash-es': 4.17.12
   '@types/node': 24.7.2
   '@types/react': 19.2.14
@@ -47,27 +45,29 @@ catalog:
   '@playwright/test': 1.60.0
   '@vitejs/plugin-basic-ssl': 2.3.0
   '@vitejs/plugin-react': 6.0.2
-  '@vitest/browser-playwright': 4.1.8
-  '@vitest/coverage-istanbul': 4.1.8
-  '@wso2/oxygen-ui': 0.11.0
-  '@wso2/oxygen-ui-icons-react': 0.11.0
+  '@vitest/browser-playwright': 4.1.10
+  '@vitest/coverage-istanbul': 4.1.10
+  '@wso2/oxygen-ui': 0.13.1
+  '@wso2/oxygen-ui-icons-react': 0.13.1
   babel-plugin-react-compiler: 19.1.0-rc.3
   clsx: 2.1.1
   dayjs: 1.11.18
-  dompurify: 3.4.11
-  eslint: 9.39.4
+  dompurify: 3.4.12
+  eslint: 9.39.5
+  framer-motion: 12.39.0
   globals: 16.4.0
   i18next: 25.6.0
   jsdom: 27.0.1
   lodash-es: 4.18.1
   lucide-react: 0.545.0
+  next: 16.2.12
   playwright: 1.60.0
   prettier: 3.6.2
   react: 19.2.3
   react-dom: 19.2.3
   react-hook-form: 7.65.0
   react-i18next: 16.0.1
-  react-router: 7.15.1
+  react-router: 8.3.0
   rimraf: 6.1.3
   rolldown: 1.0.0-beta.45
   rollup-plugin-visualizer: 6.0.5
@@ -77,7 +77,7 @@ catalog:
   typescript-eslint: 8.57.2
   vite: 8.0.16
   vite-plugin-svgr: 5.2.0
-  vitest: 4.1.8
+  vitest: 4.1.10
   zod: 4.3.6
 
 overrides:
@@ -89,7 +89,8 @@ overrides:
   # JUSTIFICATION: Fixes GHSA-xv26-6w52-cph6 — websocket-driver message corruption via protocol length headers, transitive via Docusaurus dev server sockjs/faye-websocket.
   websocket-driver: '>=0.7.5'
   # JUSTIFICATION: Packed through next@15.5.18. Could be resolved once next is updated to 16 versions.
-  postcss: 8.5.10
+  # Bumped to 8.5.23 to fix GHSA-fxqj-rqcc-2cmp — arbitrary .map file read via sourceMappingURL.
+  postcss: 8.5.23
   openapi-to-postmanv2>ajv: 8.18.0
   ajv-draft-04>ajv: 8.18.0
   ajv-formats>ajv: 8.18.0
@@ -101,7 +102,7 @@ overrides:
   defu: 6.1.5
   # JUSTIFICATION: i18next 26 breaks compatibility, gives a white screen issue on Console when navigating with "TypeError: n.getResourceBundle"
   i18next: '25.6.0'
-  dompurify: '>=3.4.11'
+  dompurify: '>=3.4.12'
   follow-redirects: 1.16.0
   unhead: 2.1.13
   minimatch@>=5.0.0 <5.1.8: '>=5.1.8'
@@ -113,16 +114,28 @@ overrides:
   webpack: '5.105.0'
   yaml: 2.8.3
   path-to-regexp: 0.1.13
-  svgo: 3.3.3
+  # JUSTIFICATION: Fixes GHSA-2p49-hgcm-8545 — SVGO removeScripts plugin leaves some executable
+  # content in place. Transitive via docs and icon tooling.
+  svgo: 3.3.4
+  # JUSTIFICATION: Fixes GHSA-v56q-mh7h-f735 (List 32-bit trie overflow DoS) and
+  # GHSA-xvcm-6775-5m9r (hash-collision algorithmic complexity DoS). Transitive via sass under
+  # the @codecov/vite-plugin chain; bounded to the vulnerable 5.x range.
+  immutable@>=5.0.0-beta.1 <5.1.8: 5.1.8
   # JUSTIFICATION: Fixes GHSA-3jxr-9vmj-r5cp — DoS via exponential-time expansion of consecutive
-  # non-expanding {} groups. Covers both the 1.x line and the 3.x/4.x line flagged by the advisory.
-  brace-expansion@<1.1.16: 1.1.16
-  brace-expansion@>=3.0.0 <5.0.7: 5.0.7
+  # non-expanding {} groups, and GHSA-mh99-v99m-4gvg — DoS via unbounded expansion length. The
+  # advisory range covers every major (<5.0.8); only 5.0.8 is patched. Force every transitive
+  # brace-expansion to 5.0.8, and route minimatch@3.1.5 (used by @eslint/config-array,
+  # @eslint/eslintrc, and eslint itself, which do CJS `require('brace-expansion')`) through the
+  # `patches/minimatch@3.1.5.patch` shim so the switch to the 5.x `{ expand }` API is transparent.
+  # 5.0.9 additionally fixes GHSA-rgw5-rvv9-x895 — DoS via unbounded intermediate arrays.
+  brace-expansion: 5.0.9
   lodash: 4.18.1
-  # JUSTIFICATION: Fixes GHSA-52cp-r559-cp3m — YAML merge-key chains forcing quadratic CPU consumption.
-  js-yaml@>=4.0.0 <4.3.0: 4.3.0
-  # JUSTIFICATION: Fixes GHSA-h67p-54hq-rp68 — quadratic-complexity DoS in js-yaml merge key handling.
-  js-yaml@<3.15.0: 3.15.0
+  # JUSTIFICATION: Fixes GHSA-52cp-r559-cp3m — YAML merge-key chains forcing quadratic CPU consumption,
+  # and GHSA-5p4m-2wfm-xmqj (CVE-2026-59870) — quadratic CPU consumption in !!omap resolution.
+  js-yaml@>=4.0.0 <4.3.1: 4.3.1
+  # JUSTIFICATION: Fixes GHSA-h67p-54hq-rp68 — quadratic-complexity DoS in js-yaml merge key handling,
+  # and GHSA-5p4m-2wfm-xmqj (CVE-2026-59870) — quadratic CPU consumption in !!omap resolution.
+  js-yaml@<3.15.1: 3.15.1
   # JUSTIFICATION: Fixes GHSA-64mm-vxmg-q3vj — http-proxy-middleware router host+path substring match bypass.
   http-proxy-middleware: 2.0.10
   # TODO: Remove once `nuxt` bumps `devalue` to 5.8.1 or later.
@@ -147,8 +160,47 @@ overrides:
   # JUSTIFICATION: Fixes GHSA-gv7w-rqvm-qjhr — esbuild Deno module downloads native binaries without integrity verification, enabling RCE via NPM_CONFIG_REGISTRY.
   esbuild: '>=0.28.1'
   # JUSTIFICATION: Fixes GHSA-vxpw-j846-p89q (high DoS), GHSA-p88m-4jfj-68fv (HTTP header injection),
-  # GHSA-35p6-xmwp-9g52 and GHSA-g8m3-5g58-fq7m — transitive via @codecov/vite-plugin chain.
-  undici: '>=6.27.0'
+  # GHSA-35p6-xmwp-9g52 and GHSA-g8m3-5g58-fq7m — transitive via @codecov/vite-plugin chain. The only
+  # consumers (@actions/http-client 3.x/4.x) declare undici ^6.23.0, so pin to the patched 6.x line:
+  # >=6.27.0 clears the CVEs above and, by staying off the 8.x line, also avoids GHSA-4cwx-7wf7-3272
+  # (8.0.0-8.8.x cross-user info disclosure). 6.x keeps Node 18 support; 8.x requires Node >=22.19.0.
+  undici: '^6.27.0'
+  # JUSTIFICATION: Fixes entity encoding bypass and RCE vulnerabilities in fast-xml-parser.
+  fast-xml-parser: '>=5.3.6'
+  # JUSTIFICATION: Fixes arbitrary file read vulnerability in Vitest UI server.
+  vitest: '>=4.1.0'
+  # JUSTIFICATION: Fixes command injection vulnerability via -c/--cmd flag in glob CLI.
+  glob: '>=11.1.0'
+  # JUSTIFICATION: Fixes environment variable exposure in Storybook manager bundle.
+  storybook: '>=10.1.10'
+  # JUSTIFICATION: Fixes ReDoS vulnerabilities in minimatch.
+  minimatch@>=9.0.0 <9.0.7: '>=9.0.7'
+  minimatch@>=10.0.0 <10.2.3: '>=10.2.3'
+  # JUSTIFICATION: Fixes path traversal vulnerability in rollup.
+  rollup: '>=4.59.0'
+  # JUSTIFICATION: Fixes prototype pollution and other vulnerabilities in axios.
+  axios: '>=1.16.0'
+  # JUSTIFICATION: Fixes form-data vulnerability.
+  form-data: '>=4.0.6'
+  # JUSTIFICATION: Fixes picomatch ReDoS vulnerability.
+  picomatch: '>=2.3.2'
+  # JUSTIFICATION: Fixes body-parser denial of service vulnerabilities. Covers 1.x <1.20.6 and 2.x <2.3.0 vulnerable ranges.
+  body-parser: '>=2.3.0'
+  # JUSTIFICATION: Fixes webpack-dev-server CSRF and DoS vulnerabilities. Pinned to 5.2.6 to address <=5.2.5 vulnerability (5.3.0 introduces breaking changes).
+  webpack-dev-server: '5.2.6'
+  '@hono/node-server': '>=2.0.5'
+  # JUSTIFICATION: Fixes GHSA-f88m-g3jw-g9cj (CVE-2026-33327, CVE-2026-33328, CVE-2026-35590,
+  # CVE-2026-35591) — libvips vulnerabilities inherited by sharp. Transitive via next's optional
+  # image-optimization dependency, which pins sharp to the vulnerable <0.35.0 range.
+  sharp: '>=0.35.3'
+  # JUSTIFICATION: Fixes GHSA-28wg-ghj8-5hjv — nanoid non-secure generators can loop indefinitely
+  # with negative size. Transitive via @scalar packages, which use the nanoid 5.x line. Pinned
+  # exact (not an open range) so the resolver can't dedupe this edge onto an untested major.
+  nanoid@>=4.0.0 <5.1.16: 5.1.16
+  # JUSTIFICATION: Fixes GHSA-2v37-7h3g-55p8 — nanoid custom generators can loop indefinitely when
+  # size is zero. Transitive via postcss, which requires the nanoid 3.x (CJS) line — an open-ended
+  # target here previously let the resolver dedupe postcss onto ESM-only nanoid 5.x and broke it.
+  nanoid@<3.3.17: 3.3.18
 
 packageExtensions:
   '@hookform/resolvers':
@@ -165,7 +217,19 @@ peerDependencyRules:
     '@codecov/vite-plugin>vite': '8'
 
 auditConfig:
-  ignoreCves: []
+  ignoreGhsas:
+    # JUSTIFICATION: image-size ICNS parser infinite-loop DoS, transitive via docusaurus mdx-loader.
+    # No patched release exists on npm yet (advisory lists "Patched: None"); revisit and add an
+    # override once image-size ships a fix.
+    - GHSA-w3rx-r6r6-pgpr
+    # JUSTIFICATION: image-size JXL/HEIF parser infinite-loop DoS, transitive via docusaurus
+    # mdx-loader. No patched release exists on npm yet (advisory lists "Patched: None"); revisit
+    # and add an override once image-size ships a fix.
+    - GHSA-5p2g-fcmc-qvqq
 
 minimumReleaseAgeExclude:
   - '@thunderid/*'
+  - nanoid@3.3.18
+
+patchedDependencies:
+  minimatch@3.1.5: patches/minimatch@3.1.5.patch

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Token-related constants
@@ -36,6 +21,18 @@ const TokenConstants = {
   ADDITIONAL_USER_ATTRIBUTES: ['groups', 'ouHandle', 'ouId', 'ouName', 'roles', 'userType'],
 
   /**
+   * Agent system, OU, group, and role attributes that can be added to the agent's own access token
+   * (client_credentials)
+   */
+  ADDITIONAL_AGENT_ATTRIBUTES: ['name', 'owner', 'ouHandle', 'ouId', 'ouName', 'groups', 'roles'],
+
+  /**
+   * Optional claims that can be added to the client access token (client_credentials grant),
+   * where there is no end user to source attributes from.
+   */
+  CLIENT_TOKEN_OPTIONAL_CLAIMS: ['groups', 'ouHandle', 'ouId', 'ouName', 'roles'],
+
+  /**
    * Supported UserInfo response types
    */
   /**
@@ -54,11 +51,6 @@ const TokenConstants = {
   ID_TOKEN_ENCRYPTION_ENCS: ['A128CBC-HS256', 'A256GCM'],
 
   USER_INFO_RESPONSE_TYPES: ['JSON', 'JWS', 'JWE', 'NESTED_JWT'],
-
-  /**
-   * Supported JWS signing algorithms for UserInfo responses
-   */
-  USER_INFO_SIGNING_ALGS: ['RS256', 'RS512', 'PS256', 'ES256', 'ES384', 'ES512', 'EdDSA'],
 
   /**
    * Supported JWE key-management algorithms for UserInfo responses

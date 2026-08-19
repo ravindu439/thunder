@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@thunderid/test-utils';
 import {describe, expect, it, vi, beforeEach} from 'vitest';
@@ -107,14 +92,13 @@ describe('ConfigureName', () => {
     expect(onReadyChange).toHaveBeenCalledWith(false);
   });
 
-  it('renders suggestion chips from the returned suggestions', () => {
+  it('renders a name suggestion', () => {
     render(<ConfigureName name="" identifier="" onNameChange={vi.fn()} onIdentifierChange={vi.fn()} />);
 
     expect(screen.getByText('Alpha Service')).toBeInTheDocument();
-    expect(screen.getByText('Beta Platform')).toBeInTheDocument();
   });
 
-  it('fills name when a suggestion chip is clicked', () => {
+  it('fills name when the suggestion is clicked', () => {
     const onNameChange = vi.fn();
     const onIdentifierChange = vi.fn();
     render(<ConfigureName name="" identifier="" onNameChange={onNameChange} onIdentifierChange={onIdentifierChange} />);
@@ -130,7 +114,7 @@ describe('ConfigureName', () => {
       <ConfigureName name="" identifier="" selectedType="API" onNameChange={vi.fn()} onIdentifierChange={vi.fn()} />,
     );
 
-    expect(screen.getByText('Name your resource server')).toBeInTheDocument();
+    expect(screen.getByText("Let's collect some details about your resource server")).toBeInTheDocument();
     expect(screen.getByRole('textbox', {name: /resource server name/i})).toBeInTheDocument();
   });
 
@@ -139,7 +123,7 @@ describe('ConfigureName', () => {
       <ConfigureName name="" identifier="" selectedType="MCP" onNameChange={vi.fn()} onIdentifierChange={vi.fn()} />,
     );
 
-    expect(screen.getByText('Name your MCP server')).toBeInTheDocument();
+    expect(screen.getByText("Let's collect some details about your MCP server")).toBeInTheDocument();
     expect(screen.getByRole('textbox', {name: /mcp server name/i})).toBeInTheDocument();
   });
 
@@ -153,5 +137,80 @@ describe('ConfigureName', () => {
         'A unique identifier for this MCP server. When set as an absolute URI, it becomes the token audience for RFC 8707 resource indicators.',
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe('ConfigureName default resource server checkbox', () => {
+  beforeEach(() => {
+    vi.mocked(generateRandomHumanReadableIdentifiers).mockReturnValue(mockSuggestions);
+  });
+
+  const renderWithDefault = (props: Partial<Parameters<typeof ConfigureName>[0]> = {}) =>
+    render(
+      <ConfigureName
+        name="Test"
+        identifier="https://api.example.com"
+        selectedType="API"
+        canSetDefault
+        onNameChange={vi.fn()}
+        onIdentifierChange={vi.fn()}
+        {...props}
+      />,
+    );
+
+  const defaultCheckbox = () => screen.queryByRole('checkbox', {name: /make this the default resource server/i});
+
+  it('offers the choice for an API resource server', () => {
+    renderWithDefault();
+
+    expect(defaultCheckbox()).toBeInTheDocument();
+  });
+
+  it('offers the choice for a custom resource server', () => {
+    renderWithDefault({selectedType: 'CUSTOM'});
+
+    expect(defaultCheckbox()).not.toBeNull();
+  });
+
+  it('does not offer the choice for an MCP server', () => {
+    renderWithDefault({selectedType: 'MCP'});
+
+    expect(defaultCheckbox()).toBeNull();
+  });
+
+  it('does not offer the choice while the default config is unavailable', () => {
+    renderWithDefault({canSetDefault: false});
+
+    expect(defaultCheckbox()).toBeNull();
+  });
+
+  it('reflects the ticked state it is given', () => {
+    renderWithDefault({makeDefault: true});
+
+    expect(defaultCheckbox()).toBeChecked();
+  });
+
+  it('reflects the unticked state it is given', () => {
+    renderWithDefault({makeDefault: false});
+
+    expect(defaultCheckbox()).not.toBeChecked();
+  });
+
+  it('reports a tick to the caller', () => {
+    const onMakeDefaultChange = vi.fn();
+    renderWithDefault({makeDefault: false, onMakeDefaultChange});
+
+    fireEvent.click(defaultCheckbox()!);
+
+    expect(onMakeDefaultChange).toHaveBeenCalledWith(true);
+  });
+
+  it('reports an untick to the caller', () => {
+    const onMakeDefaultChange = vi.fn();
+    renderWithDefault({makeDefault: true, onMakeDefaultChange});
+
+    fireEvent.click(defaultCheckbox()!);
+
+    expect(onMakeDefaultChange).toHaveBeenCalledWith(false);
   });
 });

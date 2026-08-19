@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import generateResourceId from './generateResourceId';
 import type {JsonArray, JsonObject, JsonValue} from '../models/json';
@@ -33,49 +18,62 @@ interface Replacer {
   [key: string]: unknown;
 }
 
+/**
+ * Matches a `{{KEY}}` placeholder, whether it is the whole string or embedded in a longer one,
+ * e.g. the `data-action-ref` sentinel inside a rich text's HTML label. Deliberately restricted to
+ * identifier characters so the runtime template literals (`{{ t(...) }}`,
+ * `{{meta(application.url)}}`) never match.
+ */
+const PLACEHOLDER = /\{\{([A-Za-z0-9_]+)\}\}/g;
+
 const updateTemplatePlaceholderReferences = <T = JsonValue>(
   obj: T,
   replacers: Replacer[],
 ): [T, Map<string, string>] => {
   const placeholderCache = new Map<string, string>();
 
+  // Resolves one placeholder key to its replacement, minting generated ids at most once so
+  // every occurrence of a key (the `action.ref` and the label's `data-action-ref`, say) ends
+  // up with the same value. Returns undefined when the key has no replacement to apply, which
+  // leaves the placeholder as authored.
+  const resolvePlaceholder = (placeholderKey: string): string | undefined => {
+    if (placeholderCache.has(placeholderKey)) {
+      return placeholderCache.get(placeholderKey);
+    }
+
+    const replacer = replacers?.find((r) => r.key === placeholderKey || r.placeholder === placeholderKey);
+
+    if (!replacer) {
+      return undefined;
+    }
+
+    let replacementValue: string;
+
+    if (replacer.type === 'ID') {
+      replacementValue = generateResourceId(replacer.prefix ?? replacer.type);
+    } else if (replacer.value !== undefined) {
+      replacementValue = replacer.value;
+    } else {
+      return undefined;
+    }
+
+    placeholderCache.set(placeholderKey, replacementValue);
+
+    return replacementValue;
+  };
+
   const replacePlaceholders = (input: JsonValue): JsonValue => {
+    if (typeof input === 'string') {
+      // Only a written-out `{{KEY}}` is substituted, so a literal that happens to read like a
+      // replacer key, such as the key of a replacer definition itself, is left alone.
+      return input.replace(PLACEHOLDER, (match, placeholderKey: string) => resolvePlaceholder(placeholderKey) ?? match);
+    }
     if (Array.isArray(input)) {
       return input.map((value) => replacePlaceholders(value)) as JsonArray;
     }
     if (typeof input === 'object' && input !== null) {
       return Object.fromEntries(
-        Object.entries(input).map(([key, value]) => {
-          if (typeof value === 'string') {
-            // Extract placeholder key (remove {{ }})
-            const placeholderKey = value.replace(/[{}]/g, '');
-
-            // Check if we already replaced this placeholder
-            if (placeholderCache.has(placeholderKey)) {
-              return [key, placeholderCache.get(placeholderKey)];
-            }
-
-            // Find the matching replacer
-            const replacer = replacers?.find((r) => r.key === placeholderKey || r.placeholder === placeholderKey);
-
-            if (replacer) {
-              let replacementValue: string;
-
-              if (replacer.type === 'ID') {
-                replacementValue = generateResourceId(replacer.prefix ?? replacer.type);
-              } else {
-                replacementValue = replacer.value ?? value; // Default to original if no value
-              }
-
-              // Store the replacement in the cache
-              placeholderCache.set(placeholderKey, replacementValue);
-
-              return [key, replacementValue];
-            }
-          }
-
-          return [key, replacePlaceholders(value)];
-        }),
+        Object.entries(input).map(([key, value]) => [key, replacePlaceholders(value)]),
       ) as JsonObject;
     }
 

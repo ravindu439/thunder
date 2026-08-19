@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import {ReactFlowProvider} from '@xyflow/react';
@@ -24,7 +9,6 @@ import BlockAdapter from '../BlockAdapter';
 import type {Element as FlowElement} from '@/features/flows/models/elements';
 
 // Mock dependencies
-vi.mock('../BlockAdapter.scss', () => ({}));
 
 vi.mock('@/features/flows/components/resources/steps/view/ReorderableElement', () => ({
   ReorderableElement: ({element, id, hideChrome = false}: {element: FlowElement; id: string; hideChrome?: boolean}) => (
@@ -75,13 +59,12 @@ describe('BlockAdapter', () => {
   });
 
   describe('Rendering', () => {
-    it('should render the adapter with correct class names', () => {
+    it('should render the adapter container', () => {
       const resource = createMockElement();
 
-      const {container} = render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
+      render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
 
-      expect(container.querySelector('.adapter')).toBeInTheDocument();
-      expect(container.querySelector('.block-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('block-adapter')).toBeInTheDocument();
     });
 
     it('should render empty when resource has no components', () => {
@@ -89,7 +72,7 @@ describe('BlockAdapter', () => {
 
       const {container} = render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
 
-      expect(container.querySelector('.block-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('block-adapter')).toBeInTheDocument();
       expect(container.querySelectorAll('[data-testid^="reorderable-element"]')).toHaveLength(0);
     });
 
@@ -98,7 +81,7 @@ describe('BlockAdapter', () => {
 
       const {container} = render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
 
-      expect(container.querySelector('.block-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('block-adapter')).toBeInTheDocument();
       expect(container.querySelectorAll('[data-testid^="reorderable-element"]')).toHaveLength(0);
     });
   });
@@ -153,17 +136,17 @@ describe('BlockAdapter', () => {
     it('should work with undefined availableElements', () => {
       const resource = createMockElement({components: [createMockElement({id: 'comp-1'})]});
 
-      const {container} = render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
+      render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
 
-      expect(container.querySelector('.block-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('block-adapter')).toBeInTheDocument();
     });
 
     it('should work with undefined onAddElementToForm', () => {
       const resource = createMockElement({components: [createMockElement({id: 'comp-1'})]});
 
-      const {container} = render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
+      render(<BlockAdapter resource={resource} />, {wrapper: createWrapper()});
 
-      expect(container.querySelector('.block-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('block-adapter')).toBeInTheDocument();
     });
   });
 

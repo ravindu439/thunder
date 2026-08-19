@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package mgt
 
@@ -305,6 +290,26 @@ func (suite *I18nMgtServiceTestSuite) TestSetTranslationOverrideForKey_Declarati
 	suite.Equal(declarativeresource.ErrorDeclarativeResourceUpdateOperation.Code, err.Code)
 }
 
+func (suite *I18nMgtServiceTestSuite) TestSetTranslationOverrideForKey_CompositeAllowsWrite() {
+	// Global declarative flag is on, but the translation store is composite, so
+	// database-backed overrides must still be allowed.
+	config.GetServerRuntime().Config.DeclarativeResources.Enabled = true
+	config.GetServerRuntime().Config.Translation.Store = "composite"
+	defer func() {
+		config.GetServerRuntime().Config.DeclarativeResources.Enabled = false
+		config.GetServerRuntime().Config.Translation.Store = ""
+	}()
+
+	suite.mockStore.On("UpsertTranslation", mock.Anything).Return(nil)
+
+	result, err := suite.service.SetTranslationOverrideForKey(
+		context.Background(), "en-US", "common", "welcome", "Hello")
+
+	suite.Nil(err)
+	suite.NotNil(result)
+	suite.mockStore.AssertCalled(suite.T(), "UpsertTranslation", mock.Anything)
+}
+
 // ClearTranslationOverrideForKey Tests
 func (suite *I18nMgtServiceTestSuite) TestClearTranslationOverrideForKey_Success() {
 	suite.mockStore.On("DeleteTranslation", "en-US", "welcome", "common").Return(nil)
@@ -352,6 +357,24 @@ func (suite *I18nMgtServiceTestSuite) TestClearTranslationOverrideForKey_Declara
 
 	suite.NotNil(err)
 	suite.Equal(declarativeresource.ErrorDeclarativeResourceDeleteOperation.Code, err.Code)
+}
+
+func (suite *I18nMgtServiceTestSuite) TestClearTranslationOverrideForKey_CompositeAllowsDelete() {
+	// Global declarative flag is on, but the translation store is composite, so
+	// clearing database-backed overrides must still be allowed.
+	config.GetServerRuntime().Config.DeclarativeResources.Enabled = true
+	config.GetServerRuntime().Config.Translation.Store = "composite"
+	defer func() {
+		config.GetServerRuntime().Config.DeclarativeResources.Enabled = false
+		config.GetServerRuntime().Config.Translation.Store = ""
+	}()
+
+	suite.mockStore.On("DeleteTranslation", "en-US", "welcome", "common").Return(nil)
+
+	err := suite.service.ClearTranslationOverrideForKey(context.Background(), "en-US", "common", "welcome")
+
+	suite.Nil(err)
+	suite.mockStore.AssertCalled(suite.T(), "DeleteTranslation", "en-US", "welcome", "common")
 }
 
 // ResolveTranslations Tests

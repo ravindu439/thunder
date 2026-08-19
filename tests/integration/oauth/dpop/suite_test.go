@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package dpop holds end-to-end integration tests for DPoP support.
 //
@@ -33,8 +18,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 const (
@@ -130,13 +115,13 @@ var (
 // DPoPTestSuite is the umbrella test suite shared by every phase's test file.
 type DPoPTestSuite struct {
 	suite.Suite
-	ouID             string
-	userSchemaID     string
-	authFlowID       string
-	userID           string
-	voluntaryAppID   string
-	enforcedAppID    string
-	client           *http.Client
+	ouID           string
+	userSchemaID   string
+	authFlowID     string
+	userID         string
+	voluntaryAppID string
+	enforcedAppID  string
+	client         *http.Client
 }
 
 // TestDPoPTestSuite is the single entrypoint that runs every Test* method
@@ -206,6 +191,7 @@ func (ts *DPoPTestSuite) createApp(name, clientID, clientSecret string, dpopBoun
 		"name":                      name,
 		"description":               "DPoP integration test app",
 		"ouId":                      ts.ouID,
+		"type":                      "fullstack",
 		"authFlowId":                ts.authFlowID,
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"dpop-test-person"},

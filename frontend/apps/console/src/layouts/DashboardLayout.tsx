@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useConfig} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
@@ -29,6 +14,7 @@ import {
   Footer,
   Header,
   Sidebar,
+  useAppShell,
   useSidebar,
   UserMenu,
 } from '@wso2/oxygen-ui';
@@ -54,6 +40,7 @@ import {
 import {useEffect, useMemo, useState, type JSX, type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Link as NavigateLink, Outlet, useLocation, useNavigate} from 'react-router';
+import RouteConfig from '../configs/RouteConfig';
 
 const ICON_BUTTON_SX = {
   minWidth: 40,
@@ -107,7 +94,7 @@ function SidebarFooterButtons(): ReactNode {
         variant="outlined"
         aria-label={t('navigation:pages.importExport', 'Import / Export')}
         startIcon={<SquareArrowRightEnter size={18} />}
-        onClick={() => void navigate('/import-export')}
+        onClick={() => void navigate(RouteConfig.importExport.list())}
         sx={buttonSx}
       >
         {!collapsed && t('navigation:pages.importExport', 'Import / Export')}
@@ -125,6 +112,31 @@ export interface DashboardLayoutProps {
    * pages need the full screen width (e.g. the flow builder canvas).
    */
   collapseSidebar?: boolean;
+}
+
+/**
+ * Applies a route's sidebar preference to the shell.
+ *
+ * The preference is applied when it changes rather than being bound to the sidebar,
+ * so builder routes still start collapsed while the header toggle stays free to
+ * collapse and expand it afterwards.
+ */
+function SidebarPreference({collapsed}: {collapsed: boolean}): null {
+  const {actions} = useAppShell();
+  const {collapseSidebar, expandSidebar} = actions;
+
+  useEffect(() => {
+    if (collapsed) {
+      collapseSidebar();
+    } else {
+      expandSidebar();
+    }
+    // Runs on the route's preference only: re-running whenever the shell actions are
+    // re-created would undo a manual toggle on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
+
+  return null;
 }
 
 export default function DashboardLayout({collapseSidebar = false}: DashboardLayoutProps): ReactNode {
@@ -158,6 +170,11 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
       return;
     }
 
+    // Native ThunderID session: signOut() performs OIDC RP-Initiated Logout, the SDK's default
+    // behavior (no client config required). It clears the local session and redirects to ThunderID's
+    // end_session_endpoint, which confirms the sign-out, terminates the SSO session server-side, and
+    // returns to the console. It falls back to a local-only sign out when no end_session_endpoint is
+    // advertised.
     signOut().catch((error: unknown) => {
       logger.error('Sign out failed', {error});
     });
@@ -171,7 +188,7 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'home',
             text: t('navigation:pages.home'),
             icon: <Home />,
-            path: '/home',
+            path: RouteConfig.home.list(),
           },
         ],
       },
@@ -182,13 +199,13 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'applications',
             text: t('navigation:pages.applications'),
             icon: <LayoutGrid />,
-            path: '/applications',
+            path: RouteConfig.applications.list(),
           },
           {
             id: 'resource-servers',
             text: t('navigation:pages.resourceServers', 'Resource Servers'),
             icon: <Server size={16} />,
-            path: '/resource-servers',
+            path: RouteConfig.resourceServers.list(),
           },
         ],
       },
@@ -199,31 +216,31 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'users',
             text: t('navigation:pages.users'),
             icon: <UsersRound />,
-            path: '/users',
+            path: RouteConfig.users.list(),
           },
           {
             id: 'agents',
             text: t('navigation:pages.agents', 'Agents'),
             icon: <Bot />,
-            path: '/agents',
+            path: RouteConfig.agents.list(),
           },
           {
             id: 'groups',
             text: t('navigation:pages.groups'),
             icon: <Group />,
-            path: '/groups',
+            path: RouteConfig.groups.list(),
           },
           {
             id: 'roles',
             text: t('navigation:pages.roles'),
             icon: <ShieldCheck />,
-            path: '/roles',
+            path: RouteConfig.roles.list(),
           },
           {
             id: 'user-types',
             text: t('navigation:pages.userTypes'),
             icon: <UserRoundCog />,
-            path: '/user-types',
+            path: RouteConfig.userTypes.list(),
           },
         ],
       },
@@ -234,19 +251,19 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'organization-units',
             text: t('navigation:pages.organizationUnits'),
             icon: <Building />,
-            path: '/organization-units',
+            path: RouteConfig.organizationUnits.list(),
           },
           {
             id: 'flows',
             text: t('navigation:pages.flows'),
             icon: <Workflow />,
-            path: '/flows',
+            path: RouteConfig.flows.list(),
           },
           {
             id: 'connections',
             text: t('navigation:pages.connections'),
             icon: <Layers />,
-            path: '/connections',
+            path: RouteConfig.connections.list(),
           },
           {
             id: 'verifiable-credentials',
@@ -257,13 +274,13 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
                 id: 'credentials',
                 text: t('navigation:pages.credentials'),
                 icon: <IdCard />,
-                path: '/verifiable-credentials',
+                path: RouteConfig.verifiableCredentials.list(),
               },
               {
                 id: 'presentations',
                 text: t('navigation:pages.presentations'),
                 icon: <ShieldCheck />,
-                path: '/verifiable-presentations',
+                path: RouteConfig.verifiablePresentations.list(),
               },
             ],
           },
@@ -276,13 +293,13 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'design',
             text: t('navigation:pages.design', 'Design'),
             icon: <Palette size={16} />,
-            path: '/design',
+            path: RouteConfig.design.list(),
           },
           {
             id: 'translations',
             text: t('navigation:pages.translations'),
             icon: <Languages size={16} />,
-            path: '/translations',
+            path: RouteConfig.translations.list(),
           },
         ],
       },
@@ -293,7 +310,7 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             id: 'settings',
             text: t('navigation:pages.settings'),
             icon: <Settings size={16} />,
-            path: '/settings',
+            path: RouteConfig.settings.list(),
           },
         ],
       },
@@ -333,7 +350,11 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
   }, [appRoutes, activeItem]);
 
   return (
-    <AppShell>
+    // `collapseSidebar` seeds AppShell's own state rather than force-controlling the
+    // Sidebar. Passing `collapsed` to the Sidebar would override the shell's state and
+    // leave the header toggle with nothing to drive.
+    <AppShell initialCollapsed={collapseSidebar}>
+      <SidebarPreference collapsed={collapseSidebar} />
       <AppShell.Navbar>
         <Header>
           <Header.Toggle />
@@ -358,37 +379,40 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
             <ColorSchemeToggle />
             <Divider orientation="vertical" flexItem sx={{mx: 1, display: {xs: 'none', sm: 'block'}}} />
             <User>
-              {(user) => (
-                <UserMenu>
-                  <UserMenu.Trigger name={String(user?.name ?? '')} showName />
-                  <UserMenu.Header name={String(user?.name ?? '')} email={String(user?.email ?? '')} />
-                  <UserMenu.Divider />
-                  <UserMenu.Item
-                    label={t('common:userMenu.welcome')}
-                    onClick={() => {
-                      void navigate('/welcome');
-                    }}
-                  />
-                  <UserMenu.Divider />
-                  <SignOutButton>
-                    {({signOut}) => (
-                      <UserMenu.Logout label={t('common:userMenu.signOut')} onClick={() => handleSignOut(signOut)} />
-                    )}
-                  </SignOutButton>
-                </UserMenu>
-              )}
+              {(user) => {
+                const avatar = typeof user?.picture === 'string' ? user.picture : undefined;
+
+                return (
+                  <UserMenu>
+                    <UserMenu.Trigger name={String(user?.name ?? '')} avatar={avatar} showName />
+                    <UserMenu.Header
+                      name={String(user?.name ?? '')}
+                      email={String(user?.email ?? '')}
+                      avatar={avatar}
+                    />
+                    <UserMenu.Divider />
+                    <UserMenu.Item
+                      label={t('common:userMenu.welcome')}
+                      onClick={() => {
+                        void navigate(RouteConfig.welcome.root());
+                      }}
+                    />
+                    <UserMenu.Divider />
+                    <SignOutButton>
+                      {({signOut}) => (
+                        <UserMenu.Logout label={t('common:userMenu.signOut')} onClick={() => handleSignOut(signOut)} />
+                      )}
+                    </SignOutButton>
+                  </UserMenu>
+                );
+              }}
             </User>
           </Header.Actions>
         </Header>
       </AppShell.Navbar>
 
       <AppShell.Sidebar>
-        <Sidebar
-          activeItem={activeItem}
-          expandedMenus={expandedMenus}
-          onToggleExpand={handleToggleExpand}
-          collapsed={collapseSidebar}
-        >
+        <Sidebar activeItem={activeItem} expandedMenus={expandedMenus} onToggleExpand={handleToggleExpand}>
           <Sidebar.Nav>
             {appRoutes.map((categoryGroup) => (
               <Sidebar.Category key={categoryGroup.category}>
@@ -427,7 +451,7 @@ export default function DashboardLayout({collapseSidebar = false}: DashboardLayo
 
       <AppShell.Footer>
         <Footer>
-          <Footer.Copyright>© {new Date().getFullYear()} WSO2 LLC.</Footer.Copyright>
+          <Footer.Copyright>© {new Date().getFullYear()} The ThunderID Authors</Footer.Copyright>
           <Footer.Divider />
           <Footer.Version>{`${VERSION}`}</Footer.Version>
         </Footer>

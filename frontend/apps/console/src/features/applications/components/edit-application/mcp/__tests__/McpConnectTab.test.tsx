@@ -1,73 +1,34 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type {Application, OAuth2Config} from '@thunderid/configure-applications';
+import {useState} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
-import type {Application} from '../../../../models/application';
-import type {OAuth2Config} from '../../../../models/oauth';
 import McpConnectTab from '../McpConnectTab';
 
 vi.mock('../McpAccessSection', () => ({
-  default: ({onValidationChange}: {onValidationChange?: (hasErrors: boolean) => void}) => (
-    <div data-testid="mcp-access-section">
-      McpAccessSection
-      <button type="button" data-testid="mcp-access-section-report-invalid" onClick={() => onValidationChange?.(true)}>
-        Report invalid
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock('../../general-settings/DangerZoneSection', () => ({
-  default: ({
-    onRegenerateClick,
-    onDeleteClick,
-    showRegenerateSecret,
-    showRegenerateFlowSecret,
-    onRegenerateFlowSecretClick,
-  }: {
-    onRegenerateClick?: () => void;
-    onDeleteClick: () => void;
-    showRegenerateSecret?: boolean;
-    showRegenerateFlowSecret?: boolean;
-    onRegenerateFlowSecretClick?: () => void;
-  }) => (
-    <div data-testid="danger-zone-section">
-      {showRegenerateSecret && (
-        <button type="button" onClick={onRegenerateClick} data-testid="danger-zone-regenerate-button">
-          Regenerate Client Secret
-        </button>
-      )}
-      {showRegenerateFlowSecret && (
+  default: function MockMcpAccessSection({onValidationChange}: {onValidationChange?: (hasErrors: boolean) => void}) {
+    // Mimics McpAccessSection's real redirect-URI list, which lives in local state — used to
+    // prove that a changed sectionResetKey remounts (rather than just re-renders) it.
+    const [clicks, setClicks] = useState(0);
+    return (
+      <div data-testid="mcp-access-section">
+        McpAccessSection, Clicks: {clicks}
         <button
           type="button"
-          onClick={onRegenerateFlowSecretClick}
-          data-testid="danger-zone-regenerate-flow-secret-button"
+          data-testid="mcp-access-section-report-invalid"
+          onClick={() => onValidationChange?.(true)}
         >
-          Regenerate Flow Secret
+          Report invalid
         </button>
-      )}
-      <button type="button" onClick={onDeleteClick} data-testid="delete-button">
-        Delete Application
-      </button>
-    </div>
-  ),
+        <button type="button" data-testid="mcp-access-section-bump" onClick={() => setClicks((c) => c + 1)}>
+          Bump
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../../../RegenerateSecretDialog', () => ({
@@ -90,40 +51,11 @@ vi.mock('../../../RegenerateSecretDialog', () => ({
     ) : null,
 }));
 
-vi.mock('../../../RegenerateFlowSecretDialog', () => ({
-  default: ({
-    open,
-    applicationId,
-    onSuccess,
-  }: {
-    open: boolean;
-    applicationId: string | null;
-    onClose: () => void;
-    onSuccess?: (flowSecret: string) => void;
-  }) =>
-    open ? (
-      <div data-testid="regenerate-flow-secret-dialog" data-application-id={applicationId}>
-        <button type="button" onClick={() => onSuccess?.('new-test-flow-secret')} data-testid="flow-dialog-success">
-          Trigger Success
-        </button>
-      </div>
-    ) : null,
-}));
-
 vi.mock('../../../ClientSecretSuccessDialog', () => ({
   default: ({open, clientSecret}: {open: boolean; clientSecret: string}) =>
     open ? (
       <div data-testid="secret-dialog" data-client-secret={clientSecret}>
         Secret dialog
-      </div>
-    ) : null,
-}));
-
-vi.mock('../../../ApplicationDeleteDialog', () => ({
-  default: ({open, applicationId}: {open: boolean; applicationId: string}) =>
-    open ? (
-      <div data-testid="delete-dialog" data-application-id={applicationId}>
-        Delete dialog
       </div>
     ) : null,
 }));
@@ -336,97 +268,59 @@ describe('McpConnectTab', () => {
     });
   });
 
-  describe('Danger zone', () => {
-    it('does not show a regenerate secret entry in the danger zone', () => {
-      render(
-        <McpConnectTab
-          application={buildApplication()}
-          oauth2Config={m2mOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-          isReadOnly={false}
-        />,
-      );
-
-      expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
-      expect(screen.queryByTestId('danger-zone-regenerate-button')).not.toBeInTheDocument();
-    });
-
-    it('does not show regenerate Flow Secret for a user-delegated (authorization_code) client', () => {
-      render(
+  describe('Access section reset', () => {
+    it('remounts McpAccessSection, dropping its local state, when sectionResetKey changes', () => {
+      const {rerender} = render(
         <McpConnectTab
           application={buildApplication()}
           oauth2Config={userDelegatedOAuth2Config}
           onFieldChange={mockOnFieldChange}
           isReadOnly={false}
+          sectionResetKey={0}
         />,
       );
 
-      expect(screen.queryByTestId('danger-zone-regenerate-flow-secret-button')).not.toBeInTheDocument();
-    });
+      fireEvent.click(screen.getByTestId('mcp-access-section-bump'));
+      expect(screen.getByTestId('mcp-access-section')).toHaveTextContent('Clicks: 1');
 
-    it('does not show regenerate Flow Secret for a machine-to-machine (client_credentials only) client', () => {
-      render(
-        <McpConnectTab
-          application={buildApplication()}
-          oauth2Config={m2mOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-          isReadOnly={false}
-        />,
-      );
-
-      expect(screen.queryByTestId('danger-zone-regenerate-flow-secret-button')).not.toBeInTheDocument();
-    });
-
-    it('shows and wires regenerate Flow Secret for a flow-native oauth2Config', async () => {
-      const user = userEvent.setup();
-      const flowNativeOAuth2Config: OAuth2Config = {
-        clientId: 'mcp-flow-native-client-id',
-        grantTypes: ['refresh_token'],
-        publicClient: false,
-      } as OAuth2Config;
-
-      render(
-        <McpConnectTab
-          application={buildApplication()}
-          oauth2Config={flowNativeOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-          isReadOnly={false}
-        />,
-      );
-
-      await user.click(screen.getByTestId('danger-zone-regenerate-flow-secret-button'));
-      expect(screen.getByTestId('regenerate-flow-secret-dialog')).toBeInTheDocument();
-
-      await user.click(screen.getByTestId('flow-dialog-success'));
-      expect(screen.getByTestId('secret-dialog')).toHaveAttribute('data-client-secret', 'new-test-flow-secret');
-    });
-
-    it('does not render the danger zone when the application is read-only', () => {
-      render(
-        <McpConnectTab
-          application={buildApplication({isReadOnly: true})}
-          oauth2Config={m2mOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-          isReadOnly
-        />,
-      );
-
-      expect(screen.queryByTestId('danger-zone-section')).not.toBeInTheDocument();
-    });
-
-    it('opens the delete dialog when the danger zone delete button is clicked', () => {
-      render(
+      rerender(
         <McpConnectTab
           application={buildApplication()}
           oauth2Config={userDelegatedOAuth2Config}
           onFieldChange={mockOnFieldChange}
           isReadOnly={false}
+          sectionResetKey={1}
         />,
       );
 
-      fireEvent.click(screen.getByTestId('delete-button'));
+      expect(screen.getByTestId('mcp-access-section')).toHaveTextContent('Clicks: 0');
+    });
 
-      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+    it('keeps McpAccessSection mounted when sectionResetKey stays the same', () => {
+      const {rerender} = render(
+        <McpConnectTab
+          application={buildApplication()}
+          oauth2Config={userDelegatedOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          isReadOnly={false}
+          sectionResetKey={0}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('mcp-access-section-bump'));
+      expect(screen.getByTestId('mcp-access-section')).toHaveTextContent('Clicks: 1');
+
+      rerender(
+        <McpConnectTab
+          application={buildApplication()}
+          oauth2Config={userDelegatedOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          isReadOnly={false}
+          sectionResetKey={0}
+        />,
+      );
+
+      expect(screen.getByTestId('mcp-access-section')).toHaveTextContent('Clicks: 1');
     });
   });
 });

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package security provides authentication and authorization for server APIs.
 package security
@@ -23,6 +8,7 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/thunder-id/thunderid/internal/system/log"
 )
@@ -34,13 +20,17 @@ type SecurityServiceInterface interface {
 	Process(r *http.Request) (context.Context, error)
 }
 
-// RevocationEnforcerInterface rejects tokens whose revocation identifier is on the deny list. It is
-// the read-only seam the security layer uses to consult the Resource Server's revocation cache
-// without depending on its implementation.
+// RevocationIdentity contains the trusted token attributes used by native API enforcement.
+type RevocationIdentity struct {
+	JTI           string
+	TokenFamilyID string
+	Subject       string
+	EstablishedAt time.Time
+}
+
+// RevocationEnforcerInterface rejects identities matching the Resource Server's revocation cache.
 type RevocationEnforcerInterface interface {
-	// EnsureNotRevoked returns a non-nil error when the token identified by id has been revoked.
-	// An empty id is a no-op.
-	EnsureNotRevoked(ctx context.Context, id string) error
+	EnsureNotRevoked(ctx context.Context, identity RevocationIdentity) error
 }
 
 // securityService orchestrates authentication and authorization for HTTP requests.
@@ -122,10 +112,15 @@ func (s *securityService) Process(r *http.Request) (context.Context, error) {
 		ctx = withSecurityContext(ctx, securityCtx)
 
 		// Reject the request when the presented token has been revoked. This runs after successful
-		// authentication and is format-agnostic: it enforces on the token's revocation identifier. A
-		// revoked token is surfaced as an invalid token (RFC 6750 §3.1) so the response does not
+		// authentication and is format-agnostic: it enforces on the token's jti and its token family
+		// id. A revoked token is surfaced as an invalid token (RFC 6750 §3.1) so the response does not
 		// disclose that the token was specifically revoked.
-		if err := s.revocationEnforcer.EnsureNotRevoked(ctx, securityCtx.revocationID); err != nil {
+		if err := s.revocationEnforcer.EnsureNotRevoked(ctx, RevocationIdentity{
+			JTI:           securityCtx.revocationID,
+			TokenFamilyID: securityCtx.tokenFamilyID,
+			Subject:       securityCtx.revocationSubject,
+			EstablishedAt: securityCtx.establishedAt,
+		}); err != nil {
 			return s.handleAuthError(ctx, isPublic, errInvalidToken)
 		}
 	}

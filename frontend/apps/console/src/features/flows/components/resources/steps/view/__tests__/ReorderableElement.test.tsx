@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent, waitFor} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -156,6 +141,7 @@ vi.mock('@/features/flows/hooks/useUIPanelState', () => ({
 vi.mock('@/features/flows/constants/VisualFlowConstants', () => ({
   default: {
     FLOW_BUILDER_FORM_ALLOWED_RESOURCE_TYPES: ['TEXT_INPUT', 'PASSWORD_INPUT', 'BUTTON'],
+    FLOW_BUILDER_STACK_ALLOWED_RESOURCE_TYPES: ['ACTION', 'TEXT', 'DIVIDER', 'IMAGE', 'STACK'],
     FLOW_BUILDER_PLUGIN_FUNCTION_IDENTIFIER: 'uniqueName',
   },
 }));
@@ -173,9 +159,6 @@ vi.mock('../../../../dnd/Handle', () => ({
     </button>
   ),
 }));
-
-// Mock SCSS
-vi.mock('../ReorderableElement.scss', () => ({}));
 
 describe('ReorderableElement', () => {
   const mockElement: Resource = {
@@ -210,6 +193,16 @@ describe('ReorderableElement', () => {
     components: [mockTriggerButton],
     display: {label: 'Continue with Google', image: '', showOnResourcePanel: true},
   } as unknown as Resource;
+
+  const mockStackElements: Resource[] = [
+    {
+      id: 'action-button',
+      type: 'ACTION',
+      category: 'ACTION',
+      resourceType: 'ELEMENT',
+      display: {label: 'Button', image: '', showOnResourcePanel: true},
+    } as Resource,
+  ];
 
   const mockAvailableElements: Resource[] = [
     {
@@ -304,7 +297,7 @@ describe('ReorderableElement', () => {
       expect(screen.queryByTestId('handle-add field')).not.toBeInTheDocument();
     });
 
-    it('should render a persistent dashed add field button for Form elements', () => {
+    it('should not render the persistent add button, which lives inside the container', () => {
       render(
         <ReorderableElement
           id="sortable-1"
@@ -314,7 +307,72 @@ describe('ReorderableElement', () => {
         />,
       );
 
-      expect(screen.getByTestId('form-add-field-button')).toBeInTheDocument();
+      expect(screen.queryByTestId('form-add-field-button')).not.toBeInTheDocument();
+      expect(screen.getByTestId('handle-add field')).toBeInTheDocument();
+    });
+
+    it('should offer the add-component handle for Stack elements', () => {
+      const stackElement: Resource = {
+        id: 'stack-1',
+        type: 'STACK',
+        category: 'DISPLAY',
+        resourceType: 'ELEMENT',
+        components: [],
+      } as unknown as Resource;
+
+      render(
+        <ReorderableElement id="sortable-1" index={0} element={stackElement} availableElements={mockStackElements} />,
+      );
+
+      expect(screen.getByTestId('handle-add component')).toBeInTheDocument();
+      // The persistent button lives inside the stack's own container outline.
+      expect(screen.queryByTestId('form-add-field-button')).not.toBeInTheDocument();
+    });
+
+    it('should offer only stack-compatible elements inside a Stack', () => {
+      const stackElement: Resource = {
+        id: 'stack-1',
+        type: 'STACK',
+        category: 'DISPLAY',
+        resourceType: 'ELEMENT',
+        components: [],
+      } as unknown as Resource;
+
+      render(
+        <ReorderableElement
+          id="sortable-1"
+          index={0}
+          element={stackElement}
+          availableElements={[...mockAvailableElements, ...mockStackElements]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('handle-add component'));
+
+      // ACTION is stack-compatible; TEXT_INPUT is a form field and must not appear.
+      expect(screen.getByText('Button')).toBeInTheDocument();
+      expect(screen.queryByText('Text Input')).not.toBeInTheDocument();
+    });
+
+    it('should pick up an availableElements list that loads after the first render', () => {
+      // The list arrives asynchronously, so the memo must track the prop rather than
+      // a ref that only the container flags invalidate.
+      const {rerender} = render(
+        <ReorderableElement id="sortable-1" index={0} element={mockFormElement} availableElements={[]} />,
+      );
+
+      expect(screen.queryByTestId('handle-add field')).not.toBeInTheDocument();
+
+      rerender(
+        <ReorderableElement
+          id="sortable-1"
+          index={0}
+          element={mockFormElement}
+          availableElements={mockAvailableElements}
+        />,
+      );
+
+      expect(screen.getByTestId('handle-add field')).toBeInTheDocument();
     });
 
     it('should hide the selection chrome when hideChrome is set', () => {
@@ -374,21 +432,6 @@ describe('ReorderableElement', () => {
       );
 
       expect(screen.queryByTestId('form-add-field-button')).not.toBeInTheDocument();
-    });
-
-    it('should open the add field menu from the dashed add field button', () => {
-      render(
-        <ReorderableElement
-          id="sortable-1"
-          index={0}
-          element={mockFormElement}
-          availableElements={mockAvailableElements}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId('form-add-field-button'));
-
-      expect(screen.getByRole('menu')).toBeInTheDocument();
     });
 
     it('should open menu when Add Field button is clicked', () => {

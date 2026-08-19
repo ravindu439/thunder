@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package config provides structures and functions for loading and managing server configurations.
 package config
@@ -119,9 +104,17 @@ func (c *NotificationConfig) Validate() error {
 
 // OTPConfig holds the OTP generation configuration details.
 type OTPConfig struct {
-	Length                int  `yaml:"length"                  json:"length"`
-	UseNumericOnly        bool `yaml:"use_numeric_only"        json:"use_numeric_only"`
-	ValidityPeriodSeconds int  `yaml:"validity_period_seconds" json:"validity_period_seconds"`
+	Length int `yaml:"length"                  json:"length"`
+	// UseNumericOnly uses a pointer so an explicit false in deployment.yaml overrides the
+	// default.json default of true; a nil pointer means "not set" and keeps the default.
+	UseNumericOnly        *bool `yaml:"use_numeric_only"        json:"use_numeric_only"`
+	ValidityPeriodSeconds int   `yaml:"validity_period_seconds" json:"validity_period_seconds"`
+}
+
+// UsesNumericOnly reports whether OTPs use a numeric-only character set,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c OTPConfig) UsesNumericOnly() bool {
+	return derefBool(c.UseNumericOnly)
 }
 
 // Validate ensures OTP configuration values are within accepted bounds.
@@ -228,7 +221,15 @@ type OpenID4VPConfig struct {
 	ResultTokenValiditySeconds int                  `yaml:"result_token_validity_seconds" json:"result_token_validity_seconds"` //nolint:lll
 	RegistrationCertFile       string               `yaml:"registration_cert_file" json:"registration_cert_file"`
 	TrustedAnchors             []TrustedAnchorEntry `yaml:"trusted_anchors" json:"trusted_anchors"` //nolint:lll
-	EnforceKeyBinding          bool                 `yaml:"enforce_key_binding" json:"enforce_key_binding"`
+	// EnforceKeyBinding uses a pointer so an explicit false in deployment.yaml overrides the
+	// default.json default of true; a nil pointer means "not set" and keeps the default.
+	EnforceKeyBinding *bool `yaml:"enforce_key_binding" json:"enforce_key_binding"`
+}
+
+// EnforceKeyBindingEnabled reports whether a Key Binding JWT is required, defaulting to false
+// when unset (an explicit default lives in default.json).
+func (c OpenID4VPConfig) EnforceKeyBindingEnabled() bool {
+	return derefBool(c.EnforceKeyBinding)
 }
 
 // TrustedAnchorEntry is a trust anchor (root CA) whose PEM certificate roots the
@@ -262,7 +263,6 @@ type OpenID4VCIConfig struct {
 
 // AuthnProviderConfig holds the authentication provider configuration details.
 type AuthnProviderConfig struct {
-	Type string     `yaml:"type" json:"type"`
 	Rest RestConfig `yaml:"rest" json:"rest"`
 }
 
@@ -278,6 +278,9 @@ type EntityProviderConfig struct {
 
 // RestConfig holds the REST authentication provider configuration details.
 type RestConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// CredentialTypes lists the credential keys routed to the REST provider.
+	CredentialTypes     []string           `yaml:"credential_types" json:"credential_types"`
 	BaseURL             string             `yaml:"base_url" json:"base_url"`
 	Timeout             int                `yaml:"timeout" json:"timeout"`
 	CorrelationIDHeader string             `yaml:"correlation_id_header" json:"correlation_id_header"`
@@ -579,41 +582,42 @@ type LogTimeRotationConfig struct {
 
 // Config holds the complete configuration details of the server.
 type Config struct {
-	Server               engineconfig.ServerConfig        `yaml:"server"                json:"server"`
-	Log                  LogConfig                        `yaml:"log"                   json:"log"`
-	GateClient           engineconfig.GateClientConfig    `yaml:"gate_client"           json:"gate_client"`
-	TLS                  TLSConfig                        `yaml:"tls"                   json:"tls"`
-	Database             DatabaseConfig                   `yaml:"database"              json:"database"`
-	Cache                engineconfig.CacheConfig         `yaml:"cache"                 json:"cache"`
-	JWT                  engineconfig.JWTConfig           `yaml:"jwt"                   json:"jwt"`
-	OAuth                engineconfig.OAuthConfig         `yaml:"oauth"                 json:"oauth"`
-	Flow                 engineconfig.FlowConfig          `yaml:"flow"                  json:"flow"`
-	Crypto               CryptoConfig                     `yaml:"crypto"                json:"crypto"`
-	User                 UserConfig                       `yaml:"user"                  json:"user"`
-	DeclarativeResources DeclarativeResources             `yaml:"declarative_resources" json:"declarative_resources"`
-	Resource             engineconfig.ResourceConfig      `yaml:"resource"              json:"resource"`
-	OrganizationUnit     OrganizationUnitConfig           `yaml:"organization_unit"     json:"organization_unit"`
-	IdentityProvider     IdentityProviderConfig           `yaml:"identity_provider"     json:"identity_provider"`
-	Application          ApplicationConfig                `yaml:"application"           json:"application"`
-	ServerConfig         ServerConfigConfig               `yaml:"server_config" json:"server_config"`
-	Agent                AgentConfig                      `yaml:"agent"                 json:"agent"`
-	EntityType           EntityTypeConfig                 `yaml:"user_type"             json:"user_type"`
-	Observability        engineconfig.ObservabilityConfig `yaml:"observability"         json:"observability"`
-	Passkey              PasskeyConfig                    `yaml:"passkey"               json:"passkey"`
-	Attestation          AttestationConfig                `yaml:"attestation"           json:"attestation"`
-	OpenID4VP            OpenID4VPConfig                  `yaml:"openid4vp"             json:"openid4vp"`
-	OpenID4VCI           OpenID4VCIConfig                 `yaml:"openid4vci"            json:"openid4vci"`
-	AuthnProvider        AuthnProviderConfig              `yaml:"authn_provider"        json:"authn_provider"`
-	UserProvider         UserProviderConfig               `yaml:"user_provider"         json:"user_provider"`
-	EntityProvider       EntityProviderConfig             `yaml:"entity_provider"       json:"entity_provider"`
-	Group                GroupConfig                      `yaml:"group"                 json:"group"`
-	Role                 RoleConfig                       `yaml:"role"                  json:"role"`
-	Theme                ThemeConfig                      `yaml:"theme"                 json:"theme"`
-	Layout               LayoutConfig                     `yaml:"layout"                json:"layout"`
-	Translation          TranslationConfig                `yaml:"translation"           json:"translation"`
-	Email                EmailConfig                      `yaml:"email"                 json:"email"`
-	Notification         NotificationConfig               `yaml:"notification"          json:"notification"`
-	SCIM                 SCIMConfig                       `yaml:"scim"                  json:"scim"`
+	Server               engineconfig.ServerConfig         `yaml:"server"                json:"server"`
+	Log                  LogConfig                         `yaml:"log"                   json:"log"`
+	GateClient           engineconfig.GateClientConfig     `yaml:"gate_client"           json:"gate_client"`
+	TLS                  TLSConfig                         `yaml:"tls"                   json:"tls"`
+	Database             DatabaseConfig                    `yaml:"database"              json:"database"`
+	Cache                engineconfig.CacheConfig          `yaml:"cache"                 json:"cache"`
+	JWT                  engineconfig.JWTConfig            `yaml:"jwt"                   json:"jwt"`
+	OAuth                engineconfig.OAuthConfig          `yaml:"oauth"                 json:"oauth"`
+	Flow                 engineconfig.FlowConfig           `yaml:"flow"                  json:"flow"`
+	Crypto               CryptoConfig                      `yaml:"crypto"                json:"crypto"`
+	User                 UserConfig                        `yaml:"user"                  json:"user"`
+	DeclarativeResources DeclarativeResources              `yaml:"declarative_resources" json:"declarative_resources"`
+	Resource             engineconfig.ResourceConfig       `yaml:"resource"              json:"resource"`
+	OrganizationUnit     OrganizationUnitConfig            `yaml:"organization_unit"     json:"organization_unit"`
+	IdentityProvider     IdentityProviderConfig            `yaml:"identity_provider"     json:"identity_provider"`
+	Application          ApplicationConfig                 `yaml:"application"           json:"application"`
+	ServerConfig         ServerConfigConfig                `yaml:"server_config" json:"server_config"`
+	Agent                AgentConfig                       `yaml:"agent"                 json:"agent"`
+	EntityType           EntityTypeConfig                  `yaml:"user_type"             json:"user_type"`
+	Observability        engineconfig.ObservabilityConfig  `yaml:"observability"         json:"observability"`
+	Passkey              PasskeyConfig                     `yaml:"passkey"               json:"passkey"`
+	Attestation          AttestationConfig                 `yaml:"attestation"           json:"attestation"`
+	OpenID4VP            OpenID4VPConfig                   `yaml:"openid4vp"             json:"openid4vp"`
+	OpenID4VCI           OpenID4VCIConfig                  `yaml:"openid4vci"            json:"openid4vci"`
+	AuthnProvider        AuthnProviderConfig               `yaml:"authn_provider"        json:"authn_provider"`
+	UserProvider         UserProviderConfig                `yaml:"user_provider"         json:"user_provider"`
+	EntityProvider       EntityProviderConfig              `yaml:"entity_provider"       json:"entity_provider"`
+	Group                GroupConfig                       `yaml:"group"                 json:"group"`
+	SCIM                 SCIMConfig                        `yaml:"scim"                  json:"scim"`
+	Role                 RoleConfig                        `yaml:"role"                  json:"role"`
+	Theme                ThemeConfig                       `yaml:"theme"                 json:"theme"`
+	Layout               LayoutConfig                      `yaml:"layout"                json:"layout"`
+	Translation          TranslationConfig                 `yaml:"translation"           json:"translation"`
+	Email                EmailConfig                       `yaml:"email"                 json:"email"`
+	Notification         NotificationConfig                `yaml:"notification"          json:"notification"`
+	AttributeCache       engineconfig.AttributeCacheConfig `yaml:"attribute_cache" json:"attribute_cache"`
 }
 
 // LoadConfig loads the configurations from the specified YAML file and applies defaults.
@@ -705,6 +709,9 @@ func LoadConfig(configPath string, defaultPath string, serverHome string) (*Conf
 		return nil, err
 	}
 	if err := cfg.OAuth.DPoP.Validate(); err != nil {
+		return nil, err
+	}
+	if err := cfg.OAuth.TokenExchange.Validate(); err != nil {
 		return nil, err
 	}
 	if err := cfg.Notification.Validate(); err != nil {

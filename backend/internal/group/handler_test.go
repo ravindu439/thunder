@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -22,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -606,14 +592,14 @@ func (suite *GroupHandlerTestSuite) TestGroupHandler_HandleGroupPostRequest() {
 			setup: func(serviceMock *GroupServiceInterfaceMock) {
 				serviceMock.
 					On("CreateGroup", mock.Anything, mock.MatchedBy(func(request CreateGroupRequest) bool {
-						return request.Name == "Team &lt;script&gt;" &&
+						return request.Name == "Team <script>" &&
 							request.Description == "desc" &&
 							request.OUID == testOUID &&
 							len(request.Members) == 1 &&
 							request.Members[0].ID == "member-1" &&
 							request.Members[0].Type == MemberTypeUser
 					})).
-					Return(&Group{ID: "grp-001", Name: "Team &lt;script&gt;",
+					Return(&Group{ID: "grp-001", Name: "Team <script>",
 						OUID: testOUID}, nil).
 					Once()
 			},
@@ -624,7 +610,7 @@ func (suite *GroupHandlerTestSuite) TestGroupHandler_HandleGroupPostRequest() {
 				var body Group
 				require.NoError(suite.T(), json.Unmarshal(rr.Body.Bytes(), &body))
 				require.Equal(suite.T(), "grp-001", body.ID)
-				require.Equal(suite.T(), "Team &lt;script&gt;", body.Name)
+				require.Equal(suite.T(), "Team <script>", body.Name)
 			},
 		},
 		{
@@ -995,7 +981,7 @@ func (suite *GroupHandlerTestSuite) TestGroupHandler_HandleGroupPutRequest() {
 			setup: func(serviceMock *GroupServiceInterfaceMock) {
 				serviceMock.
 					On("UpdateGroup", mock.Anything, "grp-001", mock.MatchedBy(func(request UpdateGroupRequest) bool {
-						return request.Name == "team &lt;script&gt;" &&
+						return request.Name == "team <script>" &&
 							request.Description == "desc" &&
 							request.OUID == testOUID
 					})).
@@ -1170,25 +1156,6 @@ func (suite *GroupHandlerTestSuite) TestGroupHandler_HandleGroupDeleteRequest() 
 			},
 			assertService: func(serviceMock *GroupServiceInterfaceMock) {
 				serviceMock.AssertNotCalled(suite.T(), "DeleteGroup", mock.Anything, mock.Anything)
-			},
-		},
-		{
-			name:           "conflict",
-			method:         http.MethodDelete,
-			url:            "/groups/grp-001",
-			pathParamKey:   "id",
-			pathParamValue: "grp-001",
-			setup: func(serviceMock *GroupServiceInterfaceMock) {
-				serviceMock.
-					On("DeleteGroup", mock.Anything, "grp-001").
-					Return(&ErrorCannotDeleteGroup).
-					Once()
-			},
-			assert: func(rr *httptest.ResponseRecorder) {
-				require.Equal(suite.T(), http.StatusBadRequest, rr.Code)
-				var body apierror.ErrorResponse
-				require.NoError(suite.T(), json.Unmarshal(rr.Body.Bytes(), &body))
-				require.Equal(suite.T(), ErrorCannotDeleteGroup.Code, body.Code)
 			},
 		},
 		{
@@ -1710,12 +1677,12 @@ func (suite *GroupHandlerTestSuite) TestGroupHandler_HandleErrorClientError() {
 	require.Equal(t, ErrorGroupNameConflict.Code, body.Code)
 }
 
-func (suite *GroupHandlerTestSuite) TestGroupHandler_ValidationError_NameTooShort() {
+func (suite *GroupHandlerTestSuite) TestGroupHandler_ValidationError_NameTooLong() {
 	serviceMock := NewGroupServiceInterfaceMock(suite.T())
 	handler := newGroupHandler(serviceMock)
 
-	// Fails validation because the name string has a length of 2 (violates min=3)
-	body := `{"name":"ab", "ouId":"ou-001"}`
+	// Fails validation because the name string has a length of 101 (violates max=100)
+	body := fmt.Sprintf(`{"name":%q, "ouId":"ou-001"}`, strings.Repeat("a", 101))
 	req := httptest.NewRequest(http.MethodPost, "/groups", strings.NewReader(body))
 	w := httptest.NewRecorder()
 

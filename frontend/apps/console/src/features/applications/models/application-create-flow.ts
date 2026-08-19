@@ -1,38 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Application creation step identifiers used in application creation flow
@@ -41,12 +8,10 @@
  * @public
  */
 export const ApplicationCreateFlowStep = {
-  STACK: 'STACK',
-  NAME: 'NAME',
   ORGANIZATION_UNIT: 'ORGANIZATION_UNIT',
+  DETAILS: 'DETAILS',
+  SECURITY: 'SECURITY',
   DESIGN: 'DESIGN',
-  OPTIONS: 'OPTIONS',
-  EXPERIENCE: 'EXPERIENCE',
   CONFIGURE: 'CONFIGURE',
   CLIENT_TYPE: 'CLIENT_TYPE',
   COMPLETE: 'COMPLETE',
@@ -58,7 +23,7 @@ export const ApplicationCreateFlowStep = {
  * @public
  */
 export const ApplicationCreateFlowSignInApproach = {
-  INBUILT: 'INBUILT',
+  REDIRECT_BASED: 'REDIRECT_BASED',
   EMBEDDED: 'EMBEDDED',
 } as const;
 
@@ -93,3 +58,33 @@ export type ApplicationCreateFlowSignInApproach = keyof typeof ApplicationCreate
  * @public
  */
 export type ApplicationCreateFlowConfiguration = keyof typeof ApplicationCreateFlowConfiguration;
+
+/**
+ * The organization-unit-defaultable items shown in the Details step's "Use organization unit
+ * defaults" accordion.
+ *
+ * @public
+ */
+export const OrganizationUnitDefaultItem = {
+  SIGN_IN: 'signIn',
+  SIGN_UP: 'signUp',
+  RECOVERY: 'recovery',
+  SIGN_OUT: 'signOut',
+  THEME: 'theme',
+  LAYOUT: 'layout',
+} as const;
+
+/**
+ * Organization-unit-defaultable item type
+ *
+ * @public
+ */
+export type OrganizationUnitDefaultItem =
+  (typeof OrganizationUnitDefaultItem)[keyof typeof OrganizationUnitDefaultItem];
+
+/**
+ * Per-item "use the organization unit's default" selection backing the Details step's accordion.
+ *
+ * @public
+ */
+export type OrganizationUnitDefaultsSelection = Record<OrganizationUnitDefaultItem, boolean>;

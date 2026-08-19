@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package security
 
@@ -458,4 +443,216 @@ func TestGetRequiredPermissionForAPI(t *testing.T) {
 			assert.Equal(t, tt.wantPerm, svc.getRequiredPermissionForAPI(tt.method, tt.path))
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Covers
+// ---------------------------------------------------------------------------
+
+const (
+	rsSystem  = "01900000-0000-7000-8000-000000000020"
+	rsPayroll = "01900000-0000-7000-8000-0000000000aa"
+)
+
+func TestCovers(t *testing.T) {
+	InitSystemPermissions("")
+
+	tests := []struct {
+		name     string
+		actor    PermissionSet
+		required PermissionSet
+		want     bool
+	}{
+		// ---- Vacuous coverage ----
+		{
+			name:     "NilRequiredIsCovered",
+			actor:    nil,
+			required: nil,
+			want:     true,
+		},
+		{
+			name:     "EmptyRequiredIsCovered",
+			actor:    PermissionSet{},
+			required: PermissionSet{},
+			want:     true,
+		},
+		{
+			name:     "RequiredEntryWithNoPermissionsContributesNothing",
+			actor:    PermissionSet{},
+			required: PermissionSet{rsSystem: {}},
+			want:     true,
+		},
+		{
+			name:     "NilActorCannotCoverNonEmptyRequirement",
+			actor:    nil,
+			required: PermissionSet{rsSystem: {"system:user"}},
+			want:     false,
+		},
+
+		// ---- Exact and hierarchical matching within a resource server ----
+		{
+			name:     "ExactMatch",
+			actor:    PermissionSet{rsSystem: {"system:group"}},
+			required: PermissionSet{rsSystem: {"system:group"}},
+			want:     true,
+		},
+		{
+			name:     "ParentCoversChild",
+			actor:    PermissionSet{rsSystem: {"system:user"}},
+			required: PermissionSet{rsSystem: {"system:user:view"}},
+			want:     true,
+		},
+		{
+			name:     "ChildDoesNotCoverParent",
+			actor:    PermissionSet{rsSystem: {"system:user:view"}},
+			required: PermissionSet{rsSystem: {"system:user"}},
+			want:     false,
+		},
+		{
+			name:     "RootCoversEverythingBeneathIt",
+			actor:    PermissionSet{rsSystem: {"system"}},
+			required: PermissionSet{rsSystem: {"system:user", "system:group", "system:ou:view"}},
+			want:     true,
+		},
+		{
+			name:     "SiblingDoesNotCover",
+			actor:    PermissionSet{rsSystem: {"system:group"}},
+			required: PermissionSet{rsSystem: {"system:user"}},
+			want:     false,
+		},
+		{
+			name:     "PartialCoverageIsNotCoverage",
+			actor:    PermissionSet{rsSystem: {"system:group"}},
+			required: PermissionSet{rsSystem: {"system:group", "system:user"}},
+			want:     false,
+		},
+		{
+			name:     "StringPrefixIsNotScopePrefix",
+			actor:    PermissionSet{rsSystem: {"system:use"}},
+			required: PermissionSet{rsSystem: {"system:user"}},
+			want:     false,
+		},
+
+		// ---- Incomparable sets ----
+		{
+			name:     "AssistantCannotGrantLibrarian",
+			actor:    PermissionSet{rsSystem: {"system:group", "system:user:view"}},
+			required: PermissionSet{rsSystem: {"system:user", "system:group"}},
+			want:     false,
+		},
+		{
+			name:     "AssistantCanGrantWhatItAlreadyHolds",
+			actor:    PermissionSet{rsSystem: {"system:group", "system:user:view"}},
+			required: PermissionSet{rsSystem: {"system:group", "system:user:view"}},
+			want:     true,
+		},
+
+		// ---- Coverage never crosses resource servers ----
+		{
+			name:     "RootOnOneResourceServerDoesNotCoverAnother",
+			actor:    PermissionSet{rsSystem: {"system"}},
+			required: PermissionSet{rsPayroll: {"payroll:read"}},
+			want:     false,
+		},
+		{
+			name:     "IdenticalStringOnDifferentResourceServerDoesNotCover",
+			actor:    PermissionSet{rsSystem: {"system:user"}},
+			required: PermissionSet{rsPayroll: {"system:user"}},
+			want:     false,
+		},
+		{
+			name: "CoverageIsPerResourceServer",
+			actor: PermissionSet{
+				rsSystem:  {"system:group"},
+				rsPayroll: {"payroll"},
+			},
+			required: PermissionSet{
+				rsSystem:  {"system:group"},
+				rsPayroll: {"payroll:read"},
+			},
+			want: true,
+		},
+		{
+			name: "OneUncoveredResourceServerFailsTheWholeGrant",
+			actor: PermissionSet{
+				rsSystem:  {"system"},
+				rsPayroll: {"payroll:read"},
+			},
+			required: PermissionSet{
+				rsSystem:  {"system:user"},
+				rsPayroll: {"payroll:write"},
+			},
+			want: false,
+		},
+
+		// ---- Malformed requirements are never covered ----
+		{
+			name:     "EmptyRequiredPermissionStringIsNeverCovered",
+			actor:    PermissionSet{rsSystem: {"system"}},
+			required: PermissionSet{rsSystem: {""}},
+			want:     false,
+		},
+		{
+			name:     "EmptyPermissionAmongValidOnesFailsTheGrant",
+			actor:    PermissionSet{rsSystem: {"system"}},
+			required: PermissionSet{rsSystem: {"system:user", ""}},
+			want:     false,
+		},
+		{
+			name:     "EmptyResourceServerIDIsNeverCovered",
+			actor:    PermissionSet{"": {"system"}},
+			required: PermissionSet{"": {"system"}},
+			want:     false,
+		},
+
+		// ---- Extra actor permissions are harmless ----
+		{
+			name:     "ActorMayHoldMoreThanRequired",
+			actor:    PermissionSet{rsSystem: {"system:group", "system:user", "system:ou"}},
+			required: PermissionSet{rsSystem: {"system:group"}},
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, Covers(tt.actor, tt.required))
+		})
+	}
+}
+
+// TestCoversIsNotSymmetric documents that coverage is a partial order, not an equivalence:
+// incomparable sets cover each other in neither direction.
+func TestCoversIsNotSymmetric(t *testing.T) {
+	InitSystemPermissions("")
+
+	groupAdmin := PermissionSet{rsSystem: {"system:group"}}
+	userAdmin := PermissionSet{rsSystem: {"system:user"}}
+
+	assert.False(t, Covers(groupAdmin, userAdmin), "group admin must not cover user admin")
+	assert.False(t, Covers(userAdmin, groupAdmin), "user admin must not cover group admin")
+}
+
+// TestCoversHonoursConfiguredPermissionPrefix verifies that coverage is computed from the
+// permission strings themselves, so a non-empty SystemPermissionPrefix needs no special handling.
+func TestCoversHonoursConfiguredPermissionPrefix(t *testing.T) {
+	InitSystemPermissions("mgmt")
+	t.Cleanup(func() { InitSystemPermissions("") })
+
+	p := GetSystemPermissions()
+	require.Equal(t, "mgmt:system", p.Root)
+
+	assert.True(t, Covers(
+		PermissionSet{rsSystem: {p.Root}},
+		PermissionSet{rsSystem: {p.User, p.GroupView}},
+	))
+	assert.False(t, Covers(
+		PermissionSet{rsSystem: {p.UserView}},
+		PermissionSet{rsSystem: {p.User}},
+	))
+	// An unprefixed permission must not satisfy a prefixed requirement.
+	assert.False(t, Covers(
+		PermissionSet{rsSystem: {"system"}},
+		PermissionSet{rsSystem: {p.User}},
+	))
 }

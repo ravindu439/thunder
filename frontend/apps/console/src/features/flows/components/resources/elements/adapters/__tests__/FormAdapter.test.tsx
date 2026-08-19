@@ -1,29 +1,13 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen} from '@testing-library/react';
+import {render, screen, fireEvent} from '@testing-library/react';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import FormAdapter from '../FormAdapter';
 import {ElementCategories, type Element as FlowElement} from '@/features/flows/models/elements';
 
 // Mock dependencies
-vi.mock('../FormAdapter.scss', () => ({}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -87,9 +71,9 @@ describe('FormAdapter', () => {
     it('should render the form adapter with Badge', () => {
       const resource = createMockElement();
 
-      const {container} = render(<FormAdapter resource={resource} stepId="step-1" />);
+      render(<FormAdapter resource={resource} stepId="step-1" />);
 
-      expect(container.querySelector('.form-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('form-adapter')).toBeInTheDocument();
     });
 
     it('should render Badge with form label', () => {
@@ -206,17 +190,17 @@ describe('FormAdapter', () => {
     it('should work with undefined availableElements', () => {
       const resource = createMockElement();
 
-      const {container} = render(<FormAdapter resource={resource} stepId="step-1" />);
+      render(<FormAdapter resource={resource} stepId="step-1" />);
 
-      expect(container.querySelector('.form-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('form-adapter')).toBeInTheDocument();
     });
 
     it('should work with undefined onAddElementToForm', () => {
       const resource = createMockElement();
 
-      const {container} = render(<FormAdapter resource={resource} stepId="step-1" />);
+      render(<FormAdapter resource={resource} stepId="step-1" />);
 
-      expect(container.querySelector('.form-adapter')).toBeInTheDocument();
+      expect(screen.getByTestId('form-adapter')).toBeInTheDocument();
     });
   });
 
@@ -233,6 +217,50 @@ describe('FormAdapter', () => {
       // All components should render since our mock returns true
       expect(screen.getByTestId('reorderable-element-comp-1')).toBeInTheDocument();
       expect(screen.getByTestId('reorderable-element-comp-2')).toBeInTheDocument();
+    });
+  });
+
+  describe('Add field', () => {
+    const formElements = [
+      {id: 'text-input', type: 'TEXT_INPUT', display: {label: 'Text Input', showOnResourcePanel: true}},
+      {id: 'hidden', type: 'TEXT_INPUT', display: {label: 'Hidden', showOnResourcePanel: false}},
+      {id: 'captcha', type: 'CAPTCHA', display: {label: 'Captcha', showOnResourcePanel: true}},
+    ] as never[];
+
+    it('should render the add field button inside the form outline', () => {
+      render(<FormAdapter resource={createMockElement()} stepId="step-1" availableElements={formElements} />);
+
+      expect(screen.getByTestId('form-add-field-button')).toBeInTheDocument();
+    });
+
+    it('should offer only form-compatible elements shown on the resource panel', () => {
+      render(<FormAdapter resource={createMockElement()} stepId="step-1" availableElements={formElements} />);
+
+      fireEvent.click(screen.getByTestId('form-add-field-button'));
+
+      expect(screen.getByText('Text Input')).toBeInTheDocument();
+      expect(screen.queryByText('Hidden')).not.toBeInTheDocument();
+      expect(screen.queryByText('Captcha')).not.toBeInTheDocument();
+    });
+
+    it('should add the chosen field to this form', () => {
+      const onAddElementToForm = vi.fn();
+      render(
+        <FormAdapter
+          resource={createMockElement()}
+          stepId="step-1"
+          availableElements={formElements}
+          onAddElementToForm={onAddElementToForm}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('form-add-field-button'));
+      fireEvent.click(screen.getByText('Text Input'));
+
+      expect(onAddElementToForm).toHaveBeenCalledWith(
+        expect.objectContaining({type: 'TEXT_INPUT'}),
+        createMockElement().id,
+      );
     });
   });
 });

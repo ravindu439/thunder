@@ -11,8 +11,23 @@ on:
   #   - cron: '30 6 * * 5'
   workflow_dispatch:
     inputs:
+      branch:
+        description: 'Branch to build the release from'
+        required: false
+        type: string
+        default: 'release'
+      version:
+        description: 'Release version to build (e.g. v1.0.0-beta3). Overrides bump_type and use_existing_version.'
+        required: false
+        type: string
+        default: ''
+      commit_version_bump:
+        description: 'Commit the given version to version.txt, Helm chart and sample apps on the release branch'
+        required: false
+        type: boolean
+        default: false
       bump_type:
-        description: 'Version bump type to apply to version.txt (major, minor, or patch)'
+        description: 'Version bump type to apply to version.txt (major, minor, or patch). Ignored when version is given.'
         required: false
         type: choice
         options:
@@ -21,7 +36,7 @@ on:
           - major
         default: minor
       use_existing_version:
-        description: 'Use version as-is (no bump, no auto-commit)'
+        description: 'Use version.txt as-is (no bump, no auto-commit). Ignored when version is given.'
         required: false
         type: boolean
         default: false
@@ -45,9 +60,9 @@ env:
   GOFLAGS: "-mod=readonly"
   PRODUCT_NAME: "ThunderID"
   PRODUCT_NAME_LOWER: "thunderid"
-  RELEASE_BRANCH: "release"
+  RELEASE_BRANCH: ${{ inputs.branch || 'release' }}
   RELEASE_GIT_USER_NAME: "thunderid-automation-bot"
-  RELEASE_GIT_USER_EMAIL: "thunderid-bot@wso2.com"
+  RELEASE_GIT_USER_EMAIL: "thunderid-bot@thunderid.dev"
   NODE_VERSION: "lts/*"
   PNPM_VERSION: "latest"
 
@@ -59,7 +74,7 @@ jobs:
       version: ${{ steps.get_version.outputs.version }}
       prerelease: ${{ steps.get_version.outputs.prerelease }}
       run_performance_test: ${{ steps.get_version.outputs.run_performance_test }}
-      use_existing_version: ${{ steps.get_version.outputs.use_existing_version }}
+      commit_version: ${{ steps.get_version.outputs.commit_version }}
     steps:
       - name: 📥 Checkout Code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -70,56 +85,72 @@ jobs:
 
       - name: 📝 Determine Release Version
         id: get_version
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
-          # Read current version from version.txt
-          if [ ! -f version.txt ] || [ -z "$(cat version.txt | tr -d '[:space:]')" ]; then
-            echo "❌ Error: version.txt not found or empty"
-            exit 1
-          fi
-          CURRENT_VERSION=$(tr -d '[:space:]' < version.txt)
-          # Strip leading 'v' for semver parsing
-          SEMVER="${CURRENT_VERSION#v}"
-
-          if [[ $SEMVER =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
-            CUR_MAJOR="${BASH_REMATCH[1]}"
-            CUR_MINOR="${BASH_REMATCH[2]}"
-            CUR_PATCH="${BASH_REMATCH[3]}"
-          else
-            echo "❌ Error: Could not parse version '$CURRENT_VERSION' from version.txt"
-            exit 1
-          fi
-
           PRERELEASE="${{ github.event.inputs.prerelease }}"
           RUN_PERF_TEST="${{ github.event.inputs.run_performance_test }}"
           BUMP_TYPE="${{ github.event.inputs.bump_type }}"
           USE_EXISTING_VERSION="${{ github.event.inputs.use_existing_version }}"
+          COMMIT_VERSION_BUMP="${{ github.event.inputs.commit_version_bump }}"
 
-          if [ "$USE_EXISTING_VERSION" == "true" ]; then
-            VERSION="$CURRENT_VERSION"
-            echo "✅ Using existing version from version.txt: $VERSION"
+          VERSION_INPUT=$(printf '%s' "$VERSION_INPUT" | tr -d '[:space:]')
+
+          if [ -n "$VERSION_INPUT" ]; then
+            # An explicit version takes precedence over bump_type and use_existing_version
+            VERSION="$VERSION_INPUT"
+            # Accept the version with or without the leading 'v'
+            [[ $VERSION == v* ]] || VERSION="v$VERSION"
+            COMMIT_VERSION="$COMMIT_VERSION_BUMP"
+            echo "✅ Using version from workflow input: $VERSION (ignoring bump_type and use_existing_version)"
           else
-            case "$BUMP_TYPE" in
-              major)
-                VERSION="v$((CUR_MAJOR + 1)).0.0"
-                ;;
-              minor)
-                VERSION="v${CUR_MAJOR}.$((CUR_MINOR + 1)).0"
-                ;;
-              patch)
-                VERSION="v${CUR_MAJOR}.${CUR_MINOR}.$((CUR_PATCH + 1))"
-                ;;
-              *)
-                echo "❌ Error: Invalid bump_type '$BUMP_TYPE'. Must be major, minor, or patch."
-                exit 1
-                ;;
-            esac
+            # Read current version from version.txt
+            if [ ! -f version.txt ] || [ -z "$(cat version.txt | tr -d '[:space:]')" ]; then
+              echo "❌ Error: version.txt not found or empty"
+              exit 1
+            fi
+            CURRENT_VERSION=$(tr -d '[:space:]' < version.txt)
+            # Strip leading 'v' for semver parsing
+            SEMVER="${CURRENT_VERSION#v}"
+
+            if [[ $SEMVER =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+              CUR_MAJOR="${BASH_REMATCH[1]}"
+              CUR_MINOR="${BASH_REMATCH[2]}"
+              CUR_PATCH="${BASH_REMATCH[3]}"
+            else
+              echo "❌ Error: Could not parse version '$CURRENT_VERSION' from version.txt"
+              exit 1
+            fi
+
+            if [ "$USE_EXISTING_VERSION" == "true" ]; then
+              VERSION="$CURRENT_VERSION"
+              COMMIT_VERSION="false"
+              echo "✅ Using existing version from version.txt: $VERSION"
+            else
+              case "$BUMP_TYPE" in
+                major)
+                  VERSION="v$((CUR_MAJOR + 1)).0.0"
+                  ;;
+                minor)
+                  VERSION="v${CUR_MAJOR}.$((CUR_MINOR + 1)).0"
+                  ;;
+                patch)
+                  VERSION="v${CUR_MAJOR}.${CUR_MINOR}.$((CUR_PATCH + 1))"
+                  ;;
+                *)
+                  echo "❌ Error: Invalid bump_type '$BUMP_TYPE'. Must be major, minor, or patch."
+                  exit 1
+                  ;;
+              esac
+              COMMIT_VERSION="true"
+            fi
           fi
 
-          echo "✅ Selected release version: $VERSION (use_existing_version: $USE_EXISTING_VERSION, bump: $BUMP_TYPE, Prerelease: $PRERELEASE, Perf Test: $RUN_PERF_TEST)"
+          echo "✅ Selected release version: $VERSION (Commit version: $COMMIT_VERSION, Prerelease: $PRERELEASE, Perf Test: $RUN_PERF_TEST)"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "prerelease=$PRERELEASE" >> $GITHUB_OUTPUT
           echo "run_performance_test=$RUN_PERF_TEST" >> $GITHUB_OUTPUT
-          echo "use_existing_version=$USE_EXISTING_VERSION" >> $GITHUB_OUTPUT
+          echo "commit_version=$COMMIT_VERSION" >> $GITHUB_OUTPUT
 
       - name: ✅ Validate Release Version
         run: |
@@ -136,20 +167,20 @@ jobs:
           # Check if tag already exists
           if git rev-parse "$VERSION" >/dev/null 2>&1; then
             echo "❌ Error: Version '$VERSION' already exists as a git tag"
-            echo "❌ Please update version.txt with a new version before running the release"
+            echo "❌ Please pass a new 'version' input or update version.txt before running the release"
             exit 1
           fi
           echo "✅ Version '$VERSION' does not exist yet - proceeding with release"
 
       - name: 🏷️ Update Product Version
-        if: ${{ steps.get_version.outputs.use_existing_version != 'true' }}
+        if: ${{ steps.get_version.outputs.commit_version == 'true' }}
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
           echo "$VERSION" > version.txt
           echo "✅ Updated version.txt to $VERSION"
 
       - name: 📝 Update Helm and Sample App Versions
-        if: ${{ steps.get_version.outputs.use_existing_version != 'true' }}
+        if: ${{ steps.get_version.outputs.commit_version == 'true' }}
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
           SEMVER_VERSION="${VERSION#v}"
@@ -158,15 +189,6 @@ jobs:
           sed -i -E "s/^version: .*/version: ${SEMVER_VERSION}/" install/helm/Chart.yaml
           sed -i -E "s/^appVersion: .*/appVersion: \"${SEMVER_VERSION}\"/" install/helm/Chart.yaml
 
-          echo "📝 Updating OpenChoreo Helm chart versions to $SEMVER_VERSION"
-          sed -i -E "s/^version: .*/version: ${SEMVER_VERSION}/" install/openchoreo/helm/Chart.yaml
-          sed -i -E "s/^appVersion: .*/appVersion: \"${SEMVER_VERSION}\"/" install/openchoreo/helm/Chart.yaml
-          sed -i -E "s/^version: .*/version: ${SEMVER_VERSION}/" install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-oc-componenttype/Chart.yaml
-          sed -i -E "s/^version: .*/version: ${SEMVER_VERSION}/" install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-component/Chart.yaml
-          sed -i -E "s/^version: .*/version: ${SEMVER_VERSION}/" install/openchoreo/${PRODUCT_NAME_LOWER}-oc-resourcetype/Chart.yaml
-          # Update sub-chart dependency versions in the umbrella chart (indented version: entries)
-          sed -i -E "s/(^[[:space:]]+version: \")[^\"]*/\1${SEMVER_VERSION}/" install/openchoreo/helm/Chart.yaml
-
           echo "📝 Updating sample app package versions to $SEMVER_VERSION"
           cd samples/apps/react-api-based-sample
           npm version "$SEMVER_VERSION" --no-git-tag-version --allow-same-version
@@ -174,10 +196,7 @@ jobs:
           cd "$GITHUB_WORKSPACE/samples/apps/react-sdk-sample"
           npm version "$SEMVER_VERSION" --no-git-tag-version --allow-same-version
 
-          cd "$GITHUB_WORKSPACE/samples/apps/react-vanilla-sample"
-          npm version "$SEMVER_VERSION" --no-git-tag-version --allow-same-version
-
-          cd server
+          cd "$GITHUB_WORKSPACE/samples/apps/vanilla-sample"
           npm version "$SEMVER_VERSION" --no-git-tag-version --allow-same-version
 
           cd "$GITHUB_WORKSPACE/samples/apps/wayfinder-sample"
@@ -187,7 +206,7 @@ jobs:
           echo "✅ Updated Helm chart and sample app versions to $SEMVER_VERSION"
 
       - name: 📤 Commit and Push Version Bump
-        if: ${{ steps.get_version.outputs.use_existing_version != 'true' }}
+        if: ${{ steps.get_version.outputs.commit_version == 'true' }}
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
 
@@ -198,22 +217,17 @@ jobs:
             version.txt \
             README.md \
             install/helm/Chart.yaml \
-            install/openchoreo/helm/Chart.yaml \
-            install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-oc-componenttype/Chart.yaml \
-            install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-component/Chart.yaml \
-            install/openchoreo/${PRODUCT_NAME_LOWER}-oc-resourcetype/Chart.yaml \
             samples/apps/react-api-based-sample/package.json \
             samples/apps/react-sdk-sample/package.json \
-            samples/apps/react-vanilla-sample/package.json \
-            samples/apps/react-vanilla-sample/server/package.json \
+            samples/apps/vanilla-sample/package.json \
             samples/apps/wayfinder-sample/package.json
 
           if git diff --cached --quiet; then
             echo "✅ No changes to commit (files already at $VERSION)"
           else
             git commit -m "[Release] Bump version to ${VERSION}"
-            git push origin HEAD:release
-            echo "✅ Pushed version bump commit to release branch"
+            git push origin "HEAD:${RELEASE_BRANCH}"
+            echo "✅ Pushed version bump commit to ${RELEASE_BRANCH} branch"
           fi
 
       - name: ⚙️ Set up Go Environment  
@@ -279,44 +293,18 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
+      # Checks out the dispatched ref, not the release branch, so the local
+      # composite action below is read from this workflow's own revision. The
+      # action then checks out RELEASE_BRANCH to supply the test sources.
       - name: 📥 Checkout Code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ env.RELEASE_BRANCH }}
-
-      - name: ⚙️ Set up Go Environment
-        uses: ./.github/actions/setup-go
-
-      - name: 🗄️ Cache Go Modules
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        id: cache-go-modules
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-modules-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-modules-
-
-      - name: 📦 Install Dependencies
-        run: |
-          cd backend
-          go mod download
-          cd ../tests/integration
-          go mod download
-
-      - name: 📝 Configure Test Database
-        run: |
-          chmod +x tests/integration/resources/scripts/setup-test-config.sh
-          ./tests/integration/resources/scripts/setup-test-config.sh
-        env:
-          DB_TYPE: ${{ matrix.database }}
 
       - name: 🧪 Run Integration Tests (${{ matrix.database }})
         uses: ./.github/actions/run-integration-tests
         with:
           database-type: ${{ matrix.database }}
           coverage-enabled: true
+          ref: ${{ env.RELEASE_BRANCH }}
 
   validate-windows:
     name: 🪟 Validate Windows PowerShell
@@ -333,11 +321,6 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ env.RELEASE_BRANCH }}
-
-      - name: 🏷️ Update Product Version
-        run: |
-          VERSION="${{ needs.build.outputs.version }}"
-          echo "$VERSION" > version.txt
 
       - name: ⚙️ Set up Go Environment
         uses: ./.github/actions/setup-go
@@ -373,6 +356,37 @@ jobs:
 
       - name: 🔨 Build Release Artifacts
         uses: ./.github/actions/build-multiplatform
+
+      - name: 🏷️ Name Distributions After the Release Version
+        run: |
+          # The product is built from version.txt so a release candidate stays identical to
+          # its GA build; only the distribution file name carries the release version.
+          RELEASE_VERSION="${{ needs.build.outputs.version }}"
+          RELEASE_VERSION="${RELEASE_VERSION#v}"
+          BUILT_VERSION=$(tr -d '[:space:]' < version.txt)
+          BUILT_VERSION="${BUILT_VERSION#v}"
+
+          if [ "$BUILT_VERSION" == "$RELEASE_VERSION" ]; then
+            echo "✅ Distributions already carry the release version $RELEASE_VERSION"
+            exit 0
+          fi
+
+          echo "📦 Renaming distributions from $BUILT_VERSION to $RELEASE_VERSION"
+          RENAMED=0
+          for zip in target/dist/${PRODUCT_NAME_LOWER}-${BUILT_VERSION}-*.zip; do
+            [ -e "$zip" ] || continue
+            SUFFIX="${zip#target/dist/${PRODUCT_NAME_LOWER}-${BUILT_VERSION}-}"
+            mv "$zip" "target/dist/${PRODUCT_NAME_LOWER}-${RELEASE_VERSION}-${SUFFIX}"
+            echo "  ${PRODUCT_NAME_LOWER}-${BUILT_VERSION}-${SUFFIX} -> ${PRODUCT_NAME_LOWER}-${RELEASE_VERSION}-${SUFFIX}"
+            RENAMED=$((RENAMED + 1))
+          done
+
+          if [ "$RENAMED" -eq 0 ]; then
+            echo "❌ Error: no distributions matched ${PRODUCT_NAME_LOWER}-${BUILT_VERSION}-*.zip"
+            ls -l target/dist/
+            exit 1
+          fi
+          echo "✅ Renamed $RENAMED distribution(s) to $RELEASE_VERSION"
 
       - name: 📝 Read Updated Version
         id: version
@@ -476,10 +490,6 @@ jobs:
           # Update values.yaml with the new image tag
           sed -i "s/tag: \"[^\"]*\"/tag: \"${CHART_VERSION}\"/" install/helm/values.yaml
 
-          echo "📝 Updating OpenChoreo Helm values with image tag ${CHART_VERSION}"
-          sed -i "s/tag: \"[^\"]*\"/tag: \"${CHART_VERSION}\"/" install/openchoreo/helm/values.yaml
-          sed -i "s/tag: \"[^\"]*\"/tag: \"${CHART_VERSION}\"/" install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-component/values.yaml
-          
           # Verify the replacement was successful
           if ! grep -q "tag: \"${CHART_VERSION}\"" install/helm/values.yaml; then
             echo "❌ Error: Failed to update image tag in values.yaml"
@@ -532,37 +542,6 @@ jobs:
           
           echo "✅ Helm chart pushed successfully!"
           echo "📦 Helm chart available at: oci://${HELM_REGISTRY}/helm-charts"
-
-      - name: 📦 Package and Push OpenChoreo Helm Charts to GHCR
-        run: |
-          OWNER_NAME=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          HELM_REGISTRY="ghcr.io/${OWNER_NAME}/helm-charts"
-
-          CHART_VERSION="${{ needs.build.outputs.version }}"
-          if [[ $CHART_VERSION == v* ]]; then
-            CHART_VERSION="${CHART_VERSION#v}"
-          fi
-
-          mkdir -p target/dist/openchoreo
-
-          # Authenticate Helm to GHCR
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
-
-          # Package and push oc-componenttype
-          echo "📦 Packaging ${PRODUCT_NAME_LOWER}-oc-componenttype ${CHART_VERSION}"
-          helm package install/openchoreo/helm/charts/${PRODUCT_NAME_LOWER}-oc-componenttype \
-            --version "${CHART_VERSION}" --app-version "${CHART_VERSION}" \
-            --destination target/dist/openchoreo/
-          helm push "target/dist/openchoreo/${PRODUCT_NAME_LOWER}-oc-componenttype-${CHART_VERSION}.tgz" "oci://${HELM_REGISTRY}"
-          echo "✅ ${PRODUCT_NAME_LOWER}-oc-componenttype pushed to oci://${HELM_REGISTRY}"
-
-          # Package and push oc-resourcetype
-          echo "📦 Packaging ${PRODUCT_NAME_LOWER}-oc-resourcetype ${CHART_VERSION}"
-          helm package install/openchoreo/${PRODUCT_NAME_LOWER}-oc-resourcetype \
-            --version "${CHART_VERSION}" --app-version "${CHART_VERSION}" \
-            --destination target/dist/openchoreo/
-          helm push "target/dist/openchoreo/${PRODUCT_NAME_LOWER}-oc-resourcetype-${CHART_VERSION}.tgz" "oci://${HELM_REGISTRY}"
-          echo "✅ ${PRODUCT_NAME_LOWER}-oc-resourcetype pushed to oci://${HELM_REGISTRY}"
 
       - name: 📝 Calculate Next Version
         id: next_version
@@ -618,13 +597,10 @@ jobs:
           NEXT_VERSION="${{ steps.next_version.outputs.next_version }}"
           echo "📝 Setting sample apps version to $NEXT_VERSION"
 
-          for sample in react-vanilla-sample react-sdk-sample react-api-based-sample wayfinder-sample; do
+          for sample in vanilla-sample react-sdk-sample react-api-based-sample wayfinder-sample; do
             cd "$GITHUB_WORKSPACE/samples/apps/$sample"
             pnpm version "$NEXT_VERSION" --no-git-tag-version --no-git-checks --allow-same-version
           done
-
-          cd "$GITHUB_WORKSPACE/samples/apps/react-vanilla-sample/server"
-          npm version "$NEXT_VERSION" --no-git-tag-version --allow-same-version
 
           cd "$GITHUB_WORKSPACE"
           echo "✅ Updated sample apps version to $NEXT_VERSION"
@@ -847,14 +823,14 @@ jobs:
           QUICKSTART=$(echo "$QUICKSTART" | sed '/For example, if you are using a MacOS machine with a Apple Silicon (ARM64) processor, you would download `'"${PRODUCT_NAME_LOWER}-${RELEASE_VERSION}"'-macos-arm64\.zip`\./d')
           
           # Build single download links for each sample (arch-agnostic)
-          VANILLA_SAMPLE_LINK="[sample-app-react-vanilla-${RELEASE_VERSION}.zip](https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}/sample-app-react-vanilla-${RELEASE_VERSION}.zip)"
+          VANILLA_SAMPLE_LINK="[sample-app-vanilla-${RELEASE_VERSION}.zip](https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}/sample-app-vanilla-${RELEASE_VERSION}.zip)"
           SDK_SAMPLE_LINK="[sample-app-react-sdk-${RELEASE_VERSION}.zip](https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}/sample-app-react-sdk-${RELEASE_VERSION}.zip)"
           API_SAMPLE_LINK="[sample-app-react-api-based-${RELEASE_VERSION}.zip](https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}/sample-app-react-api-based-${RELEASE_VERSION}.zip)"
           WAYFINDER_SAMPLE_LINK="[sample-app-wayfinder-${RELEASE_VERSION}.zip](https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}/sample-app-wayfinder-${RELEASE_VERSION}.zip)"
 
           # Replace per-arch sample download instructions with single download links
           QUICKSTART=$(echo "$QUICKSTART" | awk -v link="$VANILLA_SAMPLE_LINK" '
-            /Download `sample-app-react-vanilla-.*` from the \[.*release\]/ {
+            /Download `sample-app-vanilla-.*` from the \[.*release\]/ {
               print "   " link
               next
             }

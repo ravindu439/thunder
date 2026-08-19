@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent, waitFor} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -78,7 +63,7 @@ describe('ConfigureFlowName', () => {
     it('should render the title', () => {
       render(<ConfigureFlowName {...defaultProps} />);
 
-      expect(screen.getByText('Name your flow')).toBeInTheDocument();
+      expect(screen.getByText("Let's collect some details about your flow")).toBeInTheDocument();
     });
 
     it('should render the name input with label', () => {
@@ -95,18 +80,10 @@ describe('ConfigureFlowName', () => {
       expect(screen.getByPlaceholderText('e.g. customer-sign-in')).toBeInTheDocument();
     });
 
-    it('should render suggestion chips', () => {
+    it('should render a name suggestion', () => {
       render(<ConfigureFlowName {...defaultProps} />);
 
-      for (const suggestion of mockSuggestions) {
-        expect(screen.getByText(suggestion)).toBeInTheDocument();
-      }
-    });
-
-    it('should render the suggestions label text', () => {
-      render(<ConfigureFlowName {...defaultProps} />);
-
-      expect(screen.getByText('Need inspiration? Try one of these:')).toBeInTheDocument();
+      expect(screen.getByText(mockSuggestions[0])).toBeInTheDocument();
     });
   });
 
@@ -156,7 +133,7 @@ describe('ConfigureFlowName', () => {
   });
 
   describe('Suggestion Chips', () => {
-    it('should set name when a suggestion chip is clicked', async () => {
+    it('should set name and derive the handle when the suggestion is clicked', async () => {
       render(<ConfigureFlowName {...defaultProps} />);
 
       fireEvent.click(screen.getByText('Cosmic Gateway'));
@@ -165,19 +142,6 @@ describe('ConfigureFlowName', () => {
         expect(mockOnChange).toHaveBeenCalledWith({
           name: 'Cosmic Gateway',
           handle: 'cosmic-gateway',
-        });
-      });
-    });
-
-    it('should derive handle from suggestion when handle was not manually edited', async () => {
-      render(<ConfigureFlowName {...defaultProps} />);
-
-      fireEvent.click(screen.getByText('Lunar Portal'));
-
-      await waitFor(() => {
-        expect(mockOnChange).toHaveBeenCalledWith({
-          name: 'Lunar Portal',
-          handle: 'lunar-portal',
         });
       });
     });

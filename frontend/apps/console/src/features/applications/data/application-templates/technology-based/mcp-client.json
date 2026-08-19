@@ -1,9 +1,17 @@
 {
   "id": "mcp-client",
+  "type": "mcp",
   "displayName": "MCP Client",
   "description": "AI application that connects to MCP servers using the Model Context Protocol",
+  "quickstarts": [
+    {
+      "label": "Python",
+      "docsUrl": "{{applications.templates.mcpClient.docs}}"
+    }
+  ],
   "creationFlow": {
-    "steps": ["NAME", "ORGANIZATION_UNIT", "CLIENT_TYPE", "COMPLETE"]
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "CLIENT_TYPE", "COMPLETE"],
+    "previewSteps": []
   },
   "defaults": {
     "name": "MCP Client Application",

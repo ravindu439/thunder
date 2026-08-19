@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package revocation
 
@@ -40,7 +25,7 @@ const testClientID = "test-client-id"
 type RevocationServiceTestSuite struct {
 	suite.Suite
 	jwtServiceMock *jwtmock.JWTServiceInterfaceMock
-	storeMock      *RevokedTokenStoreInterfaceMock
+	storeMock      *revocationStoreInterfaceMock
 	obsMock        *observabilitymock.ObservabilityServiceInterfaceMock
 	service        RevocationServiceInterface
 }
@@ -51,9 +36,9 @@ func TestRevocationServiceTestSuite(t *testing.T) {
 
 func (s *RevocationServiceTestSuite) SetupTest() {
 	s.jwtServiceMock = jwtmock.NewJWTServiceInterfaceMock(s.T())
-	s.storeMock = NewRevokedTokenStoreInterfaceMock(s.T())
+	s.storeMock = newRevocationStoreInterfaceMock(s.T())
 	s.obsMock = observabilitymock.NewObservabilityServiceInterfaceMock(s.T())
-	s.service = newRevocationService(s.jwtServiceMock, s.storeMock, s.obsMock)
+	s.service = newRevocationService(s.jwtServiceMock, s.storeMock, time.Hour, true, s.obsMock)
 }
 
 // buildToken constructs a JWT-shaped string with the given claims. DecodeJWT only base64-decodes the
@@ -74,6 +59,26 @@ func (s *RevocationServiceTestSuite) TestRevokeToken_Success() {
 	s.jwtServiceMock.On("VerifyJWTSignature", mock.Anything, token).Return(nil)
 	s.storeMock.On("InsertRevokedToken", mock.Anything, mock.MatchedBy(func(rt RevokedToken) bool {
 		return rt.JTI == "jti-123" && rt.RevocationReason == RevocationReasonExplicit
+	})).Return(nil)
+	s.obsMock.On("IsEnabled").Return(false)
+
+	revokeOutcome, err := s.service.RevokeToken(context.Background(), token, "", testClientID)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), RevokeOutcomeRevoked, revokeOutcome)
+}
+
+func (s *RevocationServiceTestSuite) TestRevokeToken_RevokesTokenFamily() {
+	token := buildToken(map[string]interface{}{
+		"jti":       "jti-fam",
+		"client_id": testClientID,
+		"tfid":      "tfid-77",
+		"exp":       float64(time.Now().Add(time.Hour).Unix()),
+	})
+	s.jwtServiceMock.On("VerifyJWTSignature", mock.Anything, token).Return(nil)
+	s.storeMock.On("InsertRevokedToken", mock.Anything, mock.Anything).Return(nil)
+	s.storeMock.On("insertCriterion", mock.Anything, mock.MatchedBy(func(c revocationCriterion) bool {
+		return c.Type == CriterionTypeTokenFamily && c.Value == "tfid-77" &&
+			c.Reason == RevocationReasonExplicitTokenFamily
 	})).Return(nil)
 	s.obsMock.On("IsEnabled").Return(false)
 
@@ -131,6 +136,30 @@ func (s *RevocationServiceTestSuite) TestRevokeToken_NotOwnedByClient() {
 	s.storeMock.AssertNotCalled(s.T(), "InsertRevokedToken", mock.Anything, mock.Anything)
 }
 
+// A refresh token carries no client_id claim (its owning client is the subject), so ownership must be
+// enforced via sub: a refresh token presented by a different client is rejected per RFC 7009 §2.1.
+func (s *RevocationServiceTestSuite) TestRevokeToken_RefreshTokenNotOwnedByClient() {
+	token := buildToken(map[string]interface{}{"jti": "rt-jti", "sub": "another-client"})
+	s.jwtServiceMock.On("VerifyJWTSignature", mock.Anything, token).Return(nil)
+
+	revokeOutcome, err := s.service.RevokeToken(context.Background(), token, "", testClientID)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), RevokeOutcomeNotOwned, revokeOutcome)
+	s.storeMock.AssertNotCalled(s.T(), "InsertRevokedToken", mock.Anything, mock.Anything)
+}
+
+// A refresh token whose subject is the authenticated client is owned by it and revoked.
+func (s *RevocationServiceTestSuite) TestRevokeToken_RefreshTokenOwnedBySubjectSucceeds() {
+	token := buildToken(map[string]interface{}{"jti": "rt-jti", "sub": testClientID})
+	s.jwtServiceMock.On("VerifyJWTSignature", mock.Anything, token).Return(nil)
+	s.storeMock.On("InsertRevokedToken", mock.Anything, mock.Anything).Return(nil)
+	s.obsMock.On("IsEnabled").Return(false)
+
+	revokeOutcome, err := s.service.RevokeToken(context.Background(), token, "", testClientID)
+	assert.NoError(s.T(), err)
+	assert.Equal(s.T(), RevokeOutcomeRevoked, revokeOutcome)
+}
+
 func (s *RevocationServiceTestSuite) TestRevokeToken_NoJtiIsNoOp() {
 	token := buildToken(map[string]interface{}{"client_id": testClientID})
 	s.jwtServiceMock.On("VerifyJWTSignature", mock.Anything, token).Return(nil)
@@ -180,4 +209,79 @@ func (s *RevocationServiceTestSuite) TestRevokeRefreshToken_StoreErrorPropagates
 
 	err := revoker.RevokeRefreshToken(context.Background(), "jti-x", time.Now().UTC())
 	assert.Error(s.T(), err)
+}
+
+func TestRevokeTokenFamily_WritesTokenFamilyCriterion(t *testing.T) {
+	store := newRevocationStoreInterfaceMock(t)
+	var captured revocationCriterion
+	store.On("insertCriterion", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			captured = args.Get(1).(revocationCriterion)
+		}).
+		Return(nil)
+
+	revoker := newRevocationService(nil, store, time.Hour, false, nil)
+	err := revoker.RevokeTokenFamily(context.Background(), "tfid-abc", RevocationReasonSessionLogout)
+
+	assert.NoError(t, err)
+	assert.Equal(t, CriterionTypeTokenFamily, captured.Type)
+	assert.Equal(t, "tfid-abc", captured.Value)
+	assert.Equal(t, RevocationReasonSessionLogout, captured.Reason)
+	assert.WithinDuration(t, captured.RevokedAt.Add(time.Hour), captured.ExpiryTime, time.Second)
+}
+
+func TestRevokeTokenFamily_EmptyIDIsNoOp(t *testing.T) {
+	store := newRevocationStoreInterfaceMock(t)
+	// No insertCriterion expectation: an empty tfid must not write.
+	revoker := newRevocationService(nil, store, time.Hour, false, nil)
+
+	err := revoker.RevokeTokenFamily(context.Background(), "", RevocationReasonSessionLogout)
+	assert.NoError(t, err)
+	store.AssertNotCalled(t, "insertCriterion", mock.Anything, mock.Anything)
+}
+
+func TestRevokeByCriteria_UsesCutoffAsRevokedAt(t *testing.T) {
+	store := newRevocationStoreInterfaceMock(t)
+	cutoff := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	store.On("insertCriterion", mock.Anything, mock.MatchedBy(func(criterion revocationCriterion) bool {
+		return criterion.Type == CriterionTypeApplicationID &&
+			criterion.Value == "app-123" &&
+			criterion.Reason == RevocationReasonApplicationSecretRegenerated &&
+			criterion.RevokedAt.Equal(cutoff)
+	})).Return(nil)
+
+	revoker := newRevocationService(nil, store, time.Hour, false, nil)
+	err := revoker.RevokeByCriteria(context.Background(), CriteriaRevocation{
+		Criterion: Criterion{Type: CriterionTypeApplicationID, Value: "app-123"},
+		Mode:      RevocationModeBeforeAction,
+		Cutoff:    cutoff,
+		Reason:    RevocationReasonApplicationSecretRegenerated,
+	})
+
+	assert.NoError(t, err)
+}
+
+func TestRevokeTokenFamily_PropagatesStoreError(t *testing.T) {
+	store := newRevocationStoreInterfaceMock(t)
+	store.On("insertCriterion", mock.Anything, mock.Anything).Return(errors.New("db down"))
+
+	revoker := newRevocationService(nil, store, time.Hour, false, nil)
+	err := revoker.RevokeTokenFamily(context.Background(), "tfid-abc", RevocationReasonRefreshReplay)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "db down")
+}
+
+func TestRevokeTokenFamily_NonPositiveTTLFallsBack(t *testing.T) {
+	store := newRevocationStoreInterfaceMock(t)
+	var captured revocationCriterion
+	store.On("insertCriterion", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			captured = args.Get(1).(revocationCriterion)
+		}).
+		Return(nil)
+
+	revoker := newRevocationService(nil, store, 0, false, nil)
+	err := revoker.RevokeTokenFamily(context.Background(), "tfid-abc", RevocationReasonCodeReplay)
+	assert.NoError(t, err)
+	assert.WithinDuration(t, captured.RevokedAt.Add(defaultTokenFamilyRevocationTTL), captured.ExpiryTime, time.Second)
 }

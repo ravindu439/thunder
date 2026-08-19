@@ -903,6 +903,86 @@ func (_c *FlowMgtServiceInterfaceMock_ListFlows_Call) RunAndReturn(run func(ctx 
 	return _c
 }
 
+// ResolveEffectiveFlowID provides a mock function for the type FlowMgtServiceInterfaceMock
+func (_mock *FlowMgtServiceInterfaceMock) ResolveEffectiveFlowID(ctx context.Context, overriddenFlowID string, ouID string, flowType providers.FlowType) (string, *common.ServiceError) {
+	ret := _mock.Called(ctx, overriddenFlowID, ouID, flowType)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResolveEffectiveFlowID")
+	}
+
+	var r0 string
+	var r1 *common.ServiceError
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, providers.FlowType) (string, *common.ServiceError)); ok {
+		return returnFunc(ctx, overriddenFlowID, ouID, flowType)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, providers.FlowType) string); ok {
+		r0 = returnFunc(ctx, overriddenFlowID, ouID, flowType)
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, providers.FlowType) *common.ServiceError); ok {
+		r1 = returnFunc(ctx, overriddenFlowID, ouID, flowType)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*common.ServiceError)
+		}
+	}
+	return r0, r1
+}
+
+// FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResolveEffectiveFlowID'
+type FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call struct {
+	*mock.Call
+}
+
+// ResolveEffectiveFlowID is a helper method to define mock.On call
+//   - ctx context.Context
+//   - overriddenFlowID string
+//   - ouID string
+//   - flowType providers.FlowType
+func (_e *FlowMgtServiceInterfaceMock_Expecter) ResolveEffectiveFlowID(ctx interface{}, overriddenFlowID interface{}, ouID interface{}, flowType interface{}) *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call {
+	return &FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call{Call: _e.mock.On("ResolveEffectiveFlowID", ctx, overriddenFlowID, ouID, flowType)}
+}
+
+func (_c *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call) Run(run func(ctx context.Context, overriddenFlowID string, ouID string, flowType providers.FlowType)) *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 providers.FlowType
+		if args[3] != nil {
+			arg3 = args[3].(providers.FlowType)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call) Return(s string, serviceError *common.ServiceError) *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call {
+	_c.Call.Return(s, serviceError)
+	return _c
+}
+
+func (_c *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call) RunAndReturn(run func(ctx context.Context, overriddenFlowID string, ouID string, flowType providers.FlowType) (string, *common.ServiceError)) *FlowMgtServiceInterfaceMock_ResolveEffectiveFlowID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RestoreFlowVersion provides a mock function for the type FlowMgtServiceInterfaceMock
 func (_mock *FlowMgtServiceInterfaceMock) RestoreFlowVersion(ctx context.Context, flowID string, version int) (*providers.CompleteFlowDefinition, *common.ServiceError) {
 	ret := _mock.Called(ctx, flowID, version)

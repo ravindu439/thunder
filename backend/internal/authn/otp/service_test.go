@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package otp
 
@@ -59,7 +44,7 @@ func (suite *OTPAuthnServiceTestSuite) SetupTest() {
 
 func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPEmptyRecipient() {
 	sessionToken, otpValue, _, err := suite.service.GenerateOTP(
-		context.Background(), "", authnprovidercm.UserAttributeUserID)
+		context.Background(), "", authnprovidercm.UserAttributeUserID, nil)
 	suite.Empty(sessionToken)
 	suite.Empty(otpValue)
 	suite.NotNil(err)
@@ -68,7 +53,7 @@ func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPEmptyRecipient() {
 
 func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPWhitespaceRecipient() {
 	sessionToken, otpValue, _, err := suite.service.GenerateOTP(
-		context.Background(), "   ", authnprovidercm.UserAttributeUserID)
+		context.Background(), "   ", authnprovidercm.UserAttributeUserID, nil)
 	suite.Empty(sessionToken)
 	suite.Empty(otpValue)
 	suite.NotNil(err)
@@ -77,20 +62,20 @@ func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPWhitespaceRecipient() {
 
 func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPDefaultsRecipientAttr() {
 	suite.mockNotifOTPSvc.On("GenerateOTP",
-		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID,
+		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID, mock.Anything,
 	).Return(testSessionToken, testOTPCode, int64(300), (*tidcommon.ServiceError)(nil)).Once()
 
-	_, _, _, err := suite.service.GenerateOTP(context.Background(), testRecipient, "")
+	_, _, _, err := suite.service.GenerateOTP(context.Background(), testRecipient, "", nil)
 	suite.Nil(err)
 }
 
 func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPSuccess() {
 	suite.mockNotifOTPSvc.On("GenerateOTP",
-		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID,
+		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID, mock.Anything,
 	).Return(testSessionToken, testOTPCode, int64(300), (*tidcommon.ServiceError)(nil)).Once()
 
 	sessionToken, otpValue, expirySeconds, err := suite.service.GenerateOTP(
-		context.Background(), testRecipient, authnprovidercm.UserAttributeUserID)
+		context.Background(), testRecipient, authnprovidercm.UserAttributeUserID, nil)
 
 	suite.Nil(err)
 	suite.Equal(testSessionToken, sessionToken)
@@ -100,11 +85,11 @@ func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPSuccess() {
 
 func (suite *OTPAuthnServiceTestSuite) TestGenerateOTPDelegatesError() {
 	suite.mockNotifOTPSvc.On("GenerateOTP",
-		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID,
+		mock.Anything, testRecipient, authnprovidercm.UserAttributeUserID, mock.Anything,
 	).Return("", "", int64(0), &tidcommon.InternalServerError).Once()
 
 	sessionToken, otpValue, _, err := suite.service.GenerateOTP(
-		context.Background(), testRecipient, authnprovidercm.UserAttributeUserID)
+		context.Background(), testRecipient, authnprovidercm.UserAttributeUserID, nil)
 
 	suite.Empty(sessionToken)
 	suite.Empty(otpValue)

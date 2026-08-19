@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
 import {fireEvent, render, screen} from '@thunderid/test-utils';
@@ -49,7 +34,7 @@ vi.mock('react-router', async () => {
 
 const buildContext = (overrides: Partial<ApplicationCreateContextType> = {}): ApplicationCreateContextType =>
   ({
-    currentStep: ApplicationCreateFlowStep.NAME,
+    currentStep: ApplicationCreateFlowStep.DETAILS,
     setCurrentStep: vi.fn(),
     appName: '',
     setAppName: vi.fn(),
@@ -143,9 +128,11 @@ describe('ApplicationTemplateSelectPage', () => {
     expect(setSelectedTechnology).toHaveBeenCalledWith(TechnologyApplicationTemplate.REACT);
     expect(setSelectedPlatform).toHaveBeenCalledWith(null);
     expect(setSelectedTemplateConfig).toHaveBeenCalled();
-    // React uses the default flow whose first step is NAME.
-    expect(setCurrentStep).toHaveBeenCalledWith(ApplicationCreateFlowStep.NAME);
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`);
+    // React uses the default flow whose first step is ORGANIZATION_UNIT.
+    expect(setCurrentStep).toHaveBeenCalledWith(ApplicationCreateFlowStep.ORGANIZATION_UNIT);
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`, {
+      replace: false,
+    });
   });
 
   it('seeds a platform template and clears technology when a platform card is clicked', async () => {
@@ -159,10 +146,12 @@ describe('ApplicationTemplateSelectPage', () => {
 
     expect(setSelectedPlatform).toHaveBeenCalledWith(PlatformApplicationTemplate.BACKEND);
     expect(setSelectedTechnology).toHaveBeenCalledWith(null);
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${PlatformApplicationTemplate.BACKEND}`);
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${PlatformApplicationTemplate.BACKEND}`, {
+      replace: false,
+    });
   });
 
-  it('advances to NAME first for the MCP client template', async () => {
+  it('advances to ORGANIZATION_UNIT first for the MCP client template', async () => {
     const user = userEvent.setup();
     const setCurrentStep = vi.fn();
 
@@ -170,9 +159,11 @@ describe('ApplicationTemplateSelectPage', () => {
 
     await user.click(screen.getByTestId(`template-card-${TechnologyApplicationTemplate.MCP_CLIENT}`));
 
-    // mcp-client flow: NAME → ORGANIZATION_UNIT → CLIENT_TYPE → COMPLETE; first step is NAME.
-    expect(setCurrentStep).toHaveBeenCalledWith(ApplicationCreateFlowStep.NAME);
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.MCP_CLIENT}`);
+    // mcp-client flow: ORGANIZATION_UNIT → DETAILS → CLIENT_TYPE → COMPLETE; first step is ORGANIZATION_UNIT.
+    expect(setCurrentStep).toHaveBeenCalledWith(ApplicationCreateFlowStep.ORGANIZATION_UNIT);
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.MCP_CLIENT}`, {
+      replace: false,
+    });
   });
 
   it('navigates back to the Get Started page when in the welcome flow', () => {
@@ -192,6 +183,7 @@ describe('ApplicationTemplateSelectPage', () => {
 
     expect(mockNavigate).toHaveBeenCalledWith(
       `/welcome/get-started/applications/create?type=${TechnologyApplicationTemplate.REACT}`,
+      {replace: false},
     );
   });
 
@@ -209,7 +201,9 @@ describe('ApplicationTemplateSelectPage', () => {
     fireEvent.keyDown(screen.getByTestId(`template-card-${TechnologyApplicationTemplate.REACT}`), {key: 'Enter'});
 
     expect(setSelectedTechnology).toHaveBeenCalledWith(TechnologyApplicationTemplate.REACT);
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`);
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`, {
+      replace: false,
+    });
   });
 
   it('selects a template when Space is pressed on a card', () => {
@@ -220,7 +214,9 @@ describe('ApplicationTemplateSelectPage', () => {
     fireEvent.keyDown(screen.getByTestId(`template-card-${TechnologyApplicationTemplate.REACT}`), {key: ' '});
 
     expect(setSelectedTechnology).toHaveBeenCalledWith(TechnologyApplicationTemplate.REACT);
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`);
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`, {
+      replace: false,
+    });
   });
 
   it('ignores keys other than Enter and Space', () => {
@@ -242,7 +238,20 @@ describe('ApplicationTemplateSelectPage', () => {
     await vi.waitFor(() => {
       expect(setSelectedTechnology).toHaveBeenCalledWith(TechnologyApplicationTemplate.REACT);
     });
-    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`);
+    // Replaces the pass-through gallery entry so going back from the wizard reaches the entry
+    // point rather than bouncing forward again.
+    expect(mockNavigate).toHaveBeenCalledWith(`/applications/create?type=${TechnologyApplicationTemplate.REACT}`, {
+      replace: true,
+    });
+  });
+
+  it('does not render the template gallery while passing through on a deep link', () => {
+    mockSearchParams = new URLSearchParams({type: TechnologyApplicationTemplate.REACT});
+
+    renderPage();
+
+    expect(screen.queryByRole('heading', {name: 'Choose a type'})).not.toBeInTheDocument();
+    expect(screen.queryByTestId(`template-card-${TechnologyApplicationTemplate.REACT}`)).not.toBeInTheDocument();
   });
 
   it('ignores an unknown type query param', () => {

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package model
 
@@ -46,6 +31,7 @@ type property interface {
 	isCredential() bool
 	isDisplayable() bool
 	isUnique() bool
+	getType() string
 	getDisplayName() string
 	validateValue(ctx context.Context, value interface{}, path string, logger *log.Logger) (bool, error)
 	validateUniqueness(ctx context.Context, value interface{}, path string,
@@ -120,31 +106,51 @@ func (cs *Schema) ValidateAsDisplayAttribute(name string) DisplayAttributeStatus
 type AttributeInfo struct {
 	Attribute   string
 	DisplayName string
+	Type        string
 	Required    bool
 	Credential  bool
+	Unique      bool
 }
 
-// GetAttributes returns top-level properties filtered by the provided flags.
-// allowCredential includes credential properties; allowNonCredential includes non-credential
-// properties. When requiredOnly is true, only required properties are included.
-func (cs *Schema) GetAttributes(allowCredential, allowNonCredential, requiredOnly bool) []AttributeInfo {
+// AttributeFilter selects top-level schema properties by their characteristics. Credential and
+// non-credential properties are included independently via AllowCredential / AllowNonCredential.
+// RequiredOnly and UniqueOnly further restrict the result to required / unique properties, and Type
+// (when non-empty) restricts to properties of that type (e.g. "string").
+type AttributeFilter struct {
+	AllowCredential    bool
+	AllowNonCredential bool
+	RequiredOnly       bool
+	UniqueOnly         bool
+	Type               string
+}
+
+// GetAttributes returns top-level properties matching the given filter.
+func (cs *Schema) GetAttributes(filter AttributeFilter) []AttributeInfo {
 	result := make([]AttributeInfo, 0, len(cs.properties))
 	for attr, prop := range cs.properties {
 		isCredential := prop.isCredential()
-		if isCredential && !allowCredential {
+		if isCredential && !filter.AllowCredential {
 			continue
 		}
-		if !isCredential && !allowNonCredential {
+		if !isCredential && !filter.AllowNonCredential {
 			continue
 		}
-		if requiredOnly && !prop.isRequired() {
+		if filter.RequiredOnly && !prop.isRequired() {
+			continue
+		}
+		if filter.UniqueOnly && !prop.isUnique() {
+			continue
+		}
+		if filter.Type != "" && prop.getType() != filter.Type {
 			continue
 		}
 		result = append(result, AttributeInfo{
 			Attribute:   attr,
 			DisplayName: prop.getDisplayName(),
+			Type:        prop.getType(),
 			Required:    prop.isRequired(),
 			Credential:  isCredential,
+			Unique:      prop.isUnique(),
 		})
 	}
 	return result

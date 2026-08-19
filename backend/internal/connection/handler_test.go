@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package connection
 
@@ -621,4 +606,53 @@ func (s *SMSHandlerTestSuite) TestDeleteSuccess() {
 	rr := httptest.NewRecorder()
 	s.handler.deleteSMSInstance(stubProvider)(rr, req)
 	s.Equal(http.StatusNoContent, rr.Code)
+}
+
+func (s *SMSHandlerTestSuite) TestUsagesEmptyID() {
+	req := httptest.NewRequest(http.MethodGet, "/connections/twilio//usages", nil)
+	rr := httptest.NewRecorder()
+	s.handler.usagesSMSInstance(stubProvider)(rr, req)
+	s.Equal(http.StatusBadRequest, rr.Code)
+	s.mockNotif.AssertNotCalled(s.T(), "GetSenderUsages", mock.Anything, mock.Anything)
+}
+
+func (s *SMSHandlerTestSuite) TestUsagesServiceError() {
+	s.mockNotif.On("GetSender", mock.Anything, "missing").
+		Return((*ncommon.NotificationSenderDTO)(nil), &notification.ErrorSenderNotFound)
+
+	req := httptest.NewRequest(http.MethodGet, "/connections/twilio/missing/usages", nil)
+	req.SetPathValue("id", "missing")
+	rr := httptest.NewRecorder()
+	s.handler.usagesSMSInstance(stubProvider)(rr, req)
+	s.Equal(http.StatusNotFound, rr.Code)
+}
+
+func (s *SMSHandlerTestSuite) TestUsagesSuccess() {
+	total := 1
+	usages := &resourcedependency.DependenciesResponse{
+		TotalResults: &total,
+		Count:        1,
+		Summary:      map[string]int{"flow": 1},
+		Usages: []resourcedependency.ResourceDependency{
+			{ResourceType: "flow", ID: "flow-1", DisplayName: "SMS OTP", BehaviorOnDelete: "restrict"},
+		},
+	}
+	s.mockNotif.On("GetSender", mock.Anything, "tw-1").Return(&ncommon.NotificationSenderDTO{
+		ID: "tw-1", Type: ncommon.NotificationSenderTypeMessage, Provider: stubProvider,
+	}, (*tidcommon.ServiceError)(nil))
+	s.mockNotif.On("GetSenderUsages", mock.Anything, "tw-1").Return(usages, (*tidcommon.ServiceError)(nil))
+
+	req := httptest.NewRequest(http.MethodGet, "/connections/twilio/tw-1/usages", nil)
+	req.SetPathValue("id", "tw-1")
+	rr := httptest.NewRecorder()
+	s.handler.usagesSMSInstance(stubProvider)(rr, req)
+
+	s.Equal(http.StatusOK, rr.Code)
+	var resp resourcedependency.DependenciesResponse
+	s.Require().NoError(json.NewDecoder(rr.Body).Decode(&resp))
+	s.Require().NotNil(resp.TotalResults)
+	s.Equal(1, *resp.TotalResults)
+	s.Require().Len(resp.Usages, 1)
+	s.Equal("flow-1", resp.Usages[0].ID)
+	s.Equal("restrict", resp.Usages[0].BehaviorOnDelete)
 }

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {cn} from '@thunderid/utils';
 import {ColorSchemeImage, Stack, Typography} from '@wso2/oxygen-ui';
@@ -28,23 +13,24 @@ const items: {
 }[] = [
   {
     icon: <Bot className="text-muted-foreground" />,
-    title: 'Native Agent Identity',
-    description: 'Engineered with native Agent ID to secure end-to-end workflows among humans, agents, and resources.',
+    title: 'Agent-native Identity',
+    description:
+      'Engineered with native Agent ID to secure end-to-end workflows among humans, AI agents, and machines.',
   },
   {
     icon: <Wallet className="text-muted-foreground" />,
-    title: 'Verifiable Credentials',
+    title: 'Decentralized Identity',
     description:
-      'Standards-based issuance and verification of wallet-held digital credentials for user-controlled identity.',
+      'Standards-based support for DIDs, verifiable credentials, and digital wallets for user-controlled identity.',
   },
   {
     icon: <ShieldCheck className="text-muted-foreground" />,
-    title: 'Post-Quantum Ready',
+    title: 'Post-quantum-safe by Design',
     description: 'Built on a post-quantum cryptographic foundation to be inherently resistant to attacks by design.',
   },
   {
     icon: <Zap className="text-muted-foreground" />,
-    title: 'Lightweight, High-Performant Runtime',
+    title: 'Lightweight Runtime with GitOps Support',
     description:
       'Cloud-native, API-first runtime that integrates into modern CI/CD, GitOps, and containerized workflows.',
   },

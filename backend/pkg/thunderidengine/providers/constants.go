@@ -1,25 +1,13 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package providers provides constants for the providers module.
 package providers
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // IDPType represents the type of an identity provider.
 type IDPType string
@@ -57,6 +45,8 @@ const (
 	FlowTypeRecovery FlowType = "RECOVERY"
 	// FlowTypeSignOut represents a flow execution for terminating an SSO session.
 	FlowTypeSignOut FlowType = "SIGNOUT"
+	// FlowTypeAdministration represents an administrator-designed operational flow.
+	FlowTypeAdministration FlowType = "ADMINISTRATION"
 )
 
 // ValidFlowTypes is the set of supported flow types.
@@ -66,6 +56,7 @@ var ValidFlowTypes = []FlowType{
 	FlowTypeUserOnboarding,
 	FlowTypeRecovery,
 	FlowTypeSignOut,
+	FlowTypeAdministration,
 }
 
 // NodeVariant identifies a PROMPT node sub-type that activates a variant-specific code path.
@@ -194,6 +185,24 @@ func (gt GrantType) IsValid() bool {
 	return false
 }
 
+// refreshTokenIssuingGrantTypes lists the grant types that can issue a refresh token.
+var refreshTokenIssuingGrantTypes = []GrantType{
+	GrantTypeAuthorizationCode,
+	GrantTypeCIBA,
+}
+
+// IssuesRefreshToken reports whether this grant type can issue a refresh token.
+func (gt GrantType) IssuesRefreshToken() bool {
+	return slices.Contains(refreshTokenIssuingGrantTypes, gt)
+}
+
+// AnyIssuesRefreshToken reports whether any of the given grant types can issue a refresh token.
+func AnyIssuesRefreshToken(grantTypes []string) bool {
+	return slices.ContainsFunc(grantTypes, func(gt string) bool {
+		return GrantType(gt).IssuesRefreshToken()
+	})
+}
+
 // SupportedResponseTypes lists all the supported response types.
 var SupportedResponseTypes = []ResponseType{
 	ResponseTypeCode,
@@ -317,6 +326,17 @@ const (
 	ConsentTypeAuthentication ConsentType = "AUTHENTICATION"
 )
 
+// ConsentDecisionReason defines the possible reasons a consent decision was submitted.
+type ConsentDecisionReason string
+
+const (
+	// ConsentDecisionReasonTimeout marks decisions submitted because the consent prompt expired
+	// rather than because the user chose anything.
+	ConsentDecisionReasonTimeout ConsentDecisionReason = "timeout"
+	// ConsentDecisionReasonUserDenied marks decisions submitted because the user denied the prompt.
+	ConsentDecisionReasonUserDenied ConsentDecisionReason = "user_denied"
+)
+
 // Namespace represents the consent namespace to scope consent elements and purposes.
 type Namespace string
 
@@ -378,6 +398,8 @@ const (
 	InputTypeNumber = "NUMBER_INPUT"
 	// InputTypeDate represents a date input type.
 	InputTypeDate = "DATE_INPUT"
+	// InputTypeBoolean represents a boolean (checkbox) input type.
+	InputTypeBoolean = "BOOLEAN_INPUT"
 
 	// TODO: Add support for other sensitive input types:
 	// - Passkey credential fields (credentialId, clientDataJSON, authenticatorData, signature, userHandle)
@@ -399,6 +421,7 @@ var ValidInputTypes = map[string]bool{
 	InputTypeOUSelect: true,
 	InputTypeNumber:   true,
 	InputTypeDate:     true,
+	InputTypeBoolean:  true,
 }
 
 // ExecutorType defines the type of an executor in the flow execution.
@@ -505,10 +528,43 @@ const (
 	NamespaceVCINonce       RuntimeStoreNamespace = "vci:nonce"
 	NamespaceVCIOffer       RuntimeStoreNamespace = "vci:offer"
 	NamespaceVPState        RuntimeStoreNamespace = "vp:state"
+	NamespaceWebAuthn       RuntimeStoreNamespace = "webauthn:session"
 )
 
 // Error constants
 var (
 	// ErrRuntimeStoreKeyNotFound to identify key not found error in the runtime store providers
 	ErrRuntimeStoreKeyNotFound = errors.New("RuntimeStore key not found")
+)
+
+// Runtime crypto provider errors
+var (
+	// ErrKeyNotFound indicates that no key managed by the provider matches the
+	// requested identifier.
+	ErrKeyNotFound = errors.New("RuntimeCryptoProvider: no key found matching the requested identifier")
+
+	// ErrUnsupportedAlgorithm indicates the requested signature algorithm is not
+	// supported by the provider or is incompatible with the resolved key.
+	ErrUnsupportedAlgorithm = errors.New("RuntimeCryptoProvider: unsupported signature algorithm")
+)
+
+// Runtime crypto provider Encrypt/Decrypt param map keys. These identify the algorithm-specific
+// inputs a caller may pass via the params map (e.g. ECDH-ES key establishment).
+const (
+	// ParamContentEncryptionAlgorithm is the content encryption algorithm identifier (e.g. "A128GCM"),
+	// used to size the CEK for RSA-OAEP, RSA-OAEP-256, and ECDH-ES variants. Value type: string.
+	ParamContentEncryptionAlgorithm = "contentEncryptionAlgorithm"
+
+	// ParamKeyEncryptionAlgorithm
+	ParamKeyEncryptionAlgorithm = "contentKeyAlgorithm"
+
+	// ParamEPK is the ECDH-ES ephemeral public key. Required for ECDH-ES decrypt; populated by the
+	// provider on ECDH-ES encrypt. Value type: crypto.PublicKey.
+	ParamEPK = "epk"
+
+	// ParamAPU is the raw (already base64url-decoded) ECDH-ES apu header value. Value type: []byte.
+	ParamAPU = "apu"
+
+	// ParamAPV is the raw (already base64url-decoded) ECDH-ES apv header value. Value type: []byte.
+	ParamAPV = "apv"
 )

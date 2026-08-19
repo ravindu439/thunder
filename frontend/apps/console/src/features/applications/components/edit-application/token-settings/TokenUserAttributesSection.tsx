@@ -1,22 +1,8 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
+import type {IDTokenResponseType, UserInfoResponseType} from '@thunderid/configure-applications';
 import {
   Box,
   Stack,
@@ -35,12 +21,17 @@ import {
   FormControl,
   FormLabel,
   Divider,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
 } from '@wso2/oxygen-ui';
+import {ChevronDown} from '@wso2/oxygen-ui-icons-react';
 import type React from 'react';
+import type {ReactNode} from 'react';
+import {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import JwtPreview from './JwtPreview';
 import TokenConstants from '../../../constants/token-constants';
-import type {IDTokenResponseType, UserInfoResponseType} from '../../../models/oauth';
 
 /**
  * Props for the {@link TokenUserAttributesSection} component.
@@ -115,6 +106,21 @@ interface TokenUserAttributesSectionProps {
    */
   disabled?: boolean;
   /**
+   * The algorithm the deployment signs tokens with, from the OIDC discovery document. Shown
+   * read-only because signing always uses the server key and is not a per-application choice.
+   */
+  signingAlg?: string;
+  /**
+   * Whether an OAuth client certificate is configured on the application. Encrypted response
+   * formats (JWE, NESTED_JWT) require one, so they are disabled in the format dropdowns when false.
+   */
+  hasCertificate?: boolean;
+  /**
+   * Name of the tab where the OAuth client certificate is configured, used in the
+   * certificate-required hint. Applications use "Advanced"; agents use "Credentials".
+   */
+  certificateLocation?: string;
+  /**
    * Current ID token response type (OAuth mode)
    */
   idTokenResponseType?: IDTokenResponseType;
@@ -134,10 +140,6 @@ interface TokenUserAttributesSectionProps {
    * Current UserInfo response type (OAuth mode)
    */
   userInfoResponseType?: UserInfoResponseType;
-  /**
-   * Current UserInfo signing algorithm (OAuth mode)
-   */
-  userInfoSigningAlg?: string;
   /**
    * Current UserInfo encryption key-management algorithm (OAuth mode)
    */
@@ -162,6 +164,16 @@ interface TokenUserAttributesSectionProps {
    * in to `IncludeActClaim`, which isn't exposed in this UI, so they default to false.
    */
   showActorClaim?: boolean;
+  /**
+   * Value shown for `act.sub` in the actor claim preview (the acting agent's ID).
+   */
+  actorSub?: string;
+  /**
+   * Scope-to-claims mapping UI, rendered once beneath the ID Token and User Info tab panels.
+   * The mapping feeds both, so it is a single shared instance rather than a copy per tab, and it
+   * is not shown on the Access Token tab, whose attributes are not scope-driven.
+   */
+  scopeMapping?: ReactNode;
 }
 
 /**
@@ -196,21 +208,49 @@ export default function TokenUserAttributesSection({
   sharedAttributes = undefined,
   entityLabel = 'application',
   disabled = false,
+  signingAlg = undefined,
+  hasCertificate = false,
+  certificateLocation = 'Advanced',
   idTokenResponseType = undefined,
   idTokenEncryptionAlg = undefined,
   idTokenEncryptionEnc = undefined,
   onIdTokenConfigChange = undefined,
   userInfoResponseType = undefined,
-  userInfoSigningAlg = undefined,
   userInfoEncryptionAlg = undefined,
   userInfoEncryptionEnc = undefined,
   onUserInfoConfigChange = undefined,
   showUserInfoTab = true,
   showActorClaim = false,
+  actorSub = '<agent-id>',
+  scopeMapping = undefined,
 }: TokenUserAttributesSectionProps) {
   const {t} = useTranslation();
+  // Which of the two sinks the combined tab was last showing, so switching away to Access Token
+  // and back returns to the same one.
+  const [lastUserSinkTab, setLastUserSinkTab] = useState<'id' | 'userinfo'>('id');
 
   const isOAuthMode = accessTokenAttributes !== undefined;
+
+  /**
+   * Friendly label and one-line description for a response-format value. The dropdown values are
+   * the raw JOSE format identifiers sent to the backend; these translations make them readable.
+   * Signing is always done with the server's signing key, so there is no signing-algorithm choice.
+   */
+  const responseTypeOption = (
+    section: 'id_token' | 'user_info',
+    value: string,
+  ): {label: string; description: string} => ({
+    label: t(`applications:edit.token.${section}.response_type_options.${value}.label`, value),
+    description: t(`applications:edit.token.${section}.response_type_options.${value}.description`, ''),
+  });
+
+  const isEncryptedFormat = (value?: string): boolean => value === 'JWE' || value === 'NESTED_JWT';
+
+  // Placeholder shown in previews and the read-only signing line until discovery resolves.
+  const signingAlgDisplay = signingAlg ?? '<server_key_alg>';
+
+  // Encrypted formats need a client certificate, so disable them when none is configured.
+  const isFormatOptionDisabled = (value: string): boolean => isEncryptedFormat(value) && !hasCertificate;
 
   /**
    * Build the JWT/JSON preview object for a given token type.
@@ -242,9 +282,9 @@ export default function TokenUserAttributesSection({
     }
 
     // The backend always adds this claim to access tokens an agent uses to act on
-    // behalf of a user (see OAuthClient.ShouldAppendActorClaim in the backend).
+    // behalf of a user, identifying the acting agent by its ID.
     if (tokenType === 'access' && showActorClaim) {
-      preview.act = {sub: '<agent-id>', iss: '<issuer>'};
+      preview.act = {sub: actorSub};
     }
 
     return preview;
@@ -256,7 +296,7 @@ export default function TokenUserAttributesSection({
   const buildIdTokenHeader = (): Record<string, string> | undefined => {
     const responseType = idTokenResponseType ?? 'JWT';
     if (responseType === 'JWT') {
-      return {alg: 'RS256', kid: '<key_id>', typ: 'JWT'};
+      return {alg: signingAlgDisplay, kid: '<key_id>', typ: 'JWT'};
     }
     if (responseType === 'JWE') {
       return {
@@ -283,7 +323,7 @@ export default function TokenUserAttributesSection({
     const responseType = userInfoResponseType ?? 'JSON';
     if (responseType === 'JSON') return undefined;
     if (responseType === 'JWS') {
-      return {alg: userInfoSigningAlg ?? '<signing_alg>', kid: '<key_id>', typ: 'JWT'};
+      return {alg: signingAlgDisplay, kid: '<key_id>', typ: 'JWT'};
     }
     if (responseType === 'JWE') {
       return {
@@ -311,9 +351,89 @@ export default function TokenUserAttributesSection({
       tokenType === 'userinfo' ? TokenConstants.USER_INFO_DEFAULT_ATTRIBUTES : TokenConstants.DEFAULT_TOKEN_ATTRIBUTES;
     const isPendingTab = tokenType === 'shared' || activeTab === tokenType;
 
+    // Include already selected attributes so ones dropped from the schema stay visible and removable.
     const availableAttributes = Array.from(
-      new Set([...userAttributes, ...TokenConstants.ADDITIONAL_USER_ATTRIBUTES]),
+      new Set([...userAttributes, ...TokenConstants.ADDITIONAL_USER_ATTRIBUTES, ...currentAttrs]),
     ).filter((attr) => !(defaultAttrs as readonly string[]).includes(attr));
+
+    // On the ID Token and User Info tabs the scope mapping below is the primary control, so the
+    // attribute allow-list is collapsed behind a disclosure. The access token has no scope mapping,
+    // so its picker stays open.
+    const isCollapsible = tokenType === 'id' || tokenType === 'userinfo';
+
+    const attributeCard = (
+      <Card>
+        <CardContent>
+          {isLoadingUserAttributes && (
+            <Typography variant="body2" color="text.secondary">
+              {t('applications:edit.token.loading_attributes', 'Loading user attributes...')}
+            </Typography>
+          )}
+          {!isLoadingUserAttributes && (userAttributes.length > 0 || currentAttrs.length > 0) && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {availableAttributes.sort().map((attr) => {
+                const isAdded = currentAttrs.includes(attr);
+                const isPendingAddition = pendingAdditions.has(attr) && isPendingTab;
+                const isPendingRemoval = pendingRemovals.has(attr) && isPendingTab;
+                const isHighlighted = highlightedAttributes.has(attr);
+                const isActive = (isAdded && !isPendingRemoval) || isPendingAddition;
+
+                return (
+                  <Chip
+                    key={attr}
+                    label={attr}
+                    size="small"
+                    variant={isActive ? 'filled' : 'outlined'}
+                    color={isActive ? 'primary' : 'default'}
+                    onClick={disabled ? undefined : () => onAttributeClick(attr, tokenType)}
+                    sx={{
+                      cursor: 'pointer',
+                      transition: 'all 0.3s ease',
+                      transform: isHighlighted ? 'scale(1.05)' : 'scale(1)',
+                      boxShadow: isHighlighted ? '0 0 0 2px rgba(25, 118, 210, 0.4)' : 'none',
+                      '&:hover': isActive ? {backgroundColor: 'primary.dark'} : {backgroundColor: 'action.hover'},
+                    }}
+                  />
+                );
+              })}
+            </Stack>
+          )}
+          {!isLoadingUserAttributes && userAttributes.length === 0 && (
+            <Alert severity="info">
+              {t(
+                'applications:edit.token.no_user_attributes',
+                'No user attributes available. Configure allowed user types for this {{entity}}.',
+                {entity: entityLabel},
+              )}
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    );
+
+    // Accordion rather than a bare button: it carries the aria-expanded/aria-controls semantics of
+    // a disclosure for free. Its card chrome is stripped since this already sits inside a card.
+    if (isCollapsible) {
+      return (
+        <Accordion
+          disableGutters
+          square
+          sx={{bgcolor: 'transparent', boxShadow: 'none', '&:before': {display: 'none'}}}
+        >
+          <AccordionSummary
+            expandIcon={<ChevronDown size={16} />}
+            sx={{px: 0, minHeight: 'auto', '& .MuiAccordionSummary-content': {my: 1}}}
+          >
+            <Typography variant="body2">
+              {t('applications:edit.token.configure_attributes.toggle', 'Allowed Attributes ({{count}})', {
+                count: currentAttrs.length,
+              })}
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{px: 0, pt: 0}}>{attributeCard}</AccordionDetails>
+        </Accordion>
+      );
+    }
 
     return (
       <Box>
@@ -321,59 +441,9 @@ export default function TokenUserAttributesSection({
           {t('applications:edit.token.configure_attributes', 'Add or Remove Attributes')}
         </Typography>
         <Typography variant="body2" color="text.disabled" sx={{mb: 2}}>
-          {t(
-            'applications:edit.token.configure_attributes.hint',
-            'Click on user attributes to add them to your token.',
-          )}
+          {t('applications:edit.token.configure_attributes.hint', 'Click on user attributes to add them to the token.')}
         </Typography>
-
-        <Card>
-          <CardContent>
-            {isLoadingUserAttributes && (
-              <Typography variant="body2" color="text.secondary">
-                {t('applications:edit.token.loading_attributes', 'Loading user attributes...')}
-              </Typography>
-            )}
-            {!isLoadingUserAttributes && userAttributes.length > 0 && (
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {availableAttributes.sort().map((attr) => {
-                  const isAdded = currentAttrs.includes(attr);
-                  const isPendingAddition = pendingAdditions.has(attr) && isPendingTab;
-                  const isPendingRemoval = pendingRemovals.has(attr) && isPendingTab;
-                  const isHighlighted = highlightedAttributes.has(attr);
-                  const isActive = (isAdded && !isPendingRemoval) || isPendingAddition;
-
-                  return (
-                    <Chip
-                      key={attr}
-                      label={attr}
-                      size="small"
-                      variant={isActive ? 'filled' : 'outlined'}
-                      color={isActive ? 'primary' : 'default'}
-                      onClick={disabled ? undefined : () => onAttributeClick(attr, tokenType)}
-                      sx={{
-                        cursor: 'pointer',
-                        transition: 'all 0.3s ease',
-                        transform: isHighlighted ? 'scale(1.05)' : 'scale(1)',
-                        boxShadow: isHighlighted ? '0 0 0 2px rgba(25, 118, 210, 0.4)' : 'none',
-                        '&:hover': isActive ? {backgroundColor: 'primary.dark'} : {backgroundColor: 'action.hover'},
-                      }}
-                    />
-                  );
-                })}
-              </Stack>
-            )}
-            {!isLoadingUserAttributes && userAttributes.length === 0 && (
-              <Alert severity="info">
-                {t(
-                  'applications:edit.token.no_user_attributes',
-                  'No user attributes available. Configure allowed user types for this {{entity}}.',
-                  {entity: entityLabel},
-                )}
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
+        {attributeCard}
       </Box>
     );
   };
@@ -388,8 +458,8 @@ export default function TokenUserAttributesSection({
 
     return (
       <Grid container spacing={3}>
-        <Grid size={{xs: 12, md: 7}}>{renderAttributeChips(currentAttrs, tokenType)}</Grid>
-        <Grid size={{xs: 12, md: 5}}>
+        <Grid size={{xs: 12, lg: 7}}>{renderAttributeChips(currentAttrs, tokenType)}</Grid>
+        <Grid size={{xs: 12, lg: 5}} sx={{minWidth: 0}}>
           {tokenType === 'access' && showActorClaim && (
             <Alert severity="info" sx={{mb: 2}}>
               {t(
@@ -405,50 +475,89 @@ export default function TokenUserAttributesSection({
     );
   };
 
-  const cardTitle = t('applications:edit.token.token_profile_card.title', 'Token Attributes & Response');
-  const cardDescription = showUserInfoTab
-    ? t(
-        'applications:edit.token.token_profile_card.description',
-        'Configure the response types and user attributes included in your tokens and user info responses',
-      )
-    : t(
-        'applications:edit.token.token_profile_card.description.noUserInfo',
-        'Configure the response types and user attributes included in the tokens issued to this {{entity}}.',
+  // Native mode issues a single token and offers no response-format controls, so it gets its own
+  // title and description rather than the multi-token, multi-response wording.
+  const resolveCardTitle = (): string => {
+    if (!isOAuthMode) {
+      return t('applications:edit.token.token_profile_card.title.native', 'Token Attributes');
+    }
+    return t('applications:edit.token.token_profile_card.title', 'Token Attributes & Response');
+  };
+
+  const resolveCardDescription = (): string => {
+    if (!isOAuthMode) {
+      return t(
+        'applications:edit.token.token_profile_card.description.native',
+        'Choose the attributes included in the token issued to this {{entity}}.',
         {entity: entityLabel},
       );
-  if (isOAuthMode) {
-    let tabIndex = showUserInfoTab ? 2 : 0;
-
-    if (activeTab === 'access') {
-      tabIndex = 0;
-    } else if (activeTab === 'id') {
-      tabIndex = 1;
     }
+    if (showUserInfoTab) {
+      return t(
+        'applications:edit.token.token_profile_card.description',
+        'Choose the attributes in each token and the user info response, and how each is returned.',
+      );
+    }
+    return t(
+      'applications:edit.token.token_profile_card.description.noUserInfo',
+      'Choose the attributes in each token issued to this {{entity}}, and how each is returned.',
+      {entity: entityLabel},
+    );
+  };
 
-    const availableTabs: ('access' | 'id' | 'userinfo')[] = showUserInfoTab
-      ? ['access', 'id', 'userinfo']
-      : ['access', 'id'];
+  const cardTitle = resolveCardTitle();
+  const cardDescription = resolveCardDescription();
+  if (isOAuthMode) {
+    // The ID token and UserInfo share one scope-to-claims mapping, so they live under a single
+    // top-level tab with the mapping above them: rendering the mapping inside either tab panel
+    // would make one shared control look like two separate per-tab ones.
+    const isUserSinkTab = activeTab === 'id' || activeTab === 'userinfo';
 
     return (
       <SettingsCard slotProps={{content: {sx: {p: 0}}}} title={cardTitle} description={cardDescription}>
         <Stack spacing={3}>
           <Tabs
-            value={tabIndex}
+            value={activeTab === 'access' ? 0 : 1}
             onChange={(_, newValue: number) => {
-              onTabChange?.(availableTabs[newValue]);
+              // Returning to the combined tab restores whichever sink was open last.
+              onTabChange?.(newValue === 0 ? 'access' : lastUserSinkTab);
             }}
             sx={{borderBottom: 1, borderColor: 'divider'}}
           >
             <Tab label={t('applications:edit.token.tabs.access_token', 'Access Token')} />
-            <Tab label={t('applications:edit.token.tabs.id_token', 'ID Token')} />
-            {showUserInfoTab && (
-              <Tab label={t('applications:edit.token.tabs.user_info_endpoint', 'User Info Endpoint')} />
-            )}
+            <Tab
+              label={
+                showUserInfoTab
+                  ? t('applications:edit.token.tabs.id_token_and_user_info', 'ID Token & User Info')
+                  : t('applications:edit.token.tabs.id_token', 'ID Token')
+              }
+            />
           </Tabs>
 
           <Box sx={{p: 3}}>
             {/* Access Token Tab Panel */}
             {activeTab === 'access' && <Box>{renderAttributePanel(accessTokenAttributes ?? [], 'access')}</Box>}
+
+            {isUserSinkTab && (
+              <Stack spacing={3} sx={{mb: 3}}>
+                {/* One shared mapping, above the sinks it feeds. */}
+                {scopeMapping}
+                {showUserInfoTab && (
+                  <Tabs
+                    value={activeTab === 'id' ? 0 : 1}
+                    onChange={(_, newValue: number) => {
+                      const sink = newValue === 0 ? 'id' : 'userinfo';
+                      setLastUserSinkTab(sink);
+                      onTabChange?.(sink);
+                    }}
+                    sx={{borderBottom: 1, borderColor: 'divider'}}
+                  >
+                    <Tab label={t('applications:edit.token.tabs.id_token', 'ID Token')} />
+                    <Tab label={t('applications:edit.token.tabs.user_info_endpoint', 'User Info Endpoint')} />
+                  </Tabs>
+                )}
+              </Stack>
+            )}
 
             {/* ID Token Tab Panel */}
             {activeTab === 'id' &&
@@ -460,10 +569,8 @@ export default function TokenUserAttributesSection({
                 return (
                   <Grid container spacing={3}>
                     {/* Left Column - Attributes + Response Format */}
-                    <Grid size={{xs: 12, md: 7}}>
+                    <Grid size={{xs: 12, lg: 7}}>
                       <Stack spacing={3}>
-                        {renderAttributeChips(idAttrs, 'id')}
-                        <Divider />
                         {/* Response Format */}
                         <Box>
                           <Typography variant="subtitle2" sx={{mb: 1}}>
@@ -489,23 +596,57 @@ export default function TokenUserAttributesSection({
                                 renderValue={(selected) =>
                                   !selected ? (
                                     <Typography color="text.secondary" variant="body2">
-                                      {t('applications:edit.token.id_token.response_type_placeholder')}
+                                      {t(
+                                        'applications:edit.token.id_token.response_type_placeholder',
+                                        'Select response type',
+                                      )}
                                     </Typography>
                                   ) : (
-                                    selected
+                                    responseTypeOption('id_token', String(selected)).label
                                   )
                                 }
                               >
-                                {TokenConstants.ID_TOKEN_RESPONSE_TYPES.map((type) => (
-                                  <MenuItem key={type} value={type}>
-                                    {type}
-                                  </MenuItem>
-                                ))}
+                                {TokenConstants.ID_TOKEN_RESPONSE_TYPES.map((type) => {
+                                  const option = responseTypeOption('id_token', type);
+                                  return (
+                                    <MenuItem key={type} value={type} disabled={isFormatOptionDisabled(type)}>
+                                      <Box>
+                                        <Typography variant="body2">{option.label}</Typography>
+                                        {option.description && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            {option.description}
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </MenuItem>
+                                  );
+                                })}
                               </Select>
                             </FormControl>
 
+                            {/* Read-only signing algorithm (determined by the server key). Only
+                                shown for signed formats, and only once resolved from discovery. */}
+                            {signingAlg && (idTokenResponseType ?? 'JWT') !== 'JWE' && (
+                              <Typography variant="caption" color="text.secondary">
+                                {t('applications:edit.token.signed_with', 'Signed with {{alg}}.', {
+                                  alg: signingAlg,
+                                })}
+                              </Typography>
+                            )}
+
+                            {/* Certificate requirement for encrypted formats */}
+                            {!hasCertificate && (
+                              <Alert severity="info">
+                                {t(
+                                  'applications:edit.token.encryption_requires_certificate',
+                                  'Encrypted formats require an OAuth client certificate (JWKS or JWKS URI) configured under the {{location}} tab.',
+                                  {location: certificateLocation},
+                                )}
+                              </Alert>
+                            )}
+
                             {/* Row 2: Encryption fields */}
-                            {(idTokenResponseType === 'JWE' || idTokenResponseType === 'NESTED_JWT') && (
+                            {isEncryptedFormat(idTokenResponseType) && (
                               <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
                                 <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
                                   <FormLabel>
@@ -519,7 +660,10 @@ export default function TokenUserAttributesSection({
                                     renderValue={(selected) =>
                                       !selected ? (
                                         <Typography color="text.secondary" variant="body2">
-                                          {t('applications:edit.token.id_token.encryption_alg_placeholder')}
+                                          {t(
+                                            'applications:edit.token.id_token.encryption_alg_placeholder',
+                                            'Select encryption algorithm',
+                                          )}
                                         </Typography>
                                       ) : (
                                         selected
@@ -546,7 +690,10 @@ export default function TokenUserAttributesSection({
                                     renderValue={(selected) =>
                                       !selected ? (
                                         <Typography color="text.secondary" variant="body2">
-                                          {t('applications:edit.token.id_token.encryption_enc_placeholder')}
+                                          {t(
+                                            'applications:edit.token.id_token.encryption_enc_placeholder',
+                                            'Select content encryption',
+                                          )}
                                         </Typography>
                                       ) : (
                                         selected
@@ -564,11 +711,13 @@ export default function TokenUserAttributesSection({
                             )}
                           </Stack>
                         </Box>
+                        <Divider />
+                        {renderAttributeChips(idAttrs, 'id')}
                       </Stack>
                     </Grid>
 
                     {/* Right Column - JWT Preview */}
-                    <Grid size={{xs: 12, md: 5}}>
+                    <Grid size={{xs: 12, lg: 5}} sx={{minWidth: 0}}>
                       <JwtPreview payload={jwtPreview} defaultClaims={defaultAttrs} header={buildIdTokenHeader()} />
                     </Grid>
                   </Grid>
@@ -588,8 +737,150 @@ export default function TokenUserAttributesSection({
                 return (
                   <Grid container spacing={3}>
                     {/* Left Column - Attributes + Response Format */}
-                    <Grid size={{xs: 12, md: 7}}>
+                    <Grid size={{xs: 12, lg: 7}}>
                       <Stack spacing={3}>
+                        {/* Response Format */}
+                        <Box>
+                          <Typography variant="subtitle2" sx={{mb: 1}}>
+                            {t('applications:edit.token.user_info.response_format_heading', 'Response Format')}
+                          </Typography>
+                          <Typography variant="body2" color="text.disabled" sx={{mb: 2}}>
+                            {t(
+                              'applications:edit.token.user_info.response_format_hint',
+                              'Configure the format and security of the User Info endpoint response.',
+                            )}
+                          </Typography>
+                          <Stack spacing={2}>
+                            {/* Row 1: Response Type (full width) */}
+                            <FormControl size="small" fullWidth>
+                              <FormLabel>
+                                {t('applications:edit.token.user_info.response_type', 'Response Type')}
+                              </FormLabel>
+                              <Select
+                                displayEmpty
+                                value={(userInfoResponseType ?? '') as string}
+                                onChange={(e) => onUserInfoConfigChange?.('responseType', String(e.target.value))}
+                                disabled={disabled}
+                                renderValue={(selected) =>
+                                  !selected ? (
+                                    <Typography color="text.secondary" variant="body2">
+                                      {t(
+                                        'applications:edit.token.user_info.response_type_placeholder',
+                                        'Select response type',
+                                      )}
+                                    </Typography>
+                                  ) : (
+                                    responseTypeOption('user_info', String(selected)).label
+                                  )
+                                }
+                              >
+                                {TokenConstants.USER_INFO_RESPONSE_TYPES.map((type) => {
+                                  const option = responseTypeOption('user_info', type);
+                                  return (
+                                    <MenuItem key={type} value={type} disabled={isFormatOptionDisabled(type)}>
+                                      <Box>
+                                        <Typography variant="body2">{option.label}</Typography>
+                                        {option.description && (
+                                          <Typography variant="caption" color="text.secondary">
+                                            {option.description}
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </MenuItem>
+                                  );
+                                })}
+                              </Select>
+                            </FormControl>
+
+                            {/* Read-only signing algorithm for signed formats (determined by the
+                                server key). Only shown once resolved from discovery. */}
+                            {signingAlg &&
+                              (userInfoResponseType === 'JWS' || userInfoResponseType === 'NESTED_JWT') && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {t('applications:edit.token.signed_with', 'Signed with {{alg}}.', {
+                                    alg: signingAlg,
+                                  })}
+                                </Typography>
+                              )}
+
+                            {/* Certificate requirement for encrypted formats */}
+                            {!hasCertificate && (
+                              <Alert severity="info">
+                                {t(
+                                  'applications:edit.token.encryption_requires_certificate',
+                                  'Encrypted formats require an OAuth client certificate (JWKS or JWKS URI) configured under the {{location}} tab.',
+                                  {location: certificateLocation},
+                                )}
+                              </Alert>
+                            )}
+
+                            {/* Row 2: Encryption fields */}
+                            {isEncryptedFormat(userInfoResponseType) && (
+                              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+                                <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
+                                  <FormLabel>
+                                    {t('applications:edit.token.user_info.encryption_alg', 'Encryption Algorithm')}
+                                  </FormLabel>
+                                  <Select
+                                    displayEmpty
+                                    value={userInfoEncryptionAlg ?? ''}
+                                    onChange={(e) => onUserInfoConfigChange?.('encryptionAlg', e.target.value)}
+                                    disabled={disabled}
+                                    renderValue={(selected) =>
+                                      !selected ? (
+                                        <Typography color="text.secondary" variant="body2">
+                                          {t(
+                                            'applications:edit.token.user_info.encryption_alg_placeholder',
+                                            'Select encryption algorithm',
+                                          )}
+                                        </Typography>
+                                      ) : (
+                                        selected
+                                      )
+                                    }
+                                  >
+                                    {TokenConstants.USER_INFO_ENCRYPTION_ALGS.map((alg) => (
+                                      <MenuItem key={alg} value={alg}>
+                                        {alg}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
+                                </FormControl>
+
+                                <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
+                                  <FormLabel>
+                                    {t('applications:edit.token.user_info.encryption_enc', 'Content Encryption')}
+                                  </FormLabel>
+                                  <Select
+                                    displayEmpty
+                                    value={userInfoEncryptionEnc ?? ''}
+                                    onChange={(e) => onUserInfoConfigChange?.('encryptionEnc', e.target.value)}
+                                    disabled={disabled}
+                                    renderValue={(selected) =>
+                                      !selected ? (
+                                        <Typography color="text.secondary" variant="body2">
+                                          {t(
+                                            'applications:edit.token.user_info.encryption_enc_placeholder',
+                                            'Select content encryption',
+                                          )}
+                                        </Typography>
+                                      ) : (
+                                        selected
+                                      )
+                                    }
+                                  >
+                                    {TokenConstants.USER_INFO_ENCRYPTION_ENCS.map((enc) => (
+                                      <MenuItem key={enc} value={enc}>
+                                        {enc}
+                                      </MenuItem>
+                                    ))}
+                                  </Select>
+                                </FormControl>
+                              </Stack>
+                            )}
+                          </Stack>
+                        </Box>
+                        <Divider />
                         {/* User Attributes */}
                         <Box>
                           <FormControlLabel
@@ -630,145 +921,11 @@ export default function TokenUserAttributesSection({
                             </Box>
                           )}
                         </Box>
-                        <Divider />
-                        {/* Response Format */}
-                        <Box>
-                          <Typography variant="subtitle2" sx={{mb: 1}}>
-                            {t('applications:edit.token.user_info.response_format_heading', 'Response Format')}
-                          </Typography>
-                          <Typography variant="body2" color="text.disabled" sx={{mb: 2}}>
-                            {t(
-                              'applications:edit.token.user_info.response_format_hint',
-                              'Configure the format and security of the User Info endpoint response.',
-                            )}
-                          </Typography>
-                          <Stack spacing={2}>
-                            {/* Row 1: Response Type (full width) */}
-                            <FormControl size="small" fullWidth>
-                              <FormLabel>
-                                {t('applications:edit.token.user_info.response_type', 'Response Type')}
-                              </FormLabel>
-                              <Select
-                                displayEmpty
-                                value={(userInfoResponseType ?? '') as string}
-                                onChange={(e) => onUserInfoConfigChange?.('responseType', String(e.target.value))}
-                                disabled={disabled}
-                                renderValue={(selected) =>
-                                  !selected ? (
-                                    <Typography color="text.secondary" variant="body2">
-                                      {t('applications:edit.token.user_info.response_type_placeholder')}
-                                    </Typography>
-                                  ) : (
-                                    selected
-                                  )
-                                }
-                              >
-                                {TokenConstants.USER_INFO_RESPONSE_TYPES.map((type) => (
-                                  <MenuItem key={type} value={type}>
-                                    {type}
-                                  </MenuItem>
-                                ))}
-                              </Select>
-                            </FormControl>
-
-                            {/* Row 2: Algorithm fields */}
-                            {userInfoResponseType && userInfoResponseType !== 'JSON' && (
-                              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-                                {(userInfoResponseType === 'JWS' || userInfoResponseType === 'NESTED_JWT') && (
-                                  <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
-                                    <FormLabel>
-                                      {t('applications:edit.token.user_info.signing_alg', 'Signing Algorithm')}
-                                    </FormLabel>
-                                    <Select
-                                      displayEmpty
-                                      value={userInfoSigningAlg ?? ''}
-                                      onChange={(e) => onUserInfoConfigChange?.('signingAlg', e.target.value)}
-                                      disabled={disabled}
-                                      renderValue={(selected) =>
-                                        !selected ? (
-                                          <Typography color="text.secondary" variant="body2">
-                                            {t('applications:edit.token.user_info.signing_alg_placeholder')}
-                                          </Typography>
-                                        ) : (
-                                          selected
-                                        )
-                                      }
-                                    >
-                                      {TokenConstants.USER_INFO_SIGNING_ALGS.map((alg) => (
-                                        <MenuItem key={alg} value={alg}>
-                                          {alg}
-                                        </MenuItem>
-                                      ))}
-                                    </Select>
-                                  </FormControl>
-                                )}
-
-                                {(userInfoResponseType === 'JWE' || userInfoResponseType === 'NESTED_JWT') && (
-                                  <>
-                                    <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
-                                      <FormLabel>
-                                        {t('applications:edit.token.user_info.encryption_alg', 'Encryption Algorithm')}
-                                      </FormLabel>
-                                      <Select
-                                        displayEmpty
-                                        value={userInfoEncryptionAlg ?? ''}
-                                        onChange={(e) => onUserInfoConfigChange?.('encryptionAlg', e.target.value)}
-                                        disabled={disabled}
-                                        renderValue={(selected) =>
-                                          !selected ? (
-                                            <Typography color="text.secondary" variant="body2">
-                                              {t('applications:edit.token.user_info.encryption_alg_placeholder')}
-                                            </Typography>
-                                          ) : (
-                                            selected
-                                          )
-                                        }
-                                      >
-                                        {TokenConstants.USER_INFO_ENCRYPTION_ALGS.map((alg) => (
-                                          <MenuItem key={alg} value={alg}>
-                                            {alg}
-                                          </MenuItem>
-                                        ))}
-                                      </Select>
-                                    </FormControl>
-
-                                    <FormControl size="small" sx={{flex: 1, minWidth: 140}}>
-                                      <FormLabel>
-                                        {t('applications:edit.token.user_info.encryption_enc', 'Content Encryption')}
-                                      </FormLabel>
-                                      <Select
-                                        displayEmpty
-                                        value={userInfoEncryptionEnc ?? ''}
-                                        onChange={(e) => onUserInfoConfigChange?.('encryptionEnc', e.target.value)}
-                                        disabled={disabled}
-                                        renderValue={(selected) =>
-                                          !selected ? (
-                                            <Typography color="text.secondary" variant="body2">
-                                              {t('applications:edit.token.user_info.encryption_enc_placeholder')}
-                                            </Typography>
-                                          ) : (
-                                            selected
-                                          )
-                                        }
-                                      >
-                                        {TokenConstants.USER_INFO_ENCRYPTION_ENCS.map((enc) => (
-                                          <MenuItem key={enc} value={enc}>
-                                            {enc}
-                                          </MenuItem>
-                                        ))}
-                                      </Select>
-                                    </FormControl>
-                                  </>
-                                )}
-                              </Stack>
-                            )}
-                          </Stack>
-                        </Box>
                       </Stack>
                     </Grid>
 
                     {/* Right Column - JWT/JSON Preview */}
-                    <Grid size={{xs: 12, md: 5}}>
+                    <Grid size={{xs: 12, lg: 5}} sx={{minWidth: 0}}>
                       <JwtPreview
                         payload={jwtPreview}
                         defaultClaims={defaultAttrs}

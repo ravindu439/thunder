@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor, within, userEvent} from '@thunderid/test-utils';
 import type {User} from '@thunderid/types';
@@ -23,8 +8,10 @@ import {describe, it, expect, vi, beforeEach} from 'vitest';
 import type {ApiUserType, UserTypeListResponse} from '../../models/users';
 import UserEditPage from '../UserEditPage';
 
-const {mockLoggerError} = vi.hoisted(() => ({
+const {mockLoggerError, stagingCallbackIdentities} = vi.hoisted(() => ({
   mockLoggerError: vi.fn(),
+  // Every distinct onFieldChange the Attributes tab is handed.
+  stagingCallbackIdentities: new Set<unknown>(),
 }));
 
 vi.mock('@thunderid/components', async (importOriginal) => {
@@ -84,6 +71,7 @@ interface UseGetUserTypesReturn {
   data: UserTypeListResponse | undefined;
   isLoading: boolean;
   error: Error | null;
+  refetch: ReturnType<typeof vi.fn>;
 }
 
 interface UseGetUserTypeReturn {
@@ -117,6 +105,7 @@ interface UseDeleteUserReturn {
 }
 
 const mockRefetch = vi.fn();
+const mockRefetchUserTypes = vi.fn();
 const mockUseGetUser = vi.fn<() => UseGetUserReturn>();
 const mockUseGetUserTypes = vi.fn<() => UseGetUserTypesReturn>();
 const mockUseGetUserType = vi.fn<() => UseGetUserTypeReturn>();
@@ -154,13 +143,25 @@ vi.mock('@/components/edit-user/AttributesSummarySection', () => ({
 }));
 
 vi.mock('@/components/edit-user/EditUserAttributes', () => ({
-  default: ({onFieldChange}: {onFieldChange: (field: string, value: unknown) => void}) => (
-    <div data-testid="edit-user-attributes">
-      <button type="button" onClick={() => onFieldChange('attributes', {department: 'sales'})}>
-        Edit an attribute
-      </button>
-    </div>
-  ),
+  default: ({onFieldChange}: {onFieldChange: (field: string, value: unknown) => void}) => {
+    stagingCallbackIdentities.add(onFieldChange);
+    return (
+      <div data-testid="edit-user-attributes">
+        <button type="button" onClick={() => onFieldChange('attributes', {department: 'sales'})}>
+          Edit an attribute
+        </button>
+        {/* Emits the original saved attributes, so the page treats it as no change. */}
+        <button
+          type="button"
+          onClick={() =>
+            onFieldChange('attributes', {username: 'john_doe', email: 'john@example.com', age: 30, active: true})
+          }
+        >
+          Revert attributes
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('@/components/edit-user/CredentialsTabPanel', () => ({
@@ -226,6 +227,7 @@ describe('UserEditPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    stagingCallbackIdentities.clear();
     mockNavigate.mockResolvedValue(undefined);
     mockUpdateMutateAsync.mockResolvedValue(mockUserData);
     mockRefetch.mockResolvedValue({});
@@ -242,13 +244,15 @@ describe('UserEditPage', () => {
       data: mockSchemasData,
       isLoading: false,
       error: null,
+      refetch: mockRefetchUserTypes,
     });
     mockUseGetUserType.mockReturnValue({
       data: mockSchemaData,
       isLoading: false,
       error: null,
     });
-    mockUseUpdateUser.mockReturnValue({...defaultUpdateReturn});
+    // A fresh object per call, like useMutation. A stable stand-in hides identity churn.
+    mockUseUpdateUser.mockImplementation(() => ({...defaultUpdateReturn}));
     mockUseDeleteUser.mockReturnValue({...defaultDeleteReturn});
   });
 
@@ -278,6 +282,50 @@ describe('UserEditPage', () => {
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
 
+    it('displays loading spinner when the user type list is loading', () => {
+      mockUseGetUserTypes.mockReturnValue({
+        data: undefined,
+        isLoading: true,
+        error: null,
+        refetch: mockRefetchUserTypes,
+      });
+
+      render(<UserEditPage />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    it('displays error alert when the user type list fails to load', () => {
+      mockUseGetUserTypes.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('User types list failed'),
+        refetch: mockRefetchUserTypes,
+      });
+
+      render(<UserEditPage />);
+
+      // Resolved through the i18n catalog, not the raw (unlocalized) error message.
+      expect(screen.getByText('Failed to load user information')).toBeInTheDocument();
+      expect(screen.getByRole('button', {name: /back to users/i})).toBeInTheDocument();
+    });
+
+    it('retries the user type list query when Refresh is clicked', async () => {
+      const user = userEvent.setup();
+      mockUseGetUserTypes.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('User types list failed'),
+        refetch: mockRefetchUserTypes,
+      });
+
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('button', {name: /refresh/i}));
+
+      expect(mockRefetchUserTypes).toHaveBeenCalledTimes(1);
+    });
+
     it('displays error alert when user fails to load', () => {
       mockUseGetUser.mockReturnValue({
         data: undefined,
@@ -288,7 +336,8 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
-      expect(screen.getByRole('alert')).toHaveTextContent('User not found');
+      // Resolved through the i18n catalog, not the raw (unlocalized) error message.
+      expect(screen.getByText('Failed to load user information')).toBeInTheDocument();
       expect(screen.getByRole('button', {name: /back to users/i})).toBeInTheDocument();
     });
 
@@ -326,10 +375,11 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
-      expect(screen.getByRole('alert')).toHaveTextContent('Schema not found');
+      // Resolved through the i18n catalog, not the raw (unlocalized) error message.
+      expect(screen.getByText('Failed to load user information')).toBeInTheDocument();
     });
 
-    it('displays generic error message when error message is empty', () => {
+    it('displays the generic fallback message when the error has no mapped code', () => {
       mockUseGetUser.mockReturnValue({
         data: undefined,
         isLoading: false,
@@ -339,7 +389,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
-      expect(screen.getByRole('alert')).toHaveTextContent('');
+      expect(screen.getByText('Failed to load user information')).toBeInTheDocument();
     });
 
     it('displays warning when user is null but no error', () => {
@@ -395,7 +445,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
-      expect(screen.getByRole('alert')).toBeInTheDocument();
+      expect(screen.getByText('Failed to load user information')).toBeInTheDocument();
     });
   });
 
@@ -414,10 +464,13 @@ describe('UserEditPage', () => {
       expect(screen.getByText('Employee')).toBeInTheDocument();
     });
 
-    it('renders the General and Attributes tabs, and the Delete button', () => {
+    it('renders the General, Attributes, and Advanced tabs, and the Delete button', async () => {
+      const user = userEvent.setup();
       render(<UserEditPage />);
 
-      expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['General', 'Attributes']);
+      expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['General', 'Attributes', 'Advanced']);
+
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       expect(screen.getByRole('button', {name: /^delete$/i})).toBeInTheDocument();
     });
 
@@ -481,6 +534,18 @@ describe('UserEditPage', () => {
       expect(screen.getByRole('button', {name: 'Reset'})).toBeInTheDocument();
     });
 
+    it('hides the unsaved-changes bar when attributes are manually reverted to the saved values', async () => {
+      const user = userEvent.setup();
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+
+      await user.click(screen.getByText('Revert attributes'));
+      expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+    });
+
     it('does not submit if user ouId is missing', async () => {
       const user = userEvent.setup();
       mockUseGetUser.mockReturnValue({
@@ -493,6 +558,7 @@ describe('UserEditPage', () => {
         data: {...mockSchemasData, types: [{...mockSchemasData.types[0], ouId: ''}]},
         isLoading: false,
         error: null,
+        refetch: mockRefetchUserTypes,
       });
 
       render(<UserEditPage />);
@@ -546,6 +612,52 @@ describe('UserEditPage', () => {
       });
     });
 
+    it('drops a staged optional attribute whose value no longer matches the schema', async () => {
+      const user = userEvent.setup();
+      // department is optional and typed number, but the staged value is the string 'sales'.
+      mockUseGetUserType.mockReturnValue({
+        data: {...mockSchemaData, schema: {...mockSchemaData.schema, department: {type: 'number'}}},
+        isLoading: false,
+        error: null,
+      });
+
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+      await user.click(screen.getByRole('button', {name: 'Save'}));
+
+      await waitFor(() => {
+        expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
+          userId: 'user123',
+          data: {ouId: 'test-ou', type: 'Employee', attributes: {}},
+        });
+      });
+    });
+
+    it('keeps a required attribute even when its value no longer matches the schema', async () => {
+      const user = userEvent.setup();
+      // department is required, so the mismatched value is kept for the backend to reject.
+      mockUseGetUserType.mockReturnValue({
+        data: {...mockSchemaData, schema: {...mockSchemaData.schema, department: {type: 'number', required: true}}},
+        isLoading: false,
+        error: null,
+      });
+
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+      await user.click(screen.getByRole('button', {name: 'Save'}));
+
+      await waitFor(() => {
+        expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
+          userId: 'user123',
+          data: {ouId: 'test-ou', type: 'Employee', attributes: {department: 'sales'}},
+        });
+      });
+    });
+
     it('uses schema organization unit when updating user', async () => {
       const user = userEvent.setup();
       mockUseGetUser.mockReturnValue({
@@ -558,6 +670,7 @@ describe('UserEditPage', () => {
         data: {...mockSchemasData, types: [{...mockSchemasData.types[0], ouId: 'schema-ou'}]},
         isLoading: false,
         error: null,
+        refetch: mockRefetchUserTypes,
       });
 
       render(<UserEditPage />);
@@ -579,6 +692,7 @@ describe('UserEditPage', () => {
         data: {...mockSchemasData, types: [{...mockSchemasData.types[0], ouId: ''}]},
         isLoading: false,
         error: null,
+        refetch: mockRefetchUserTypes,
       });
 
       render(<UserEditPage />);
@@ -592,6 +706,36 @@ describe('UserEditPage', () => {
         const callArgs = mockUpdateMutateAsync.mock.calls[0][0] as {data: {ouId: string}};
         expect(callArgs.data.ouId).toBe('test-ou');
       });
+    });
+
+    it('hands the Attributes tab one stable onFieldChange across re-renders', async () => {
+      // A new callback per render refired the tab's staging effect until React stopped
+      // committing renders at all, which is what broke navigation.
+      const user = userEvent.setup();
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+
+      expect(stagingCallbackIdentities.size).toBe(1);
+    });
+
+    it('resets a failed save mutation as soon as another field changes', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+      mockUseUpdateUser.mockImplementation(() => ({
+        ...defaultUpdateReturn,
+        error: new Error('Boom'),
+        isError: true,
+        reset: mockReset,
+      }));
+
+      render(<UserEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+
+      expect(mockReset).toHaveBeenCalled();
     });
 
     it('hides the unsaved-changes bar after a successful save', async () => {
@@ -687,6 +831,7 @@ describe('UserEditPage', () => {
         'General',
         'Attributes',
         'Credentials',
+        'Advanced',
       ]);
     });
 
@@ -731,6 +876,8 @@ describe('UserEditPage', () => {
       const user = userEvent.setup();
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
+
       const deleteButton = screen.getByRole('button', {name: /^delete$/i});
       await user.click(deleteButton);
 
@@ -747,6 +894,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -762,6 +910,7 @@ describe('UserEditPage', () => {
       const user = userEvent.setup();
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -778,6 +927,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -799,6 +949,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -806,7 +957,7 @@ describe('UserEditPage', () => {
       await user.click(confirmButton);
 
       await waitFor(() => {
-        expect(within(dialog).getByText('Failed to delete user')).toBeInTheDocument();
+        expect(within(dialog).getByText('Failed to delete user. Please try again.')).toBeInTheDocument();
       });
     });
 
@@ -820,6 +971,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -837,6 +989,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -844,7 +997,7 @@ describe('UserEditPage', () => {
       await user.click(confirmButton);
 
       await waitFor(() => {
-        expect(within(dialog).getByText('Delete failed')).toBeInTheDocument();
+        expect(within(dialog).getByText('Failed to delete user. Please try again.')).toBeInTheDocument();
       });
     });
 
@@ -856,6 +1009,7 @@ describe('UserEditPage', () => {
 
       render(<UserEditPage />);
 
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       const dialog = screen.getByRole('dialog');
@@ -864,7 +1018,7 @@ describe('UserEditPage', () => {
 
       await waitFor(() => {
         expect(screen.getByRole('dialog')).toBeInTheDocument();
-        expect(within(dialog).getByText('Delete failed')).toBeInTheDocument();
+        expect(within(dialog).getByText('Failed to delete user. Please try again.')).toBeInTheDocument();
       });
     });
   });

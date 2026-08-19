@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package oauth
 
@@ -24,6 +9,7 @@ import (
 
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -872,35 +858,123 @@ func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateTokenExchangeFailure() 
 	suite.Equal(ErrorEmptyAuthorizationCode.Code, err.Code)
 }
 
-func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateFetchUserInfoFailure() {
+// oauthIDPProperties builds a generic OAuth IDP. An empty endpoint leaves the property out entirely,
+// as the connection API does for an omitted value.
+func oauthIDPProperties(userInfoEndpoint string) *providers.IDPDTO {
 	clientIDProp, _ := cmodels.NewProperty("client_id", "test_client", false)
 	clientSecretProp, _ := cmodels.NewProperty("client_secret", "test_secret", false)
 	redirectURIProp, _ := cmodels.NewProperty("redirect_uri", "https://app.com/callback", false)
-	scopesProp, _ := cmodels.NewProperty("scopes", "openid", false)
+	scopesProp, _ := cmodels.NewProperty("scopes", "read", false)
 	tokenEndpointProp, _ := cmodels.NewProperty("token_endpoint", "https://idp.com/token", false)
 
-	idpDTO := &providers.IDPDTO{
-		ID:   testIDPID,
-		Name: "Test IDP",
-		Type: providers.IDPTypeOAuth,
-		Properties: []cmodels.Property{
-			*clientIDProp, *clientSecretProp, *redirectURIProp, *scopesProp, *tokenEndpointProp,
-		},
+	props := []cmodels.Property{
+		*clientIDProp, *clientSecretProp, *redirectURIProp, *scopesProp, *tokenEndpointProp,
+	}
+	if userInfoEndpoint != "" {
+		userInfoEndpointProp, _ := cmodels.NewProperty("userinfo_endpoint", userInfoEndpoint, false)
+		props = append(props, *userInfoEndpointProp)
 	}
 
-	tokenRespJSON := testTokenRespJSON
-	tokenHTTPResp := &http.Response{
-		StatusCode: 200,
-		Body:       io.NopCloser(bytes.NewReader([]byte(tokenRespJSON))),
+	return &providers.IDPDTO{
+		ID:         testIDPID,
+		Name:       "Test IDP",
+		Type:       providers.IDPTypeOAuth,
+		Properties: props,
+	}
+}
+
+// jwtAccessToken builds an unsigned JWT-shaped access token carrying the given payload.
+func jwtAccessToken(payload map[string]interface{}) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"at+jwt"}`))
+	body, _ := json.Marshal(payload)
+	return header + "." + base64.RawURLEncoding.EncodeToString(body) + ".signature"
+}
+
+// tokenHTTPResponse builds a token endpoint response returning the given access token.
+func tokenHTTPResponse(accessToken string) *http.Response {
+	body, _ := json.Marshal(map[string]string{"access_token": accessToken, "token_type": "Bearer"})
+	return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(body))}
+}
+
+func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateFetchUserInfoFailure() {
+	userInfoHTTPResp := &http.Response{
+		StatusCode: 403,
+		Body: io.NopCloser(bytes.NewReader([]byte(
+			`{"error":"insufficient_scope","error_description":"Access token does not have the openid scope"}`))),
 	}
 
-	suite.mockIDPService.On("GetIdentityProvider", mock.Anything, testIDPID).Return(idpDTO, nil)
-	suite.mockHTTPClient.On("Do", mock.Anything).Return(tokenHTTPResp, nil).Once()
+	suite.mockIDPService.On("GetIdentityProvider", mock.Anything, testIDPID).
+		Return(oauthIDPProperties("https://idp.com/userinfo"), nil)
+	suite.mockHTTPClient.On("Do", mock.Anything).Return(tokenHTTPResponse("access123"), nil).Once()
+	suite.mockHTTPClient.On("Do", mock.Anything).Return(userInfoHTTPResp, nil).Once()
 
 	result, err := suite.service.Authenticate(context.Background(), testIDPID,
 		common.AuthorizationData{Code: "auth_code"})
 	suite.Nil(result)
 	suite.NotNil(err)
+	suite.Equal(ErrorUserProfileRetrievalFailed.Code, err.Code)
+	suite.Equal(tidcommon.ClientErrorType, err.Type)
+}
+
+func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateWithoutProfileEndpointUsesAccessTokenSubject() {
+	accessToken := jwtAccessToken(map[string]interface{}{
+		"sub": testSub, "client_id": "test_client", "scope": "read", "jti": "token-id",
+	})
+
+	suite.mockIDPService.On("GetIdentityProvider", mock.Anything, testIDPID).Return(oauthIDPProperties(""), nil)
+	suite.mockHTTPClient.On("Do", mock.Anything).Return(tokenHTTPResponse(accessToken), nil).Once()
+
+	result, err := suite.service.Authenticate(context.Background(), testIDPID,
+		common.AuthorizationData{Code: "auth_code"})
+	suite.Nil(err)
+	suite.NotNil(result)
+	suite.Equal(testSub, result.Token["sub"])
+	// Only the subject is taken from the access token; its resource server claims are not user attributes.
+	suite.Equal(map[string]interface{}{"sub": testSub}, result.AuthenticatedClaims)
+}
+
+func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateWithoutProfileEndpointFailures() {
+	tests := []struct {
+		name        string
+		accessToken string
+	}{
+		{
+			name:        "OpaqueAccessToken",
+			accessToken: "access123",
+		},
+		{
+			name:        "JWTAccessTokenWithoutSub",
+			accessToken: jwtAccessToken(map[string]interface{}{"client_id": "test_client", "scope": "read"}),
+		},
+		{
+			name:        "JWTAccessTokenWithNumericSub",
+			accessToken: jwtAccessToken(map[string]interface{}{"sub": 1}),
+		},
+		{
+			name:        "JWTAccessTokenWithBooleanSub",
+			accessToken: jwtAccessToken(map[string]interface{}{"sub": true}),
+		},
+		{
+			name:        "JWTAccessTokenWithEmptySub",
+			accessToken: jwtAccessToken(map[string]interface{}{"sub": ""}),
+		},
+	}
+
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			suite.SetupTest()
+			suite.mockIDPService.On("GetIdentityProvider", mock.Anything, testIDPID).
+				Return(oauthIDPProperties(""), nil)
+			suite.mockHTTPClient.On("Do", mock.Anything).Return(tokenHTTPResponse(test.accessToken), nil).Once()
+
+			result, err := suite.service.Authenticate(context.Background(), testIDPID,
+				common.AuthorizationData{Code: "auth_code"})
+			suite.Nil(result)
+			suite.NotNil(err)
+			suite.Equal(ErrorNoUserProfileSource.Code, err.Code)
+			suite.Equal(tidcommon.ClientErrorType, err.Type)
+		})
+	}
 }
 
 func (suite *OAuthAuthnServiceTestSuite) TestAuthenticateMissingSub() {
@@ -991,7 +1065,8 @@ func (suite *OAuthAuthnServiceTestSuite) TestBuildFederatedAuthResultAppliesMapp
 		context.Background(), testIDPID, testSub, map[string]interface{}{"given_name": "Jane", "sub": testSub})
 	suite.Nil(svcErr)
 	suite.Equal("Jane", result.AuthenticatedClaims["firstName"])
-	suite.NotContains(result.AuthenticatedClaims, "given_name")
+	// Mappings copy rather than rename, so the source claim survives alongside the local attribute.
+	suite.Equal("Jane", result.AuthenticatedClaims["given_name"])
 	// No account linking configured, so the lookup falls back to sub without a query.
 	suite.Equal(testSub, result.Token["sub"])
 }
@@ -1070,10 +1145,10 @@ func (suite *OAuthAuthnServiceTestSuite) TestBuildFederatedAuthResultResolvesExt
 		map[string]interface{}{"sub": testSub}).Return(nil, errEntityNotFound)
 
 	result, svcErr := suite.service.BuildFederatedAuthResult(
-		context.Background(), testIDPID, testSub, map[string]interface{}{"email": "sadil@wso2.com"})
+		context.Background(), testIDPID, testSub, map[string]interface{}{"email": "sadil@example.com"})
 	suite.Nil(svcErr)
-	suite.Equal("sadil@wso2.com", result.AuthenticatedClaims["family_name"])
-	suite.Equal("sadil@wso2.com", result.Token["family_name"])
+	suite.Equal("sadil@example.com", result.AuthenticatedClaims["family_name"])
+	suite.Equal("sadil@example.com", result.Token["family_name"])
 	suite.NotContains(result.Token, "sub")
 }
 

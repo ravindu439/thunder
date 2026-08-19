@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -50,6 +35,10 @@ const (
 	ExecutorNameSession                      = "SessionExecutor"
 	ExecutorNameSessionSignOut               = "SessionSignOutExecutor"
 	ExecutorNameOTPExecutor                  = "OTPExecutor"
+	ExecutorNamePreDelete                    = "PreDeleteExecutor"
+	ExecutorNameCriteriaRevocation           = "CriteriaRevocationExecutor"
+	ExecutorNameSessionRevocation            = "SessionRevocationExecutor"
+	ExecutorNameUserDelete                   = "UserDeleteExecutor"
 )
 
 // Executor mode constants
@@ -82,6 +71,7 @@ const (
 	userInputMagicLinkToken   = "token"
 	userInputConsentDecisions = "consent_decisions"
 	userInputLoginHint        = "login_hint"
+	revocationInputSubject    = "subject"
 
 	ouIDKey        = "ouId"
 	defaultOUIDKey = "defaultOUID"
@@ -115,6 +105,18 @@ const (
 	propertyKeyCallbackType                            = "callbackType"
 	propertyKeyLoginHintAttribute                      = "loginHintAttribute"
 	propertyKeyMaxOTPAttempts                          = "maxAttempts"
+	propertyKeyOTPLength                               = "otpLength"
+	propertyKeyOTPUseNumericOnly                       = "otpUseNumericOnly"
+	propertyKeyOTPValidityPeriodSeconds                = "otpValidityPeriodSeconds"
+	// propertyKeyPromptOnSignOut, when set to boolean true on a session sign-out node, makes the executor
+	// confirm the logout with the End-User (via the node's onIncomplete prompt) whenever the RP-initiated
+	// logout was not accompanied by a valid id_token_hint (RuntimeKeyLogoutPromptRequired).
+	propertyKeyPromptOnSignOut = "promptOnSignOut"
+	// propertyKeyConsentFailOnDeny, when set to boolean true on a consent node, makes the executor
+	// fail the flow if the user did not approve the consent prompt, either by pressing
+	// the Deny button or by letting the prompt time out. This applies even when every prompted
+	// element is optional.
+	propertyKeyConsentFailOnDeny = "failOnDeny"
 )
 
 // nonSearchableInputs contains the list of user inputs/ attributes that are non-searchable.

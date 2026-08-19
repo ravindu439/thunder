@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package session provides the persistent SSO session model and relational store.
 //
@@ -33,8 +18,8 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
 	"github.com/thunder-id/thunderid/internal/system/log"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // Service is the SSO session capability. It wraps every session-store operation so callers (the
@@ -45,9 +30,11 @@ type Service interface {
 	// session, a session from a different flow, or one established at an incompatible flow version.
 	Resolve(ctx context.Context, handle, flowID string, flowVersion int, now time.Time) (*Session, error)
 
-	// HasCheckpoint reports whether the resolved session already holds a snapshot for the checkpoint,
-	// using the decrypt-free checkpoint listing.
-	HasCheckpoint(ctx context.Context, sessionID, checkpoint string) (bool, error)
+	// FindCheckpoint returns the resolved session's snapshot for the checkpoint, or (nil, nil) when
+	// the session holds none. Callers deciding only whether a checkpoint is available compare the
+	// result against nil; the SSO-Check node forwards it to the paired Session node so the load path
+	// does not fetch the same row again.
+	FindCheckpoint(ctx context.Context, sessionID, checkpoint string) (*SessionContext, error)
 
 	// SaveCheckpoint attaches the checkpoint to this flow execution's session — the one already
 	// resolved (via HandleHint), one an earlier join minted, or a freshly established one — writing
@@ -55,18 +42,46 @@ type Service interface {
 	// true when the authenticated subject conflicts with the existing session's subject.
 	SaveCheckpoint(ctx context.Context, in SaveCheckpointInput) (SaveCheckpointResult, error)
 
-	// LoadCheckpoint fetches the session referenced by handle and its checkpoint context, refreshes
-	// the session's last-active timestamp and idle deadline, and records the joining participant
-	// (both best-effort). It errors when the session or its checkpoint context no longer exists.
-	LoadCheckpoint(ctx context.Context, handle, checkpoint, appID string) (*Session, *SessionContext, error)
+	// LoadCheckpoint returns the session referenced by in.Handle and the checkpoint's context, refreshes
+	// the session's last-active timestamp and idle deadline (throttled: skipped when the last refresh is
+	// within the activity-refresh window), and records the joining application as a participant. It uses
+	// the rows the SSO-Check node forwarded when they match what is being loaded, and reads whatever it
+	// was not given. The activity refresh is best-effort, but recording the participant is not when
+	// in.TokenFamilyID is set: a token family with no persisted mapping would be unrevocable, so that
+	// failure aborts the load. It errors when a row it has to read no longer exists.
+	LoadCheckpoint(ctx context.Context, in LoadCheckpointInput) (*Session, *SessionContext, error)
 
-	// Terminate ends the session referenced by handle: it marks the session ENDED (so it can no
-	// longer back SSO) and removes its checkpoint contexts and participants, all in one transaction.
-	// When flowID is non-empty the handle must belong to that flow, guarding against ending a
-	// session grouped under a different flow. It is idempotent — a no-op returning (nil, nil) when
-	// no session matches the handle, and the unchanged session when it is already ended — and
-	// returns the ended session on success.
+	// Terminate ends the session referenced by handle: it revokes the token families of every
+	// participating application (when a revoker is wired) and hard-deletes the session along with its
+	// checkpoint contexts and participants, all in one transaction, so nothing is left that could back
+	// SSO or hold live grants. When flowID is non-empty the handle must belong to that flow, guarding
+	// against ending a session grouped under a different flow. It is idempotent, returning (nil, nil)
+	// when no session matches the handle, and returns the deleted session on success.
 	Terminate(ctx context.Context, handle, flowID string) (*Session, error)
+	// TerminateBySubject ends every SSO session belonging to the subject, revoking the subject's
+	// grants first so no session is deleted while its tokens remain live. It is idempotent, returning
+	// nil when the subject holds no sessions.
+	TerminateBySubject(ctx context.Context, subjectID string) error
+}
+
+// LoadCheckpointInput carries what a Session join needs to restore a checkpoint. Session and Context
+// are the rows the SSO-Check node already read for this checkpoint, handed over so the load path does
+// not repeat those two queries; either may be nil, in which case it is read from the store.
+type LoadCheckpointInput struct {
+	// Handle is the resolved session handle. It identifies the session to load when Session is nil,
+	// and guards the handed-over Session against belonging to a different handle.
+	Handle string
+	// Checkpoint is the checkpoint id whose snapshot is being restored.
+	Checkpoint string
+	// AppID is the joining application, recorded as a session participant.
+	AppID string
+	// TokenFamilyID is the token family id (tfid) minted for this grant. Recording it is required
+	// when non-empty: a tfid with no persisted mapping would be unrevocable.
+	TokenFamilyID string
+	// Session is the session the SSO-Check node resolved, or nil to read it by Handle.
+	Session *Session
+	// Context is the checkpoint context the SSO-Check node fetched, or nil to read it.
+	Context *SessionContext
 }
 
 // SaveCheckpointInput carries the data a Session join needs to persist. The caller resolves the
@@ -82,6 +97,10 @@ type SaveCheckpointInput struct {
 	RuntimeData    map[string]string
 	CompletedSteps map[string]StepFact
 	AppID          string
+	// TokenFamilyID is the token family id (tfid) minted by the caller for this grant. It is stored on
+	// the joining participant so logout can resolve the session to its families. Empty leaves the
+	// participant's tfid unset.
+	TokenFamilyID string
 }
 
 // SaveCheckpointResult reports the outcome of a save. Handle is the session's handle; Created is
@@ -93,13 +112,21 @@ type SaveCheckpointResult struct {
 	Skipped bool
 }
 
+// CriteriaRevoker revokes a token family (one authorization grant) by its id. It is injected so session
+// sign-out can drop the session's grants without the session package depending on the OAuth
+// revocation implementation. A nil revoker disables sign-out revocation.
+type CriteriaRevoker interface {
+	RevokeTokenFamily(ctx context.Context, tokenFamilyID string) error
+}
+
 // service is the store-backed implementation of Service.
 type service struct {
-	store         sessionStore
-	resolver      Resolver
-	transactioner transaction.Transactioner
-	timeouts      Timeouts
-	logger        *log.Logger
+	store           sessionStore
+	resolver        Resolver
+	transactioner   providers.Transactioner
+	criteriaRevoker CriteriaRevoker
+	timeouts        Timeouts
+	logger          *log.Logger
 }
 
 var _ Service = (*service)(nil)
@@ -128,18 +155,15 @@ func (s *service) Resolve(ctx context.Context, handle, flowID string, flowVersio
 	return sess, nil
 }
 
-// HasCheckpoint implements Service.
-func (s *service) HasCheckpoint(ctx context.Context, sessionID, checkpoint string) (bool, error) {
-	ids, err := s.store.ListCheckpointIDs(ctx, sessionID)
+// FindCheckpoint implements Service. Fetching the checkpoint context by its full primary key answers
+// the availability question by itself, so this replaces listing every checkpoint id and matching in
+// Go, and it returns the row for the caller to hand to LoadCheckpoint.
+func (s *service) FindCheckpoint(ctx context.Context, sessionID, checkpoint string) (*SessionContext, error) {
+	snapshot, err := s.store.GetByCheckpoint(ctx, sessionID, checkpoint)
 	if err != nil {
-		return false, fmt.Errorf("failed to list SSO session checkpoints: %w", err)
+		return nil, fmt.Errorf("failed to read SSO session checkpoint: %w", err)
 	}
-	for _, id := range ids {
-		if id == checkpoint {
-			return true, nil
-		}
-	}
-	return false, nil
+	return snapshot, nil
 }
 
 // SaveCheckpoint implements Service.
@@ -167,7 +191,7 @@ func (s *service) SaveCheckpoint(ctx context.Context, in SaveCheckpointInput) (S
 		if err := s.store.CreateContext(txCtx, snapshot); err != nil {
 			return err
 		}
-		return s.recordParticipant(txCtx, target.SessionID, in.AppID, now)
+		return s.recordParticipant(txCtx, target.SessionID, in.AppID, in.TokenFamilyID, now)
 	}); err != nil {
 		return SaveCheckpointResult{}, err
 	}
@@ -177,45 +201,82 @@ func (s *service) SaveCheckpoint(ctx context.Context, in SaveCheckpointInput) (S
 }
 
 // LoadCheckpoint implements Service.
-func (s *service) LoadCheckpoint(ctx context.Context, handle, checkpoint, appID string) (
+func (s *service) LoadCheckpoint(ctx context.Context, in LoadCheckpointInput) (
 	*Session, *SessionContext, error) {
-	if handle == "" {
+	if in.Handle == "" {
 		return nil, nil, fmt.Errorf("no resolved session handle to load")
 	}
-	sess, err := s.store.GetByHandle(ctx, handle)
-	if err != nil {
-		return nil, nil, err
+	// The SSO-Check node resolved the session and read this checkpoint's context to decide routing, and
+	// forwards both here, so this path re-reads neither. The resolver has already applied every liveness,
+	// flow-identity and flow-version check. What the handover gives up is noticing that a concurrent
+	// sign-out deleted the session in between: the idle slide below then matches no row and logs, and the
+	// reuse still completes. That is accepted, since the check node had already committed to skipping.
+	// ForwardedData reaches the immediate next node only, so anything not handed over is read here and a
+	// load still works when the handover did not survive to this node.
+	sess := in.Session
+	if sess != nil && sess.HandleID != in.Handle {
+		sess = nil // forwarded from a different handle; do not trust it
 	}
 	if sess == nil {
-		return nil, nil, fmt.Errorf("resolved session no longer exists")
+		loaded, err := s.store.GetByHandle(ctx, in.Handle)
+		if err != nil {
+			return nil, nil, err
+		}
+		if loaded == nil {
+			return nil, nil, fmt.Errorf("resolved session no longer exists")
+		}
+		sess = loaded
 	}
 
-	// Lazily load this checkpoint's durable session context (only the load path reads it).
-	sc, err := s.store.GetByCheckpoint(ctx, sess.SessionID, checkpoint)
-	if err != nil {
-		return nil, nil, err
+	// This checkpoint's durable context, read here only when the check node's row did not reach us.
+	snapshot := in.Context
+	if snapshot != nil && (snapshot.SessionID != sess.SessionID || snapshot.CheckpointID != in.Checkpoint) {
+		snapshot = nil // forwarded for a different session or checkpoint; do not trust it
 	}
-	if sc == nil {
-		return nil, nil, fmt.Errorf("session context for checkpoint %q no longer exists", checkpoint)
+	if snapshot == nil {
+		loaded, err := s.store.GetByCheckpoint(ctx, sess.SessionID, in.Checkpoint)
+		if err != nil {
+			return nil, nil, err
+		}
+		if loaded == nil {
+			return nil, nil, fmt.Errorf("session context for checkpoint %q no longer exists", in.Checkpoint)
+		}
+		snapshot = loaded
 	}
 
 	// Refresh last-active and slide the idle deadline under the optimistic-lock guard — touches
 	// SESSION only. The absolute deadline is left unchanged so it keeps capping total lifetime. A
 	// conflict here is non-fatal: the session loaded successfully.
+	//
+	// Throttle the write: within ActivityRefresh of the last persisted activity refresh, skip it. This
+	// hot path fires on every session reuse, and an unthrottled UPDATE per reuse is the dominant write
+	// load (and, on Postgres, the main source of dead tuples) on the session table. The persisted idle
+	// deadline then lags real activity by at most ActivityRefresh; config validation keeps that below
+	// the idle window so an active session is never skipped past its idle deadline.
 	now := time.Now().UTC()
-	sess.LastActiveAt = now
-	sess.IdleExpiresAt = now.Add(s.timeouts.Idle)
-	if updErr := s.store.Update(ctx, sess); updErr != nil {
-		s.logger.Warn(ctx, "Failed to refresh session last-active timestamp", log.Error(updErr))
+	if now.Sub(sess.LastActiveAt) >= s.timeouts.ActivityRefresh {
+		sess.LastActiveAt = now
+		sess.IdleExpiresAt = now.Add(s.timeouts.Idle)
+		if updErr := s.store.Update(ctx, sess); updErr != nil {
+			s.logger.Warn(ctx, "Failed to refresh session last-active timestamp", log.Error(updErr))
+		}
 	}
 
-	// Record the joining application as a participant. Best-effort: the session loaded fine even if
-	// this fails.
-	if partErr := s.recordParticipant(ctx, sess.SessionID, appID, now); partErr != nil {
+	// Record the joining application as a participant. When this reused session issues a token family,
+	// its SESSION_ID -> tfid mapping is security-critical: logout resolves the families to revoke from
+	// these rows, so a token stamped with a tfid that has no persisted mapping would be unrevocable.
+	// Fail closed in that case so the reuse does not issue an unrevocable family (the caller aborts the
+	// load before publishing the tfid, forcing full re-authentication). Without a tfid there is nothing
+	// to revoke, so the write stays best-effort. Either way it is not throttled with the activity
+	// refresh above: the upsert also registers an application joining the session for the first time.
+	if partErr := s.recordParticipant(ctx, sess.SessionID, in.AppID, in.TokenFamilyID, now); partErr != nil {
+		if in.TokenFamilyID != "" {
+			return nil, nil, fmt.Errorf("failed to record SSO session participant for token family: %w", partErr)
+		}
 		s.logger.Warn(ctx, "Failed to record SSO session participant", log.Error(partErr))
 	}
 
-	return sess, sc, nil
+	return sess, snapshot, nil
 }
 
 // Terminate implements Service.
@@ -240,8 +301,12 @@ func (s *service) Terminate(ctx context.Context, handle, flowID string) (*Sessio
 	// row is removed rather than tombstoned. DeleteSession removes the session row (SSO_SESSION), Delete
 	// its checkpoint contexts (SSO_SESSION_CONTEXT), and DeleteBySessionID its participants
 	// (SSO_SESSION_PARTICIPANT). Repeated calls are idempotent: once the row is gone, GetByHandle
-	// returns nil above.
+	// returns nil above. Token families are revoked first, in the same transaction, so a crash can
+	// never orphan live tokens for a deleted session.
 	if txErr := s.transactioner.Transact(ctx, func(txCtx context.Context) error {
+		if revErr := s.revokeSessionFamilies(txCtx, sess.SessionID); revErr != nil {
+			return revErr
+		}
 		if delErr := s.store.DeleteSession(txCtx, sess.SessionID); delErr != nil {
 			return delErr
 		}
@@ -255,6 +320,72 @@ func (s *service) Terminate(ctx context.Context, handle, flowID string) (*Sessio
 
 	s.logger.Debug(ctx, "Terminated SSO session", log.String("flowId", sess.FlowID))
 	return sess, nil
+}
+
+// TerminateBySubject ends every SSO session belonging to the subject. Repeated calls are idempotent.
+//
+// Unlike Terminate, this does not revoke token families. Subject-wide termination is driven by a
+// criteria revocation on the subject dimension, which already matches every token those sessions
+// hold regardless of which application's family issued it, so enumerating families here would write
+// one redundant deny-list row per participating application.
+//
+// That makes the criteria revocation a precondition, not an optimisation: the caller must have
+// persisted the subject criterion before calling this, or sessions are deleted while their tokens
+// stay live. In flows this is enforced at flow-creation time, where a flow containing
+// SessionRevocationExecutor must also contain CriteriaRevocationExecutor.
+//
+// All deletions share one transaction, so a partial failure leaves every session intact rather than
+// some subset terminated.
+func (s *service) TerminateBySubject(ctx context.Context, subjectID string) error {
+	if subjectID == "" {
+		return nil
+	}
+	sessions, err := s.store.ListBySubject(ctx, subjectID)
+	if err != nil {
+		return fmt.Errorf("failed to list sessions by subject: %w", err)
+	}
+	if len(sessions) == 0 {
+		return nil
+	}
+
+	if txErr := s.transactioner.Transact(ctx, func(txCtx context.Context) error {
+		for _, sess := range sessions {
+			if delErr := s.store.DeleteSession(txCtx, sess.SessionID); delErr != nil {
+				return delErr
+			}
+			if delErr := s.store.Delete(txCtx, sess.SessionID); delErr != nil {
+				return delErr
+			}
+			if delErr := s.store.DeleteBySessionID(txCtx, sess.SessionID); delErr != nil {
+				return delErr
+			}
+		}
+		return nil
+	}); txErr != nil {
+		return fmt.Errorf("failed to terminate subject sessions: %w", txErr)
+	}
+
+	s.logger.Debug(ctx, "Terminated all SSO sessions for subject", log.Int("sessionCount", len(sessions)))
+	return nil
+}
+
+// revokeSessionFamilies revokes the token family of every application participating in the session,
+// so signing out of a login drops all of that login's grants. It is a no-op when no family revoker is
+// wired. A participant recorded before tfid was introduced (empty tfid) is skipped by the revoker.
+func (s *service) revokeSessionFamilies(ctx context.Context, sessionID string) error {
+	if s.criteriaRevoker == nil {
+		return nil
+	}
+	participants, err := s.store.ListBySessionID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, p := range participants {
+		if err := s.criteriaRevoker.RevokeTokenFamily(ctx, p.TokenFamilyID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // targetSession returns the session this execution's checkpoints attach to, establishing one when
@@ -311,7 +442,7 @@ func (s *service) establishSession(ctx context.Context, in SaveCheckpointInput) 
 		AuthenticatedAt: now,
 		CreatedAt:       now,
 		LastActiveAt:    now,
-		// The idle deadline slides on each activity touch; the absolute deadline is fixed here and
+		// The idle deadline slides on each activity refresh; the absolute deadline is fixed here and
 		// caps the session's total lifetime. The resolver rejects a session past either deadline.
 		IdleExpiresAt:     now.Add(s.timeouts.Idle),
 		AbsoluteExpiresAt: now.Add(s.timeouts.Absolute),
@@ -339,14 +470,17 @@ func (s *service) establishSession(ctx context.Context, in SaveCheckpointInput) 
 }
 
 // recordParticipant records the application as a participant of the session, refreshing its
-// last-active time if it has joined before. It is a no-op when the application id is unknown.
-func (s *service) recordParticipant(ctx context.Context, sessionID, appID string, now time.Time) error {
+// last-active time and current-grant tfid if it has joined before. It is a no-op when the
+// application id is unknown.
+func (s *service) recordParticipant(ctx context.Context, sessionID, appID, tokenFamilyID string,
+	now time.Time) error {
 	if appID == "" {
 		return nil
 	}
 	return s.store.Record(ctx, Participant{
 		SessionID:     sessionID,
 		AppID:         appID,
+		TokenFamilyID: tokenFamilyID,
 		FirstJoinedAt: now,
 		LastActiveAt:  now,
 	})

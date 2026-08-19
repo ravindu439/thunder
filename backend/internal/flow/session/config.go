@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -29,10 +14,17 @@ import (
 type Config struct {
 	IdleTimeoutSeconds     int64 `json:"idleTimeoutSeconds"     yaml:"idleTimeoutSeconds"`
 	AbsoluteTimeoutSeconds int64 `json:"absoluteTimeoutSeconds" yaml:"absoluteTimeoutSeconds"`
+	// ActivityRefreshIntervalSeconds is the minimum spacing between persisted activity refreshes: a
+	// session reuse within this window of the last persisted activity refresh skips the idle-slide
+	// write, cutting write load on the hot path. It is honored as configured and must be less than
+	// idleTimeoutSeconds (enforced by Validate), so an active session is never skipped past its idle
+	// deadline.
+	ActivityRefreshIntervalSeconds int64 `json:"activityRefreshIntervalSeconds" yaml:"activityRefreshIntervalSeconds"`
 }
 
-// Validate ensures the configured session timeouts are coherent. Unset (zero) values are allowed
-// and fall back to defaults, so only set values are checked.
+// Validate ensures the configured session timeouts are coherent. Unset (zero) values are allowed and
+// fall back to defaults; the activity-refresh/idle invariant is checked against the resolved
+// durations so a defaulted side cannot silently violate it.
 func (c Config) Validate() error {
 	if c.IdleTimeoutSeconds < 0 {
 		return fmt.Errorf("session.idleTimeoutSeconds must be greater than or equal to 0")
@@ -40,9 +32,27 @@ func (c Config) Validate() error {
 	if c.AbsoluteTimeoutSeconds < 0 {
 		return fmt.Errorf("session.absoluteTimeoutSeconds must be greater than or equal to 0")
 	}
+	if c.ActivityRefreshIntervalSeconds < 0 {
+		return fmt.Errorf("session.activityRefreshIntervalSeconds must be greater than or equal to 0")
+	}
+	// Reject values that would overflow when converted to a time.Duration (nanoseconds); such a value
+	// wraps to a negative duration and would otherwise slip past the invariant check below.
+	if c.IdleTimeoutSeconds > maxTimeoutSeconds || c.AbsoluteTimeoutSeconds > maxTimeoutSeconds ||
+		c.ActivityRefreshIntervalSeconds > maxTimeoutSeconds {
+		return fmt.Errorf("session timeout seconds must not exceed %d", maxTimeoutSeconds)
+	}
 	if c.IdleTimeoutSeconds > 0 && c.AbsoluteTimeoutSeconds > 0 &&
 		c.IdleTimeoutSeconds > c.AbsoluteTimeoutSeconds {
 		return fmt.Errorf("session.idleTimeoutSeconds must not exceed absoluteTimeoutSeconds")
+	}
+	// Check the resolved durations, not the raw config values: a zero means "use the default", so the
+	// activity-refresh/idle invariant must be verified after defaults are substituted (and idle is
+	// clamped to absolute). Comparing only raw positive values lets a defaulted side violate it, e.g.
+	// a small configured idle with a defaulted refresh, or a defaulted idle with a large configured
+	// refresh, either of which could skip an active session past its idle deadline.
+	resolved := NewTimeouts(c.IdleTimeoutSeconds, c.AbsoluteTimeoutSeconds, c.ActivityRefreshIntervalSeconds)
+	if resolved.ActivityRefresh >= resolved.Idle {
+		return fmt.Errorf("session.activityRefreshIntervalSeconds must be less than idleTimeoutSeconds")
 	}
 	return nil
 }
@@ -81,6 +91,9 @@ func (ConfigHandler) Merge(readOnly, writable any) any {
 	}
 	if wr.AbsoluteTimeoutSeconds > 0 {
 		merged.AbsoluteTimeoutSeconds = wr.AbsoluteTimeoutSeconds
+	}
+	if wr.ActivityRefreshIntervalSeconds > 0 {
+		merged.ActivityRefreshIntervalSeconds = wr.ActivityRefreshIntervalSeconds
 	}
 	return merged
 }

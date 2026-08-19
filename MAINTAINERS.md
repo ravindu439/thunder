@@ -21,12 +21,15 @@ These Maintainers are responsible for a specific area of the codebase. Their app
 
 | Name | GitHub ID | Affiliation |
 | ----- | ----- | ----- |
+| Anuradha Karunarathna | [@AnuradhaSK](https://github.com/AnuradhaSK) | WSO2 |
 | Anusha Sunkada  | [@anushasunkada](https://github.com/anushasunkada)  | MOSIP  |
+| Ayesha Dissanayaka | [@ayshsandu](https://github.com/ayshsandu) | WSO2 |
 | Brion Silva  | [@brionmario](https://github.com/brionmario)  | WSO2  |
 | Charith Rajitha  | [@rajithacharith](https://github.com/rajithacharith)  | WSO2  |
 | Jerad Rutnam  | [@jeradrutnam](https://github.com/jeradrutnam)  | WSO2  |
 | Omal Wijegunawardana  | [@DonOmalVindula](https://github.com/DonOmalVindula)  | WSO2  |
 | Piumini Ranasinghe  | [@KaveeshaPiumini](https://github.com/KaveeshaPiumini)  | WSO2  |
+| Maduranga Siriwardena | [@madurangasiriwardena](https://github.com/madurangasiriwardena) | WSO2 |
 | Sahan Dilshan  | [@sahandilshan](https://github.com/sahandilshan)  | WSO2  |
 | Thamindu Jayawickrama  | [@ThaminduDilshan](https://github.com/ThaminduDilshan)  | WSO2  |
 | Thivaharan Kalyanasundaram  | [@thiva-k](https://github.com/thiva-k)  | WSO2  |

@@ -1,26 +1,12 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, it, expect} from 'vitest';
 import VisualFlowConstants from '../../constants/VisualFlowConstants';
 import type {FlowDefinitionResponse, FlowNode} from '../../models/responses';
 import {StaticStepTypes, StepTypes} from '../../models/steps';
 import {transformFlowToCanvas} from '../flowToCanvasTransformer';
+import {transformReactFlow} from '../reactFlowTransformer';
 
 describe('flowToCanvasTransformer', () => {
   const createBaseFlowData = (nodes: FlowNode[]): FlowDefinitionResponse => ({
@@ -154,6 +140,81 @@ describe('flowToCanvasTransformer', () => {
 
         expect(result.nodes[0].data.action).toHaveProperty('onIncomplete');
         expect(result.nodes[0].data.action?.onIncomplete).toBe('incomplete-node');
+      });
+
+      it('should restore the branching outcomes the executor declares when the flow omits them', () => {
+        // A flow only persists an outcome that was wired to an edge, so a node saved without a
+        // failure/incomplete connection came back without the keys that drive its output handles.
+        const flowData = createBaseFlowData([
+          {
+            id: 'invite-node',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'InviteExecutor', mode: 'generate'},
+            onSuccess: 'next-node',
+            layout: {position: {x: 300, y: 0}, size: {width: 200, height: 100}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        expect(result.nodes[0].data.action).toMatchObject({
+          onSuccess: 'next-node',
+          onFailure: '',
+          onIncomplete: '',
+        });
+      });
+
+      it('should keep the persisted target over the restored default outcome', () => {
+        const flowData = createBaseFlowData([
+          {
+            id: 'invite-node',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'InviteExecutor', mode: 'generate'},
+            onSuccess: 'next-node',
+            onFailure: 'failure-node',
+            layout: {position: {x: 300, y: 0}, size: {width: 200, height: 100}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        expect(result.nodes[0].data.action?.onFailure).toBe('failure-node');
+        expect(result.nodes[0].data.action?.onIncomplete).toBe('');
+      });
+
+      it('should not restore branching outcomes for an executor that declares none', () => {
+        const flowData = createBaseFlowData([
+          {
+            id: 'revoke-node',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'SessionRevocationExecutor'},
+            onSuccess: 'next-node',
+            layout: {position: {x: 300, y: 0}, size: {width: 200, height: 100}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        expect(result.nodes[0].data.action).not.toHaveProperty('onFailure');
+        expect(result.nodes[0].data.action).not.toHaveProperty('onIncomplete');
+      });
+
+      it('should keep only the persisted outcomes for an executor missing from the catalog', () => {
+        const flowData = createBaseFlowData([
+          {
+            id: 'unknown-node',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'NotACatalogExecutor'},
+            onSuccess: 'next-node',
+            onFailure: 'failure-node',
+            layout: {position: {x: 300, y: 0}, size: {width: 200, height: 100}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        expect(result.nodes[0].data.action?.onFailure).toBe('failure-node');
+        expect(result.nodes[0].data.action).not.toHaveProperty('onIncomplete');
       });
 
       it('should transform DECISION node correctly', () => {
@@ -462,6 +523,89 @@ describe('flowToCanvasTransformer', () => {
         });
       });
 
+      it("should restore the prompt action's type onto the element", () => {
+        // A definition authored outside the builder carries the type only on the prompt action.
+        // Without restoring it the property panel cannot show it and serialization drops it.
+        const flowData = createBaseFlowData([
+          {
+            id: 'prompt-node',
+            type: 'PROMPT',
+            meta: {
+              components: [{id: 'action_confirm', type: 'ACTION', label: 'Sign out'}],
+            },
+            prompts: [{action: {ref: 'action_confirm', type: 'CONFIRM', nextNode: 'next-node'}}],
+            layout: {position: {x: 0, y: 0}, size: {width: 300, height: 200}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        const component = result.nodes[0].data.components?.[0] as Record<string, unknown> | undefined;
+        expect(component?.actionType).toBe('CONFIRM');
+      });
+
+      it('should restore the type when the element carries a cleared action type', () => {
+        // Clearing the Action selector writes an empty string rather than dropping the key, and
+        // cleanComponents keeps it, so a definition saved after a clear carries actionType: ''.
+        // That means no type, so it must not block the backfill.
+        const flowData = createBaseFlowData([
+          {
+            id: 'prompt-node',
+            type: 'PROMPT',
+            meta: {
+              components: [{id: 'action_confirm', type: 'ACTION', actionType: '', label: 'Sign out'}],
+            },
+            prompts: [{action: {ref: 'action_confirm', type: 'CONFIRM', nextNode: 'next-node'}}],
+            layout: {position: {x: 0, y: 0}, size: {width: 300, height: 200}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        const component = result.nodes[0].data.components?.[0] as Record<string, unknown> | undefined;
+        expect(component?.actionType).toBe('CONFIRM');
+      });
+
+      it('should keep an action type already on the element over the prompt action', () => {
+        // The element is the authoring surface, so an unwired button that still carries a type
+        // must not have it overwritten by a stale prompt action.
+        const flowData = createBaseFlowData([
+          {
+            id: 'prompt-node',
+            type: 'PROMPT',
+            meta: {
+              components: [{id: 'action_confirm', type: 'ACTION', actionType: 'REJECT', label: 'No'}],
+            },
+            prompts: [{action: {ref: 'action_confirm', type: 'CONFIRM', nextNode: 'next-node'}}],
+            layout: {position: {x: 0, y: 0}, size: {width: 300, height: 200}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        const component = result.nodes[0].data.components?.[0] as Record<string, unknown> | undefined;
+        expect(component?.actionType).toBe('REJECT');
+      });
+
+      it('should leave the element without an action type when the prompt action has none', () => {
+        const flowData = createBaseFlowData([
+          {
+            id: 'prompt-node',
+            type: 'PROMPT',
+            meta: {
+              components: [{id: 'submit-btn', type: 'ACTION', label: 'Submit'}],
+            },
+            prompts: [{action: {ref: 'submit-btn', nextNode: 'next-node'}}],
+            layout: {position: {x: 0, y: 0}, size: {width: 300, height: 200}},
+          },
+        ]);
+
+        const result = transformFlowToCanvas(flowData);
+
+        const component = result.nodes[0].data.components?.[0] as Record<string, unknown> | undefined;
+        expect(component).not.toHaveProperty('actionType');
+      });
+
       it('should normalize INPUT element properties', () => {
         const flowData = createBaseFlowData([
           {
@@ -677,6 +821,43 @@ describe('flowToCanvasTransformer', () => {
         const result = transformFlowToCanvas(flowData);
 
         expect(result.edges).toHaveLength(0);
+      });
+    });
+
+    describe('Action Type Round Trip', () => {
+      const signOutFlow = (): FlowDefinitionResponse =>
+        createBaseFlowData([
+          {
+            id: 'prompt_confirm',
+            type: 'PROMPT',
+            meta: {
+              components: [{id: 'action_confirm', type: 'ACTION', label: 'Sign out'}],
+            },
+            prompts: [{action: {ref: 'action_confirm', type: 'CONFIRM', nextNode: 'session_signout'}}],
+            layout: {position: {x: 0, y: 0}, size: {width: 300, height: 200}},
+          },
+          {
+            id: 'session_signout',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'SessionSignOutExecutor'},
+            layout: {position: {x: 400, y: 0}, size: {width: 200, height: 100}},
+          },
+        ]);
+
+      it('should keep the action type when a definition is loaded and serialized again', () => {
+        // Opening a flow in the builder and saving it must not change its meaning. Before the type
+        // was restored onto the element, this round trip silently dropped it and a sign-out flow
+        // regressed into an endless confirmation loop.
+        const canvas = transformFlowToCanvas(signOutFlow());
+
+        const saved = transformReactFlow({edges: canvas.edges, nodes: canvas.nodes});
+
+        const prompt = saved.nodes.find((node) => node.id === 'prompt_confirm');
+        expect(prompt?.prompts?.[0].action).toMatchObject({
+          ref: 'action_confirm',
+          nextNode: 'session_signout',
+          type: 'CONFIRM',
+        });
       });
     });
   });

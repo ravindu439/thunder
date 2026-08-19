@@ -1,27 +1,11 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
 import (
 	"encoding/json"
 	"errors"
-	"html"
 	"slices"
 	"strconv"
 	"strings"
@@ -78,6 +62,7 @@ func newConsentExecutor(
 		defaultInputs, prerequisites, &providers.ExecutorMeta{
 			SupportedProperties: []providers.ExecutorSupportedProperties{
 				{Property: "timeout"},
+				{Property: propertyKeyConsentFailOnDeny},
 			},
 		})
 
@@ -160,7 +145,7 @@ func (e *consentExecutor) checkConsent(ctx *providers.NodeContext, execResp *pro
 	promptData, svcErr := e.consentEnforcer.ResolveConsent(
 		ctx.Context, ouID, appID, appName, entityRef.EntityID,
 		essentialAttributes, optionalAttributes, authorizedPermissions,
-		availableAttributes, forceReprompt, buildRuntimeMetadata(ctx))
+		availableAttributes, forceReprompt, core.BuildProviderMetadata(ctx).RuntimeMetadata)
 	if svcErr != nil {
 		if svcErr.Type == tidcommon.ClientErrorType {
 			logger.Debug(ctx.Context, "Client error while resolving user consent", log.Any("error", svcErr))
@@ -227,16 +212,30 @@ func (e *consentExecutor) handleConsentDecisions(ctx *providers.NodeContext, exe
 		return execResp, nil
 	}
 
-	// SanitizeStringMap HTML-escapes all user inputs as an XSS prevention measure.
-	// For the consent_decisions field the value is a JSON string, so HTML entities
-	// must be unescaped before parsing
-	decisionsJSON = html.UnescapeString(decisionsJSON)
-
 	var decisions providers.ConsentDecisions
 	if err := json.Unmarshal([]byte(decisionsJSON), &decisions); err != nil {
 		logger.Error(ctx.Context, "Failed to parse consent decisions", log.Error(err))
 		execResp.Status = providers.ExecFailure
 		execResp.Error = &ErrConsentDecisionsParseFail
+		return execResp, nil
+	}
+
+	failOnDeny, _ := ctx.NodeProperties[propertyKeyConsentFailOnDeny].(bool)
+
+	// A timed out prompt is not a user decision, so nothing is recorded and nothing is consented.
+	// The expiry check below is skipped because such a submission is expected to arrive late.
+	if decisions.Reason == providers.ConsentDecisionReasonTimeout {
+		if failOnDeny {
+			logger.Debug(ctx.Context, "Consent prompt timed out and failOnDeny is enabled. Failing the flow")
+			execResp.Status = providers.ExecFailure
+			execResp.Error = &ErrConsentPromptTimedOut
+			return execResp, nil
+		}
+
+		logger.Debug(ctx.Context, "Consent prompt timed out. Completing without recording consent")
+		execResp.RuntimeData[common.RuntimeKeyConsentedAttributes] = ""
+		execResp.RuntimeData[common.RuntimeKeyConsentedPermissions] = ""
+		execResp.Status = providers.ExecComplete
 		return execResp, nil
 	}
 
@@ -264,7 +263,7 @@ func (e *consentExecutor) handleConsentDecisions(ctx *providers.NodeContext, exe
 	// Always record consent decisions (including denials) for audit/compliance purposes.
 	// The session token is used to verify completeness and enforce essential attribute rules
 	consentRecord, svcErr := e.consentEnforcer.RecordConsent(ctx.Context, ouID, appID, userID,
-		&decisions, sessionToken, validityPeriod, buildRuntimeMetadata(ctx))
+		&decisions, sessionToken, validityPeriod, core.BuildProviderMetadata(ctx).RuntimeMetadata)
 	if svcErr != nil {
 		// Essential consent denied: the consent record was persisted but the user denied
 		// a required attribute, so the flow cannot proceed
@@ -284,6 +283,16 @@ func (e *consentExecutor) handleConsentDecisions(ctx *providers.NodeContext, exe
 
 		logger.Error(ctx.Context, "Failed to record consent", log.Any("error", svcErr))
 		return nil, errors.New("failed to record consent")
+	}
+
+	// Fail the flow when the node opts into strict denial handling and the user did not approve
+	// the prompt. This is verified with the IsApproved flag on the consent decisions struct.
+	if failOnDeny && !decisions.Approved {
+		logger.Debug(ctx.Context, "User denied consent and failOnDeny is enabled",
+			log.String("consentID", consentRecord.ID))
+		execResp.Status = providers.ExecFailure
+		execResp.Error = &ErrConsentDenied
+		return execResp, nil
 	}
 
 	// Store the consent ID in RuntimeData for downstream usage
@@ -331,7 +340,7 @@ func (e *consentExecutor) getRequiredAttributes(ctx *providers.NodeContext) (
 }
 
 // buildAugmentedAvailableAttributes returns an AttributesResponse value augmented with
-// special attribute keys (groups, userType, ouId, ouName, ouHandle) that are present by
+// special attribute keys (groups, roles, userType, ouId, ouName, ouHandle) that are present by
 // construction in the authenticated user context but are never included in AttributesResponse
 // by authentication providers.
 //
@@ -371,6 +380,7 @@ func (e *consentExecutor) buildAugmentedAvailableAttributes(
 	}
 	if entityRef.EntityID != "" {
 		augmented[oauth2const.UserAttributeGroups] = &providers.AttributeResponse{}
+		augmented[oauth2const.UserAttributeRoles] = &providers.AttributeResponse{}
 	}
 
 	return &providers.AttributesResponse{

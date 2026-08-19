@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package resource
 
@@ -24,8 +9,10 @@ type ResourceServerResponse struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Identifier  string `json:"identifier,omitempty"`
+	Type        string `json:"type,omitempty"`
 	OUID        string `json:"ouId"`
 	Delimiter   string `json:"delimiter"`
+	IsReadOnly  bool   `json:"isReadOnly"`
 }
 
 // ResourceResponse represents a resource response.
@@ -45,6 +32,7 @@ type ActionResponse struct {
 	Handle      string `json:"handle"`
 	Description string `json:"description,omitempty"`
 	Permission  string `json:"permission"`
+	Kind        string `json:"kind,omitempty"`
 }
 
 // LinkResponse represents a pagination link.
@@ -100,6 +88,7 @@ type CreateResourceServerRequest struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description,omitempty"`
 	Identifier  string  `json:"identifier,omitempty"`
+	Type        string  `json:"type,omitempty"`
 	OUID        string  `json:"ouId"`
 	Delimiter   *string `json:"delimiter,omitempty"`
 }
@@ -131,6 +120,7 @@ type CreateActionRequest struct {
 	Name        string `json:"name"`
 	Handle      string `json:"handle"`
 	Description string `json:"description,omitempty"`
+	Kind        string `json:"kind,omitempty"`
 }
 
 // UpdateActionRequest represents the request to update an action.

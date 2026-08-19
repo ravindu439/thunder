@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package oidc
 
@@ -513,8 +498,11 @@ func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateWithUserInfoMerge() {
 	suite.mockOAuthService.On("ExchangeCodeForToken", mock.Anything, testOIDCIDPID, "auth_code", false).
 		Return(tokenResp, nil)
 	cfg := &oauth.OAuthClientConfig{
-		OAuthEndpoints: oauth.OAuthEndpoints{JwksEndpoint: "https://example.com/jwks"},
-		Scopes:         []string{"openid", "profile"},
+		OAuthEndpoints: oauth.OAuthEndpoints{
+			JwksEndpoint:     "https://example.com/jwks",
+			UserInfoEndpoint: "https://example.com/userinfo",
+		},
+		Scopes: []string{"openid", "profile"},
 	}
 	suite.mockOAuthService.On("GetOAuthClientConfig", mock.Anything, testOIDCIDPID).Return(cfg, nil)
 	suite.mockJWTService.On("VerifyJWTWithJWKS", mock.Anything, idToken, "https://example.com/jwks", "", "").Return(nil)
@@ -538,6 +526,39 @@ func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateWithUserInfoMerge() {
 	suite.Equal("John Doe", result.AuthenticatedClaims["name"])
 }
 
+func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateSkipsUserInfoWhenEndpointNotConfigured() {
+	suite.mockOAuthService = oauthmock.NewOAuthAuthnServiceInterfaceMock(suite.T())
+	suite.mockJWTService = jwtmock.NewJWTServiceInterfaceMock(suite.T())
+
+	service := newOIDCAuthnService(suite.mockOAuthService, suite.mockJWTService)
+	cast, ok := service.(*oidcAuthnService)
+	suite.True(ok)
+	suite.service = *cast
+
+	idToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." +
+		"eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0Ijox" +
+		"NTE2MjM5MDIyLCJub25jZSI6InRlc3Qtbm9uY2UtdmFsdWUifQ." +
+		"fake_sig"
+	tokenResp := &oauth.TokenResponse{AccessToken: "access_token", IDToken: idToken, TokenType: "Bearer"}
+	suite.mockOAuthService.On("ExchangeCodeForToken", mock.Anything, testOIDCIDPID, "auth_code", false).
+		Return(tokenResp, nil)
+	// Extra scopes are configured, but with no UserInfo endpoint there is nothing to call.
+	cfg := &oauth.OAuthClientConfig{
+		OAuthEndpoints: oauth.OAuthEndpoints{JwksEndpoint: "https://example.com/jwks"},
+		Scopes:         []string{"openid", "profile"},
+	}
+	suite.mockOAuthService.On("GetOAuthClientConfig", mock.Anything, testOIDCIDPID).Return(cfg, nil)
+	suite.mockJWTService.On("VerifyJWTWithJWKS", mock.Anything, idToken, "https://example.com/jwks", "", "").Return(nil)
+	suite.mockOAuthService.On("BuildFederatedAuthResult", mock.Anything, testOIDCIDPID, "1234567890", mock.Anything).
+		Return(&authncm.AuthnResult{Token: map[string]interface{}{"sub": "1234567890"}}, nil)
+
+	result, svcErr := suite.service.Authenticate(context.Background(), testOIDCIDPID,
+		authncm.AuthorizationData{Code: "auth_code", Nonce: "test-nonce-value"})
+	suite.Nil(svcErr)
+	suite.NotNil(result)
+	suite.mockOAuthService.AssertNotCalled(suite.T(), "FetchUserInfo", mock.Anything, mock.Anything, mock.Anything)
+}
+
 func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateUserInfoSubMismatch() {
 	suite.mockOAuthService = oauthmock.NewOAuthAuthnServiceInterfaceMock(suite.T())
 	suite.mockJWTService = jwtmock.NewJWTServiceInterfaceMock(suite.T())
@@ -555,8 +576,11 @@ func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateUserInfoSubMismatch() {
 	suite.mockOAuthService.On("ExchangeCodeForToken", mock.Anything, testOIDCIDPID, "auth_code", false).
 		Return(tokenResp, nil)
 	cfg := &oauth.OAuthClientConfig{
-		OAuthEndpoints: oauth.OAuthEndpoints{JwksEndpoint: "https://example.com/jwks"},
-		Scopes:         []string{"openid", "profile"},
+		OAuthEndpoints: oauth.OAuthEndpoints{
+			JwksEndpoint:     "https://example.com/jwks",
+			UserInfoEndpoint: "https://example.com/userinfo",
+		},
+		Scopes: []string{"openid", "profile"},
 	}
 	suite.mockOAuthService.On("GetOAuthClientConfig", mock.Anything, testOIDCIDPID).Return(cfg, nil)
 	suite.mockJWTService.On("VerifyJWTWithJWKS", mock.Anything, idToken, "https://example.com/jwks", "", "").Return(nil)
@@ -636,8 +660,11 @@ func (suite *OIDCAuthnServiceTestSuite) TestAuthenticateUserInfoFetchError() {
 	suite.mockOAuthService.On("ExchangeCodeForToken", mock.Anything, testOIDCIDPID, "auth_code", false).
 		Return(tokenResp, nil)
 	cfg := &oauth.OAuthClientConfig{
-		OAuthEndpoints: oauth.OAuthEndpoints{JwksEndpoint: "https://example.com/jwks"},
-		Scopes:         []string{"openid", "profile"},
+		OAuthEndpoints: oauth.OAuthEndpoints{
+			JwksEndpoint:     "https://example.com/jwks",
+			UserInfoEndpoint: "https://example.com/userinfo",
+		},
+		Scopes: []string{"openid", "profile"},
 	}
 	suite.mockOAuthService.On("GetOAuthClientConfig", mock.Anything, testOIDCIDPID).Return(cfg, nil)
 	suite.mockJWTService.On("VerifyJWTWithJWKS", mock.Anything, idToken, "https://example.com/jwks", "", "").Return(nil)

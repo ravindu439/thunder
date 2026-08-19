@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package config
 
@@ -473,6 +458,36 @@ func (suite *ConfigTestSuite) TestLogConfigOverrideToZeroValues() {
 	assert.Equal(suite.T(), boolPtr(true), base2.Log.Output.Console.Enabled, "nil override keeps the default")
 }
 
+// TestOAuthSendServerErrorsToClientOverride verifies the presence-based (pointer) merge for
+// the OAuth.SendServerErrorsToClient field:
+func (suite *ConfigTestSuite) TestOAuthSendServerErrorsToClientOverride() {
+	base := &Config{}
+	base.OAuth.SendServerErrorsToClient = boolPtr(false)
+
+	user := &Config{}
+	user.OAuth.SendServerErrorsToClient = boolPtr(true)
+
+	mergeConfigs(base, user)
+	assert.Equal(suite.T(), boolPtr(true), base.OAuth.SendServerErrorsToClient,
+		"true must override the false default")
+
+	// The reverse direction is what a plain bool could not express: a zero-valued user field is
+	// skipped by the merge, so only the pointer lets deployment.yaml turn the toggle back off.
+	base2 := &Config{}
+	base2.OAuth.SendServerErrorsToClient = boolPtr(true)
+	user2 := &Config{}
+	user2.OAuth.SendServerErrorsToClient = boolPtr(false)
+	mergeConfigs(base2, user2)
+	assert.Equal(suite.T(), boolPtr(false), base2.OAuth.SendServerErrorsToClient,
+		"explicit false must override a true base")
+
+	base3 := &Config{}
+	base3.OAuth.SendServerErrorsToClient = boolPtr(false)
+	mergeConfigs(base3, &Config{})
+	assert.Equal(suite.T(), boolPtr(false), base3.OAuth.SendServerErrorsToClient,
+		"nil override keeps the default")
+}
+
 func (suite *ConfigTestSuite) TestLoadConfigWithDefaults_ErrorCases() {
 	tempDir := suite.T().TempDir()
 
@@ -837,6 +852,81 @@ func (suite *ConfigTestSuite) TestMergeStructs_PrimitiveTypes() {
 	assert.Equal(suite.T(), 100, base.IntField)              // Not overridden (zero value)
 	assert.Equal(suite.T(), true, base.BoolField)            // Not overridden (zero value)
 	assert.Equal(suite.T(), 2.71, base.Float64Field)         // Overridden
+}
+
+// TestMergeConfigs_BoolPointerOverride guards the fix for the bug where plain bool config fields
+// defaulting to true in default.json could not be overridden to false via deployment.yaml (a user
+// false was indistinguishable from the zero value and silently dropped). The affected fields use
+// *bool so an explicit false overrides while an absent value keeps the default.
+func (suite *ConfigTestSuite) TestMergeConfigs_BoolPointerOverride() {
+	newBase := func() *Config {
+		return &Config{
+			Notification: NotificationConfig{OTP: OTPConfig{UseNumericOnly: boolPtr(true)}},
+			OpenID4VP:    OpenID4VPConfig{EnforceKeyBinding: boolPtr(true)},
+			OAuth: engineconfig.OAuthConfig{
+				RefreshToken:    engineconfig.RefreshTokenConfig{RevokePreviousOnRenew: boolPtr(true)},
+				TokenRevocation: engineconfig.OAuthTokenRevocationConfig{Enabled: boolPtr(true)},
+				Logout:          engineconfig.LogoutConfig{Enabled: boolPtr(true)},
+				Revocation: engineconfig.RevocationConfig{TokenFamily: engineconfig.TokenFamilyRevocationConfig{
+					OnRefreshReplay:  boolPtr(true),
+					OnExplicitRevoke: boolPtr(true),
+					OnCodeReplay:     boolPtr(true),
+				}},
+			},
+			Server: engineconfig.ServerConfig{SecurityConfig: engineconfig.SecurityConfig{
+				TokenRevocation: engineconfig.TokenRevocationConfig{Enabled: boolPtr(true)},
+			}},
+		}
+	}
+
+	suite.Run("explicit false overrides the true default", func() {
+		base := newBase()
+		user := &Config{
+			Notification: NotificationConfig{OTP: OTPConfig{UseNumericOnly: boolPtr(false)}},
+			OpenID4VP:    OpenID4VPConfig{EnforceKeyBinding: boolPtr(false)},
+			OAuth: engineconfig.OAuthConfig{
+				RefreshToken:    engineconfig.RefreshTokenConfig{RevokePreviousOnRenew: boolPtr(false)},
+				TokenRevocation: engineconfig.OAuthTokenRevocationConfig{Enabled: boolPtr(false)},
+				Logout:          engineconfig.LogoutConfig{Enabled: boolPtr(false)},
+				Revocation: engineconfig.RevocationConfig{TokenFamily: engineconfig.TokenFamilyRevocationConfig{
+					OnRefreshReplay:  boolPtr(false),
+					OnExplicitRevoke: boolPtr(false),
+					OnCodeReplay:     boolPtr(false),
+				}},
+			},
+			Server: engineconfig.ServerConfig{SecurityConfig: engineconfig.SecurityConfig{
+				TokenRevocation: engineconfig.TokenRevocationConfig{Enabled: boolPtr(false)},
+			}},
+		}
+
+		mergeConfigs(base, user)
+
+		assert.False(suite.T(), base.Notification.OTP.UsesNumericOnly())
+		assert.False(suite.T(), base.OpenID4VP.EnforceKeyBindingEnabled())
+		assert.False(suite.T(), base.OAuth.RefreshToken.RevokePreviousOnRenewEnabled())
+		assert.False(suite.T(), base.OAuth.TokenRevocation.IsEnabled())
+		assert.False(suite.T(), base.OAuth.Logout.IsEnabled())
+		assert.False(suite.T(), base.OAuth.Revocation.TokenFamily.OnRefreshReplayEnabled())
+		assert.False(suite.T(), base.OAuth.Revocation.TokenFamily.OnExplicitRevokeEnabled())
+		assert.False(suite.T(), base.OAuth.Revocation.TokenFamily.OnCodeReplayEnabled())
+		assert.False(suite.T(), base.Server.SecurityConfig.TokenRevocation.IsEnabled())
+	})
+
+	suite.Run("absent value keeps the true default", func() {
+		base := newBase()
+
+		mergeConfigs(base, &Config{})
+
+		assert.True(suite.T(), base.Notification.OTP.UsesNumericOnly())
+		assert.True(suite.T(), base.OpenID4VP.EnforceKeyBindingEnabled())
+		assert.True(suite.T(), base.OAuth.RefreshToken.RevokePreviousOnRenewEnabled())
+		assert.True(suite.T(), base.OAuth.TokenRevocation.IsEnabled())
+		assert.True(suite.T(), base.OAuth.Logout.IsEnabled())
+		assert.True(suite.T(), base.OAuth.Revocation.TokenFamily.OnRefreshReplayEnabled())
+		assert.True(suite.T(), base.OAuth.Revocation.TokenFamily.OnExplicitRevokeEnabled())
+		assert.True(suite.T(), base.OAuth.Revocation.TokenFamily.OnCodeReplayEnabled())
+		assert.True(suite.T(), base.Server.SecurityConfig.TokenRevocation.IsEnabled())
+	})
 }
 
 func (suite *ConfigTestSuite) TestMergeStructs_SliceHandling() {
@@ -1492,7 +1582,7 @@ flow:
 func (suite *ConfigTestSuite) TestOTPConfig_Validate_Defaults() {
 	cfg := &OTPConfig{
 		Length:                6,
-		UseNumericOnly:        true,
+		UseNumericOnly:        boolPtr(true),
 		ValidityPeriodSeconds: 120,
 	}
 	assert.NoError(suite.T(), cfg.Validate())

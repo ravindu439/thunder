@@ -1,28 +1,14 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {zodResolver} from '@hookform/resolvers/zod';
 import {SettingsCard} from '@thunderid/components';
+import type {Application} from '@thunderid/configure-applications';
 import {Box, Stack, Typography, TextField} from '@wso2/oxygen-ui';
+import {useEffect} from 'react';
 import {useForm, Controller} from 'react-hook-form';
 import {useTranslation} from 'react-i18next';
 import {z} from 'zod';
-import type {Application} from '../../../models/application';
 
 /**
  * Props for the {@link UrlsSection} component.
@@ -46,6 +32,11 @@ interface UrlsSectionProps {
    * Singular noun used to refer to the entity in user-visible copy (default: 'application').
    */
   entityLabel?: string;
+  /**
+   * Callback function to handle validation changes
+   * @param hasErrors - Boolean indicating if the URLs have validation errors
+   */
+  onValidationChange?: (hasErrors: boolean) => void;
 }
 
 /**
@@ -66,6 +57,7 @@ export default function UrlsSection({
   editedApp,
   onFieldChange,
   entityLabel = 'application',
+  onValidationChange = undefined,
 }: UrlsSectionProps) {
   const {t} = useTranslation();
 
@@ -78,6 +70,7 @@ export default function UrlsSection({
 
   const {
     control,
+    trigger,
     formState: {errors},
   } = useForm<UrlsFormData>({
     resolver: zodResolver(urlsSchema),
@@ -87,6 +80,19 @@ export default function UrlsSection({
       policyUri: editedApp.policyUri ?? application.policyUri ?? '',
     },
   });
+
+  // Validate default values on mount so stale validation state doesn't survive a remount.
+  useEffect(() => {
+    void trigger();
+  }, [trigger]);
+
+  // Effect to notify parent component of validation state changes
+  useEffect(() => {
+    if (onValidationChange) {
+      const hasErrors = !!errors.tosUri || !!errors.policyUri;
+      onValidationChange(hasErrors);
+    }
+  }, [errors.tosUri, errors.policyUri, onValidationChange]);
 
   return (
     <SettingsCard

@@ -1,6 +1,6 @@
 # ThunderID Helm Chart
 
-This repository contains the Helm chart for ThunderID, a lightweight user and identity management system designed for modern application development.
+This repository contains the Helm chart for ThunderID, an open-source IAM stack designed for modern application development.
 
 ## Configuration Value Types
 
@@ -378,6 +378,7 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 |---------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------| ---------------------------- |
 | `configuration.server.port`                       | ThunderID server port                                                                                                                                     | `8090`                       |
 | `configuration.server.httpOnly`                   | Whether the server should run in HTTP-only mode                                                                                                         | `false`                      |
+| `configuration.server.identifier`                 | Logical deployment identifier that scopes every stored record. Give each deployment sharing a database its own value. Empty keeps the server default.    | `""` (`default-deployment`)  |
 | `configuration.server.publicURL`                  | Public URL of the ThunderID server                                                                                                                        | `https://thunderid.local`      |
 | `configuration.server.security.directAuthSecret`  | Secret that gates the Direct API endpoints (`/auth/**`, `/register/passkey/**`). Leave unset to let the setup job generate one per deployment onto the secrets PVC (referenced from `deployment.yaml` as `file://config/secrets/direct_auth_secret`); set an explicit value to override generation. When unset and `setup.enabled=false`, the Direct API stays blocked. See [Direct API Secret](#direct-api-secret). | `""` (generated) |
 | `configuration.gateClient.hostname`               | Gate client hostname                                                                                                                                    | `thunderid.local`              |
@@ -409,7 +410,7 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 > The default `configuration.crypto.keys` list includes two entries: `default-key` (RSA, used for JWT signing) and `ecdsa-key` (ECDSA at `config/certs/ecdsa-signing.{cert,key}`, used by the OpenID4VP/OpenID4VCI engines). The setup job generates both key pairs per deployment.
 | `configuration.database.config.type`            | Config database type (postgres or sqlite)                                                                                                               | `postgres`                   |
 | `configuration.database.config.sqlite.path`      | SQLite database path (for SQLite only)                                                                                                                  | `database/configdb.db` |
-| `configuration.database.config.sqlite.options`   | SQLite options (for SQLite only)                                                                                                                        | `_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)` |
+| `configuration.database.config.sqlite.options`   | SQLite options (for SQLite only)                                                                                                                        | `_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)` |
 | `configuration.database.config.sqlite.max_open_conns` | Maximum number of open connections for SQLite                                                                                                      | `500`                        |
 | `configuration.database.config.sqlite.max_idle_conns` | Maximum number of idle SQLite connections                                                                                                          | `100`                        |
 | `configuration.database.config.sqlite.conn_max_lifetime` | Maximum SQLite connection lifetime in seconds                                                                                                    | `3600`                       |
@@ -426,7 +427,7 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 | `configuration.database.config.postgres.conn_max_lifetime` | Maximum lifetime of a connection in seconds                                                                                                             | `3600`                       |
 | `configuration.database.runtime_transient.type`             | Runtime-transient database type (`postgres`, `sqlite`, or `redis`)                                                                                               | `postgres`                   |
 | `configuration.database.runtime_transient.sqlite.path`       | SQLite database path (for SQLite only)                                                                                                                  | `database/runtime_transient.db` |
-| `configuration.database.runtime_transient.sqlite.options`    | SQLite options (for SQLite only)                                                                                                                        | `_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)` |
+| `configuration.database.runtime_transient.sqlite.options`    | SQLite options (for SQLite only)                                                                                                                        | `_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)` |
 | `configuration.database.runtime_transient.sqlite.max_open_conns` | Maximum number of open connections for SQLite                                                                                                      | `500`                        |
 | `configuration.database.runtime_transient.sqlite.max_idle_conns` | Maximum number of idle SQLite connections                                                                                                          | `100`                        |
 | `configuration.database.runtime_transient.sqlite.conn_max_lifetime` | Maximum SQLite connection lifetime in seconds                                                                                                    | `3600`                       |
@@ -450,7 +451,7 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 | `configuration.database.runtime_transient.redis.key_prefix`   | Prefix applied to all Redis keys written by ThunderID (for Redis only)                                                                                   | `""`                         |
 | `configuration.database.entity.type`                | Entity database type (postgres or sqlite)                                                                                                                 | `postgres`                   |
 | `configuration.database.entity.sqlite.path`          | SQLite database path (for SQLite only)                                                                                                                  | `database/entitydb.db` |
-| `configuration.database.entity.sqlite.options`       | SQLite options (for SQLite only)                                                                                                                        | `_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)` |
+| `configuration.database.entity.sqlite.options`       | SQLite options (for SQLite only)                                                                                                                        | `_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)` |
 | `configuration.database.entity.sqlite.max_open_conns` | Maximum number of open connections for SQLite                                                                                                        | `500`                        |
 | `configuration.database.entity.sqlite.max_idle_conns` | Maximum number of idle SQLite connections                                                                                                            | `100`                        |
 | `configuration.database.entity.sqlite.conn_max_lifetime` | Maximum SQLite connection lifetime in seconds                                                                                                      | `3600`                       |
@@ -467,7 +468,7 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 | `configuration.database.entity.postgres.conn_max_lifetime`   | Maximum lifetime of a connection in seconds                                                                                                             | `3600`                       |
 | `configuration.database.runtime_persistent.type`           | Runtime-persistent database type (postgres or sqlite). Stores SSO sessions, revoked tokens, and consent records.                                                 | `postgres`                   |
 | `configuration.database.runtime_persistent.sqlite.path`     | SQLite database path (for SQLite only)                                                                                                                  | `database/runtime_persistent.db` |
-| `configuration.database.runtime_persistent.sqlite.options`  | SQLite options (for SQLite only)                                                                                                                        | `_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)` |
+| `configuration.database.runtime_persistent.sqlite.options`  | SQLite options (for SQLite only)                                                                                                                        | `_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)` |
 | `configuration.database.runtime_persistent.sqlite.max_open_conns` | Maximum number of open connections for SQLite                                                                                                     | `500`                        |
 | `configuration.database.runtime_persistent.sqlite.max_idle_conns` | Maximum number of idle SQLite connections                                                                                                         | `100`                        |
 | `configuration.database.runtime_persistent.sqlite.conn_max_lifetime` | Maximum SQLite connection lifetime in seconds                                                                                                  | `3600`                       |
@@ -499,13 +500,36 @@ Password fields are available in `configuration.database.config.postgres`, `conf
 | `configuration.jwt.validityPeriod`                | JWT validity period in seconds                                                                                                                          | `3600`                       |
 | `configuration.jwt.audience`                      | Default audience for auth assertions                                                                                                                    | `application`                |
 | `configuration.jwt.preferredKeyId`                | Preferred key ID for signing JWTs (must match a key in configuration.crypto.keys)                                                                       | `default-key`                |
-| `configuration.oauth.refreshToken.renewOnGrant`   | Renew refresh token on grant                                                                                                                            | `false`                      |
+| `configuration.oauth.refreshToken.renewOnGrant`   | Renew refresh token on grant                                                                                                                            | `true`                       |
 | `configuration.oauth.refreshToken.revokePreviousOnRenew` | Revoke the consumed refresh token on rotation (single-use); effective only when `renewOnGrant` is `true`                                          | `true`                       |
 | `configuration.oauth.refreshToken.validityPeriod` | Refresh token validity period in seconds                                                                                                                | `86400`                      |
-| `configuration.flow.defaultAuthFlowHandle`        | Default authentication flow handle                                                                                                                      | `default-flow`         |
+| `configuration.oauth.authorizationCode.validityPeriod` | Authorization code validity period in seconds                                                                                                      | `600`                        |
+| `configuration.oauth.authorizationRequest.validityPeriod` | How long the authorization request context stays valid while the user completes the login flow, in seconds                                       | `3600`                       |
+| `configuration.oauth.sendServerErrorsToClient`    | Report an authentication flow failure that maps to the OAuth `server_error` code to the client | `false`                      |
 | `configuration.flow.maxVersionHistory`            | Maximum flow version history to retain                                                                                                                  | `3`                          |
 | `configuration.flow.autoInferRegistration`        | Enable auto-infer registration flow                                                                                                                     | `true`                       |
 | `configuration.passkey.allowedOrigins`            | Passkey allowed origins                                                                                                                                 | `[]`                         |
+| `configuration.email.smtp.host`                   | SMTP server host. Empty omits the whole `email` section, and no email can be sent (email OTP, magic link, verification all fail).                        | `""`                         |
+| `configuration.email.smtp.port`                   | SMTP server port. Required once `host` is set.                                                                                                          | `587`                        |
+| `configuration.email.smtp.fromAddress`            | Sender address on outgoing mail. Required once `host` is set.                                                                                            | `""`                         |
+| `configuration.email.smtp.username`               | SMTP username                                                                                                                                            | `""`                         |
+| `configuration.email.smtp.password`               | Inline SMTP password, stored in the generated `<release>-db-credentials` Secret and injected as `SMTP_PASSWORD`                                          | `""`                         |
+| `configuration.email.smtp.passwordRef.name`       | Existing Kubernetes Secret holding the SMTP password. Takes precedence over `password` when set together with `passwordRef.key`.                          | `""`                         |
+| `configuration.email.smtp.passwordRef.key`        | Key within `passwordRef.name` holding the SMTP password                                                                                                  | `""`                         |
+| `configuration.email.smtp.enableStartTls`         | Upgrade the connection with STARTTLS                                                                                                                     | `true`                       |
+| `configuration.email.smtp.enableAuthentication`   | Authenticate against the SMTP server. When `true`, `username` and `password` are required.                                                               | `true`                       |
+| `configuration.log.level`                         | Log level (`debug`, `info`, `warn`, `error`)                                                                                                             | `info`                       |
+| `configuration.log.output.console.enabled`        | Write logs to stdout. This is the default and expected setup on Kubernetes: a log collector reads them from the pod.                                      | `true`                       |
+| `configuration.log.output.file.enabled`           | Optional file output. The container root filesystem is read-only by default, so point `path` at a writable mount before enabling this. Commented out in `values.yaml`. | unset (`false`)   |
+| `configuration.log.output.file.path`              | Log directory, relative to the server home unless absolute                                                                                               | unset (`logs`)               |
+| `configuration.log.output.file.fileName`          | Log file name                                                                                                                                            | unset (`thunderid.log`)      |
+| `configuration.log.output.file.format`            | Log line format (`text` or `json`). Applies to every output, including the console, so set it alone to emit JSON to stdout without enabling file output.  | unset (`text`)               |
+| `configuration.log.output.file.rotation`          | Rotation and retention settings (`size.enabled`, `size.maxSizeMb`, `time.enabled`, `time.intervalDays`, `maxBackups`, `maxAgeDays`, `compress`)          | unset, see `values.yaml`     |
+| `configuration.log.access.excludePaths`           | Optional. Extra path prefixes served without an access log line. The Gate and Console prefixes are always excluded.                                       | unset (`[]`)                 |
+| `configuration.stores.<resource>`                 | Storage mode per resource type: `mutable`, `declarative`, or `composite`. Keys: `user`, `group`, `role`, `theme`, `layout`, `translation`, `agent`, `user_type`, `organization_unit`, `identity_provider`, `application`, `server_config`, `resource`. Unset inherits `declarativeResources.enabled`. | `{}` |
+| `configuration.flow.store`                        | Storage mode for flows (`mutable`, `declarative`, `composite`)                                                                                           | `""`                         |
+| `configuration.openid4vp.store`                   | Storage mode for presentation definitions (`mutable`, `declarative`, `composite`)                                                                        | `""`                         |
+| `configuration.openid4vci.store`                  | Storage mode for credential configurations (`mutable`, `declarative`, `composite`)                                                                       | `""`                         |
 
 > CORS allowed origins are configured through the server-config `cors` section — by creating the declarative resource `config/resources/server_configs/cors.yaml` (with `server_config.store: composite` set so it loads at boot) or at runtime with `PUT /server-config/cors` — not through Helm values.
 
@@ -728,22 +752,37 @@ The setup job runs `setup.sh` as a one-time Helm pre-install hook to initialize 
 | `setup.resources.requests.memory`      | Memory request for setup job                                    | `50Mi`                       |
 | `setup.resources.limits.cpu`           | CPU limit for setup job                                         | `200m`                       |
 | `setup.resources.limits.memory`        | Memory limit for setup job                                      | `100Mi`                      |
-| `setup.admin.username`                 | Username for the default admin user                             | `admin`                      |
-| `setup.admin.password`                 | Password for the default admin user. Ignored when `setup.admin.passwordRef.name` is set | `admin` |
-| `setup.admin.passwordRef.name`         | Existing Kubernetes Secret name containing the admin password. Must be set together with `passwordRef.key` | `""` |
-| `setup.admin.passwordRef.key`          | Key in the Secret whose value is used as the admin password. Must be set together with `passwordRef.name` | `""` |
+| `setup.admin.username`                 | Username for the admin user. Ignored when `usernameRef` is set                | `admin`    |
+| `setup.admin.usernameRef.name`         | Existing Secret holding the username. Set together with `usernameRef.key`; takes precedence over inline username | `""` |
+| `setup.admin.usernameRef.key`          | Key in the Secret holding the username. Set together with `usernameRef.name`  | `""`         |
+| `setup.admin.password`                 | Inline password for the admin user. Leave empty to generate one. Ignored when `passwordRef` is set | `""` |
+| `setup.admin.passwordRef.name`         | Existing Secret holding the password. Set together with `passwordRef.key`; takes precedence over inline password and generation | `""` |
+| `setup.admin.passwordRef.key`          | Key in the Secret holding the password. Set together with `passwordRef.name`  | `""`         |
 | `setup.extraVolumeMounts`              | Additional volume mounts for setup job                          | `[]`                         |
 | `setup.extraVolumes`                   | Additional volumes for setup job                                | `[]`                         |
 
 ### Admin Credentials
 
-The setup job seeds a default admin user during first install. The password can be supplied as a plain value (for development) or sourced from an existing Kubernetes Secret (recommended for production).
+The setup job seeds an admin user during first install (only when `setup.enabled=true`). No default password is shipped. The password is resolved in the following order of precedence:
 
-#### Security Warning
+1. **`passwordRef`** — sourced from an existing Kubernetes Secret.
+2. **`password`** — the inline value in `values.yaml`.
+3. **generated** — a random password is generated and stored in the `<release>-admin-credentials` Secret.
 
-⚠️ **The default `admin`/`admin` credentials must be changed before any non-development deployment.** When defaults are used, the credentials are printed in the setup completion summary. Always set explicit credentials for any non-development environment.
+The username is resolved independently: **`usernameRef`** (existing Secret) if set, otherwise the inline **`username`** (default `admin`).
 
-#### Pattern 1: Plain value (Development / Quick-start)
+#### Pattern 1: Generated password (default)
+
+Leave `setup.admin.password` and `setup.admin.passwordRef` unset. A random password is generated during install and stored in a Kubernetes Secret. Retrieve it with:
+
+```bash
+kubectl get secret --namespace <namespace> <release>-thunderid-admin-credentials \
+  -o jsonpath="{.data.admin-password}" | base64 -d; echo
+```
+
+The Secret name follows the chart's fullname (`nameOverride`/`fullnameOverride` change it), so use the exact command printed in the post-install notes.
+
+#### Pattern 2: Inline value (Development / Quick-start)
 
 ```yaml
 setup:
@@ -760,29 +799,32 @@ helm install my-thunderid oci://ghcr.io/thunder-id/helm-charts/thunderid \
   --set setup.admin.password='MyP@ssw0rd!'
 ```
 
-#### Pattern 2: External Kubernetes Secret (Production — Recommended)
+#### Pattern 3: Existing Kubernetes Secret (Production — Recommended)
 
-**Step 1:** Create the Secret:
+**Step 1:** Create a Secret holding the credentials. Read the values from files (each written without a trailing newline) so they do not appear in your shell history or process arguments:
 
 ```bash
 kubectl create secret generic thunderid-admin-credentials \
-  --from-literal=password='MyP@ssw0rd!'
+  --from-file=username=./admin-username \
+  --from-file=password=./admin-password
 ```
 
-**Step 2:** Reference it in your values:
+**Step 2:** Reference it in your values. Point both refs at the same Secret name with different keys (or at different Secrets):
 
 ```yaml
 setup:
   admin:
-    username: "myAdmin"
+    usernameRef:              # optional; falls back to setup.admin.username
+      name: "thunderid-admin-credentials"
+      key: "username"
     passwordRef:
       name: "thunderid-admin-credentials"
       key: "password"
 ```
 
-When `passwordRef.name` and `passwordRef.key` are both set, the `password` field is ignored and the admin password is injected directly from the Secret — no plaintext appears in the rendered Job manifest.
+When `passwordRef` is set it takes precedence over the inline password and over generation; likewise `usernameRef` over the inline username. Credentials are injected directly from the Secret via `secretKeyRef`, so no plaintext appears in the rendered Job manifest.
 
-**Validation:** The chart fails at render time if only one of `passwordRef.name` / `passwordRef.key` is provided. Both must be set together or both must be left empty.
+**Validation:** The chart fails at render time if either ref has only one of `name`/`key` set. Provide both or neither.
 
 Environment variable item structure for plain value environment variables in `deployment.env` and `setup.env`:
 

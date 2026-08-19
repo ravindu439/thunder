@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -204,6 +189,27 @@ func (s *StoreTestSuite) TestGetByExecutionID_Miss() {
 
 	s.NoError(err)
 	s.Nil(got)
+}
+
+func (s *StoreTestSuite) TestListBySubject() {
+	base := time.Date(2026, 6, 16, 10, 0, 0, 0, time.UTC)
+	row := map[string]interface{}{
+		"session_id": "sess-1", "subject_id": "user-1", "flow_id": "flow-1",
+		"flow_version": int64(2), "flow_execution_id": "exec-1", "handle_id": "handle-abc",
+		"authenticated_at": base, "created_at": base, "last_active_at": base,
+		"idle_expires_at": nil, "absolute_expires_at": base.Add(8 * time.Hour),
+		"state": "ACTIVE", "version": int64(1),
+	}
+	s.mockDBProvider.On("GetRuntimePersistentDBClient").Return(s.mockDBClient, nil)
+	s.mockDBClient.On("QueryContext", context.Background(), queryListSessionsBySubject,
+		"user-1", testDeploymentID).Return([]map[string]interface{}{row}, nil)
+
+	got, err := s.store.ListBySubject(context.Background(), "user-1")
+
+	s.NoError(err)
+	s.Require().Len(got, 1)
+	s.Equal("sess-1", got[0].SessionID)
+	s.Equal("user-1", got[0].SubjectID)
 }
 
 func (s *StoreTestSuite) TestUpdate_Success() {

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -419,6 +404,34 @@ func (c *compositeGroupStore) GetTransitiveGroupsForEntity(
 		}
 	}
 	return result, nil
+}
+
+// GetDirectGroupParents returns the deduplicated IDs of groups from both stores that directly
+// contain any of the given groups. Unioning at every level is what lets a caller resolve
+// mixed-store nesting, which GetTransitiveGroupsForEntity cannot do.
+func (c *compositeGroupStore) GetDirectGroupParents(
+	ctx context.Context, groupIDs []string,
+) ([]string, error) {
+	dbParents, err := c.dbStore.GetDirectGroupParents(ctx, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	fileParents, err := c.fileStore.GetDirectGroupParents(ctx, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool, len(dbParents)+len(fileParents))
+	parents := make([]string, 0, len(dbParents)+len(fileParents))
+	for _, id := range append(dbParents, fileParents...) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		parents = append(parents, id)
+	}
+	return parents, nil
 }
 
 // mergeMembers deduplicates and merges members from database and file stores.

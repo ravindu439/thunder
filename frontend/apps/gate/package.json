@@ -6,14 +6,13 @@
   "keywords": [
     "thunderid",
     "gate",
-    "app",
-    "wso2"
+    "app"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/apps/gate#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {

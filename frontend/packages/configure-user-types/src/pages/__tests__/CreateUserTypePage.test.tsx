@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen, waitFor, userEvent, within} from '@thunderid/test-utils';
+import {fireEvent, render, screen, waitFor, userEvent, within} from '@thunderid/test-utils';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import type useCreateUserTypeHook from '../../api/useCreateUserType';
+import UserTypeConstraints from '../../constants/user-type-constraints';
 import UserTypeCreateProvider from '../../contexts/UserTypeCreate/UserTypeCreateProvider';
 import type {LibraryAttribute} from '../../types/user-types';
 import CreateUserTypePage from '../CreateUserTypePage';
@@ -126,7 +112,7 @@ const {mockAttributes} = vi.hoisted(() => ({
 
 vi.mock('../../constants/attributes', () => ({default: mockAttributes}));
 
-// Mock useHasMultipleOUs (used by ConfigureGeneral to decide whether to show the OU picker)
+// Mock useHasMultipleOUs and the full-screen OU picker (rendered as the wizard's first step)
 vi.mock('@thunderid/configure-organization-units', () => ({
   useHasMultipleOUs: () => ({
     hasMultipleOUs: true,
@@ -136,11 +122,41 @@ vi.mock('@thunderid/configure-organization-units', () => ({
       {id: 'child-ou', name: 'Child Organization', handle: 'child', description: null, parent: 'root-ou'},
     ],
   }),
-  OrganizationUnitTreePicker: ({value, onChange}: {value: string; onChange: (id: string) => void}) => (
-    <div data-testid="ou-tree-picker">
+  useGetOrganizationUnit: (id?: string) => ({
+    data: id ? {id, name: id === 'root-ou' ? 'Root Organization' : id} : undefined,
+    isLoading: false,
+  }),
+  OrganizationUnitTreeConstants: {
+    DEFAULT_AVATAR: 'avatar:shape=rounded,variant=anonymous_entity,content=pavilion,colors=0',
+  },
+  OrganizationUnitPickerScreen: ({
+    value,
+    onChange,
+    onBack,
+    onContinue,
+    backLabel,
+    continueLabel,
+  }: {
+    value: string;
+    onChange: (id: string) => void;
+    onBack: () => void;
+    onContinue: () => void;
+    backLabel: string;
+    continueLabel: string;
+  }) => (
+    <div data-testid="organization-unit-picker-screen">
       <span data-testid="ou-value">{value}</span>
-      <button type="button" data-testid="select-ou" onClick={() => onChange('ou-123')}>
+      <button type="button" data-testid="select-ou" onClick={() => onChange('root-ou')}>
         Select OU
+      </button>
+      <button type="button" data-testid="select-other-ou" onClick={() => onChange('ou-123')}>
+        Select Other OU
+      </button>
+      <button type="button" onClick={onBack}>
+        {backLabel}
+      </button>
+      <button type="button" onClick={onContinue}>
+        {continueLabel}
       </button>
     </div>
   ),
@@ -166,27 +182,27 @@ function renderPage() {
 }
 
 /**
- * Helper to navigate from step 1 (Name) to step 2 (General) by typing a name and clicking Continue.
+ * Helper to pick the organization unit on the wizard's first step (using the default "root-ou"
+ * choice unless a different testid is given) and continue to the Name step.
  */
-async function goToGeneralStep(user: ReturnType<typeof userEvent.setup>, name = 'Employee') {
-  await user.type(screen.getByLabelText(/User Type Name/i), name);
+async function pickOrganizationUnit(user: ReturnType<typeof userEvent.setup>, ouTestId = 'select-ou') {
+  await waitFor(() => {
+    expect(screen.getByTestId('organization-unit-picker-screen')).toBeInTheDocument();
+  });
+  await user.click(screen.getByTestId(ouTestId));
   await user.click(screen.getByRole('button', {name: /Continue/i}));
   await waitFor(() => {
-    expect(screen.getByTestId('configure-general')).toBeInTheDocument();
+    expect(screen.getByTestId('configure-name')).toBeInTheDocument();
   });
 }
 
 /**
- * Helper to navigate from step 1 to step 3 (Properties) via step 2.
- * The first OU is auto-selected by ConfigureGeneral.
+ * Helper to navigate from the organization unit step to the Properties step by picking an OU,
+ * typing a name and clicking Continue.
  */
 async function goToPropertiesStep(user: ReturnType<typeof userEvent.setup>, name = 'Employee') {
-  await goToGeneralStep(user, name);
-  // OU is auto-selected from useGetOrganizationUnits data
-  await waitFor(() => {
-    const continueButton = screen.getByRole('button', {name: /Continue/i});
-    expect(continueButton).not.toBeDisabled();
-  });
+  await pickOrganizationUnit(user);
+  await user.type(screen.getByLabelText(/User Type Name/i), name);
   await user.click(screen.getByRole('button', {name: /Continue/i}));
   await waitFor(() => {
     expect(screen.getByTestId('configure-properties')).toBeInTheDocument();
@@ -223,20 +239,61 @@ describe('CreateUserTypePage', () => {
   });
 
   // ============================================================================
+  // Step 0: Organization Unit
+  // ============================================================================
+
+  it('renders the organization unit picker initially', () => {
+    renderPage();
+
+    expect(screen.getByTestId('organization-unit-picker-screen')).toBeInTheDocument();
+  });
+
+  it('navigates to the user types list when Back is clicked on the organization unit step', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('organization-unit-picker-screen')).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole('button', {name: /Back/i}));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/user-types');
+    });
+  });
+
+  it('allows selecting a different organization unit', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('organization-unit-picker-screen')).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId('select-other-ou'));
+
+    expect(screen.getByTestId('ou-value')).toHaveTextContent('ou-123');
+  });
+
+  // ============================================================================
   // Step 1: Name
   // ============================================================================
 
-  it('renders the wizard with Name step initially', () => {
+  it('renders the Name step after picking an organization unit', async () => {
+    const user = userEvent.setup();
     renderPage();
 
+    await pickOrganizationUnit(user);
+
     expect(screen.getByTestId('configure-name')).toBeInTheDocument();
-    expect(screen.getByText("Let's name your user type")).toBeInTheDocument();
+    expect(screen.getByText("Let's collect some details about your user type")).toBeInTheDocument();
     expect(screen.getByLabelText(/User Type Name/i)).toBeInTheDocument();
   });
 
   it('closes wizard when X button is clicked', async () => {
     const user = userEvent.setup();
     renderPage();
+
+    await pickOrganizationUnit(user);
 
     // The X (close) button navigates back to /user-types
     const closeButtons = screen.getAllByRole('button');
@@ -253,14 +310,19 @@ describe('CreateUserTypePage', () => {
     const user = userEvent.setup();
     renderPage();
 
+    await pickOrganizationUnit(user);
+
     const nameInput = screen.getByLabelText(/User Type Name/i);
     await user.type(nameInput, 'Employee');
 
     expect(nameInput).toHaveValue('Employee');
   });
 
-  it('disables Continue button when name is empty', () => {
+  it('disables Continue button when name is empty', async () => {
+    const user = userEvent.setup();
     renderPage();
+
+    await pickOrganizationUnit(user);
 
     const continueButton = screen.getByRole('button', {name: /Continue/i});
     expect(continueButton).toBeDisabled();
@@ -270,80 +332,47 @@ describe('CreateUserTypePage', () => {
     const user = userEvent.setup();
     renderPage();
 
+    await pickOrganizationUnit(user);
     await user.type(screen.getByLabelText(/User Type Name/i), 'Employee');
 
     const continueButton = screen.getByRole('button', {name: /Continue/i});
     expect(continueButton).not.toBeDisabled();
   });
 
-  it('navigates to General step when Continue is clicked', async () => {
+  it('enables Continue button for a single character name', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await goToGeneralStep(user);
+    await pickOrganizationUnit(user);
+    await user.type(screen.getByLabelText(/User Type Name/i), 'E');
 
-    expect(screen.getByTestId('configure-general')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: /Continue/i})).not.toBeDisabled();
   });
 
-  // ============================================================================
-  // Step 2: General
-  // ============================================================================
-
-  it('shows the organization unit tree picker on General step', async () => {
+  it('blocks Continue and shows an error when the name exceeds the maximum length', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await goToGeneralStep(user);
-
-    expect(screen.getByTestId('ou-tree-picker')).toBeInTheDocument();
-  });
-
-  it('auto-selects the first organization unit', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await goToGeneralStep(user);
-
-    // First OU should be auto-selected from useGetOrganizationUnits data
-    await waitFor(() => {
-      expect(screen.getByTestId('ou-value')).toHaveTextContent('root-ou');
+    await pickOrganizationUnit(user);
+    fireEvent.change(screen.getByLabelText(/User Type Name/i), {
+      target: {value: 'a'.repeat(UserTypeConstraints.NAME_MAX_LENGTH + 1)},
     });
+
+    expect(screen.getByText('User type name cannot exceed 100 characters')).toBeInTheDocument();
+    expect(screen.getByRole('button', {name: /Continue/i})).toBeDisabled();
   });
 
-  it('allows selecting a different organization unit via tree picker', async () => {
+  it('allows toggling self-registration on the Details step', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await goToGeneralStep(user);
+    await pickOrganizationUnit(user);
 
-    await user.click(screen.getByTestId('select-ou'));
+    const selfRegistrationCheckbox = screen.getByLabelText(/Allow Self Registration/i);
+    expect(selfRegistrationCheckbox).not.toBeChecked();
 
-    expect(screen.getByTestId('ou-value')).toHaveTextContent('ou-123');
-  });
-
-  it('enables Continue on General step when OU is auto-selected', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await goToGeneralStep(user);
-
-    await waitFor(() => {
-      const continueButton = screen.getByRole('button', {name: /Continue/i});
-      expect(continueButton).not.toBeDisabled();
-    });
-  });
-
-  it('navigates back to Name step when Back is clicked on General step', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await goToGeneralStep(user);
-
-    await user.click(screen.getByRole('button', {name: /Back/i}));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('configure-name')).toBeInTheDocument();
-    });
+    await user.click(selfRegistrationCheckbox);
+    expect(selfRegistrationCheckbox).toBeChecked();
   });
 
   // ============================================================================
@@ -540,7 +569,7 @@ describe('CreateUserTypePage', () => {
     });
   });
 
-  it('navigates back to General step when Back is clicked on Properties step', async () => {
+  it('navigates back to Details step when Back is clicked on Properties step', async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -549,7 +578,7 @@ describe('CreateUserTypePage', () => {
     await user.click(screen.getByRole('button', {name: /Back/i}));
 
     await waitFor(() => {
-      expect(screen.getByTestId('configure-general')).toBeInTheDocument();
+      expect(screen.getByTestId('configure-name')).toBeInTheDocument();
     });
   });
 
@@ -563,20 +592,14 @@ describe('CreateUserTypePage', () => {
 
     renderPage();
 
-    // Step 1: Name
+    // Step 0: Organization Unit
+    await pickOrganizationUnit(user);
+
+    // Step 1: Details
     await user.type(screen.getByLabelText(/User Type Name/i), 'Employee');
     await user.click(screen.getByRole('button', {name: /Continue/i}));
 
-    // Step 2: General (OU auto-selected as root-ou)
-    await waitFor(() => {
-      expect(screen.getByTestId('configure-general')).toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(screen.getByRole('button', {name: /Continue/i})).not.toBeDisabled();
-    });
-    await user.click(screen.getByRole('button', {name: /Continue/i}));
-
-    // Step 3: Properties
+    // Step 2: Properties
     await waitFor(() => {
       expect(screen.getByTestId('configure-properties')).toBeInTheDocument();
     });
@@ -614,19 +637,15 @@ describe('CreateUserTypePage', () => {
 
     renderPage();
 
-    // Step 1: Name
-    await user.type(screen.getByLabelText(/User Type Name/i), 'Employee');
-    await user.click(screen.getByRole('button', {name: /Continue/i}));
+    // Step 0: Organization Unit - pick a different OU
+    await pickOrganizationUnit(user, 'select-other-ou');
 
-    // Step 2: General - pick a different OU via tree picker and enable self-registration
-    await waitFor(() => {
-      expect(screen.getByTestId('configure-general')).toBeInTheDocument();
-    });
-    await user.click(screen.getByTestId('select-ou'));
+    // Step 1: Details - enable self-registration
+    await user.type(screen.getByLabelText(/User Type Name/i), 'Employee');
     await user.click(screen.getByLabelText(/Allow Self Registration/i));
     await user.click(screen.getByRole('button', {name: /Continue/i}));
 
-    // Step 3: Properties
+    // Step 2: Properties
     await waitFor(() => {
       expect(screen.getByTestId('configure-properties')).toBeInTheDocument();
     });
@@ -663,7 +682,8 @@ describe('CreateUserTypePage', () => {
     expect(mockMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('displays error from API', () => {
+  it('displays error from API', async () => {
+    const user = userEvent.setup();
     const error = new Error('Failed to create user type');
 
     mockUseCreateUserType.mockReturnValue({
@@ -676,7 +696,54 @@ describe('CreateUserTypePage', () => {
 
     renderPage();
 
-    expect(screen.getByText('Failed to create user type')).toBeInTheDocument();
+    await pickOrganizationUnit(user);
+
+    expect(screen.getByText('Failed to create user type. Please try again.')).toBeInTheDocument();
+  });
+
+  it('resets the create error as soon as a field changes', async () => {
+    const user = userEvent.setup();
+    const mockReset = vi.fn();
+    const error = new Error('Failed to create user type');
+
+    mockUseCreateUserType.mockReturnValue({
+      mutateAsync: mockMutateAsync,
+      isPending: false,
+      error,
+      isError: true,
+      reset: mockReset,
+    } as unknown as ReturnType<typeof useCreateUserTypeHook>);
+
+    renderPage();
+
+    await pickOrganizationUnit(user);
+
+    expect(screen.getByText('Failed to create user type. Please try again.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/User Type Name/i), 'A');
+
+    expect(mockReset).toHaveBeenCalled();
+  });
+
+  it('does not reset a pending create mutation when a field changes', async () => {
+    const user = userEvent.setup();
+    const mockReset = vi.fn();
+
+    mockUseCreateUserType.mockReturnValue({
+      mutateAsync: mockMutateAsync,
+      isPending: true,
+      error: null,
+      isError: false,
+      reset: mockReset,
+    } as unknown as ReturnType<typeof useCreateUserTypeHook>);
+
+    renderPage();
+
+    await pickOrganizationUnit(user);
+
+    await user.type(screen.getByLabelText(/User Type Name/i), 'A');
+
+    expect(mockReset).not.toHaveBeenCalled();
   });
 
   it('shows loading state during submission on last step', async () => {
@@ -805,27 +872,35 @@ describe('CreateUserTypePage', () => {
     const user = userEvent.setup();
     renderPage();
 
-    // Step 1: Only the name step breadcrumb
+    // The organization unit step itself has no breadcrumb chrome (full-screen picker).
+    await pickOrganizationUnit(user);
+
+    // Step 1: Only the Details step breadcrumb
     const breadcrumb1 = screen.getByRole('navigation', {name: /breadcrumb/i});
-    expect(within(breadcrumb1).getByText('Create a User Type')).toBeInTheDocument();
+    expect(within(breadcrumb1).getByText('Details')).toBeInTheDocument();
 
-    await goToGeneralStep(user);
+    await user.type(screen.getByLabelText(/User Type Name/i), 'Employee');
+    await user.click(screen.getByRole('button', {name: /Continue/i}));
+    await waitFor(() => {
+      expect(screen.getByTestId('configure-properties')).toBeInTheDocument();
+    });
 
-    // Step 2: Name step > "General" breadcrumbs
+    // Step 2: "Organization Unit" > "Details" > "Properties" breadcrumbs
     const breadcrumb2 = screen.getByRole('navigation', {name: /breadcrumb/i});
-    expect(within(breadcrumb2).getByText('Create a User Type')).toBeInTheDocument();
-    expect(within(breadcrumb2).getByText('General')).toBeInTheDocument();
+    expect(within(breadcrumb2).getByText('Organization Unit')).toBeInTheDocument();
+    expect(within(breadcrumb2).getByText('Details')).toBeInTheDocument();
+    expect(within(breadcrumb2).getByText('Properties')).toBeInTheDocument();
   });
 
   it('allows navigating back via breadcrumb click', async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await goToGeneralStep(user);
+    await goToPropertiesStep(user);
 
-    // Click on name step breadcrumb to go back
+    // Click on Details step breadcrumb to go back
     const breadcrumb = screen.getByRole('navigation', {name: /breadcrumb/i});
-    await user.click(within(breadcrumb).getByText('Create a User Type'));
+    await user.click(within(breadcrumb).getByText('Details'));
 
     await waitFor(() => {
       expect(screen.getByTestId('configure-name')).toBeInTheDocument();
@@ -836,8 +911,12 @@ describe('CreateUserTypePage', () => {
   // Progress bar
   // ============================================================================
 
-  it('shows progress bar', () => {
+  it('shows progress bar', async () => {
+    const user = userEvent.setup();
     renderPage();
+
+    // The organization unit step itself has no progress bar (full-screen picker).
+    await pickOrganizationUnit(user);
 
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });

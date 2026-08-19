@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -116,7 +101,7 @@ func initializeTestRuntime() error {
 
 func newTestAuthenticatedAuthUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -1637,24 +1622,67 @@ func (suite *AuthAssertExecutorTestSuite) TestIntersectPermissionSpaceList_NoOve
 	assert.Equal(suite.T(), "", intersectPermissionSpaceList("a b", "c d"))
 }
 
-func (suite *AuthAssertExecutorTestSuite) TestExecute_CallbackType_EmittedWhenSet() {
+func (suite *AuthAssertExecutorTestSuite) TestResolveSubject() {
+	const defaultSub = "entity-123"
+	tests := []struct {
+		name     string
+		mapping  map[string]string
+		userType string
+		attrs    map[string]interface{}
+		want     string
+	}{
+		{"nil mapping", nil, "employee", map[string]interface{}{"email": "a@b.com"}, defaultSub},
+		{"no mapping for user type", map[string]string{"customer": "email"}, "employee",
+			map[string]interface{}{"email": "a@b.com"}, defaultSub},
+		{"empty mapped attribute name", map[string]string{"employee": ""}, "employee",
+			map[string]interface{}{"email": "a@b.com"}, defaultSub},
+		{"mapped attribute missing from attrs", map[string]string{"employee": "email"}, "employee",
+			map[string]interface{}{}, defaultSub},
+		{"mapped attribute is non-string", map[string]string{"employee": "age"}, "employee",
+			map[string]interface{}{"age": 42}, defaultSub},
+		{"mapped attribute is empty string", map[string]string{"employee": "email"}, "employee",
+			map[string]interface{}{"email": ""}, defaultSub},
+		{"mapped attribute resolved", map[string]string{"employee": "email"}, "employee",
+			map[string]interface{}{"email": "u@corp.com"}, "u@corp.com"},
+	}
+	for _, tc := range tests {
+		suite.Run(tc.name, func() {
+			suite.Equal(tc.want, resolveSubject(tc.mapping, tc.userType, tc.attrs, defaultSub))
+		})
+	}
+}
+
+// TestExecute_ResolvesMappedSubjectFromUnreleasedAttribute verifies resolve-then-drop: the mapped
+// attribute is fetched and used as the assertion subject even though it is not released to the
+// client, and it does not leak into the assertion claims.
+func (suite *AuthAssertExecutorTestSuite) TestExecute_ResolvesMappedSubjectFromUnreleasedAttribute() {
 	ctx := &providers.NodeContext{
-		ExecutionID: "flow-ciba",
-		EntityID:    "app-1",
-		FlowType:    providers.FlowTypeAuthentication,
-		AuthUser:    newTestAuthenticatedAuthUser(),
-		NodeProperties: map[string]interface{}{
-			propertyKeyCallbackType: "urn:openid:params:grant-type:ciba",
-		},
+		ExecutionID:      "flow-123",
+		EntityID:         "app-123",
+		FlowType:         providers.FlowTypeAuthentication,
+		AuthUser:         newTestAuthenticatedAuthUser(),
+		NodeProperties:   map[string]interface{}{},
 		RuntimeData:      map[string]string{},
 		ExecutionHistory: map[string]*providers.NodeExecutionRecord{},
+		Application: providers.Application{
+			InboundAuthProfile: providers.InboundAuthProfile{
+				// external_id is mapped as the subject but NOT released via UserAttributes.
+				SubjectAttribute: map[string]string{"INTERNAL": "external_id"},
+				Assertion:        &inboundmodel.AssertionConfig{UserAttributes: []string{}},
+			},
+		},
 	}
 
 	suite.setupGetEntityReference("INTERNAL", testAuthOUID)
-	suite.setupGetUserAttributesEmpty()
+	suite.setupGetUserAttributesWith(map[string]*providers.AttributeResponse{
+		"external_id": {Value: "ext-987"},
+	})
 
-	suite.mockJWTService.On("GenerateJWT", mock.Anything, "user-123", mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything).Return("jwt-token", int64(3600), nil)
+	suite.mockJWTService.On("GenerateJWT", mock.Anything, "ext-987", mock.Anything, mock.Anything,
+		mock.MatchedBy(func(claims map[string]interface{}) bool {
+			_, leaked := claims["external_id"]
+			return !leaked
+		}), mock.Anything, mock.Anything).Return("jwt-token", int64(3600), nil)
 
 	resp, err := suite.executor.Execute(ctx)
 
@@ -1662,31 +1690,5 @@ func (suite *AuthAssertExecutorTestSuite) TestExecute_CallbackType_EmittedWhenSe
 	assert.NotNil(suite.T(), resp)
 	assert.Equal(suite.T(), providers.ExecComplete, resp.Status)
 	assert.Equal(suite.T(), "jwt-token", resp.Assertion)
-	assert.Equal(suite.T(), "urn:openid:params:grant-type:ciba", resp.AdditionalData[propertyKeyCallbackType])
-}
-
-func (suite *AuthAssertExecutorTestSuite) TestExecute_CallbackType_AbsentWhenNotSet() {
-	ctx := &providers.NodeContext{
-		ExecutionID:      "flow-authcode",
-		EntityID:         "app-1",
-		FlowType:         providers.FlowTypeAuthentication,
-		AuthUser:         newTestAuthenticatedAuthUser(),
-		NodeProperties:   map[string]interface{}{},
-		RuntimeData:      map[string]string{},
-		ExecutionHistory: map[string]*providers.NodeExecutionRecord{},
-	}
-
-	suite.setupGetEntityReference("INTERNAL", testAuthOUID)
-	suite.setupGetUserAttributesEmpty()
-
-	suite.mockJWTService.On("GenerateJWT", mock.Anything, "user-123", mock.Anything, mock.Anything,
-		mock.Anything, mock.Anything, mock.Anything).Return("jwt-token", int64(3600), nil)
-
-	resp, err := suite.executor.Execute(ctx)
-
-	assert.NoError(suite.T(), err)
-	assert.NotNil(suite.T(), resp)
-	assert.Equal(suite.T(), providers.ExecComplete, resp.Status)
-	_, hasCallbackType := resp.AdditionalData[propertyKeyCallbackType]
-	assert.False(suite.T(), hasCallbackType, "callbackType must not be present for auth code flows")
+	suite.mockJWTService.AssertExpectations(suite.T())
 }

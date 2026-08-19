@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package tokenservice
 
@@ -718,6 +703,53 @@ func (suite *TokenBuilderTestSuite) TestBuildRefreshToken_Success_Basic() {
 	suite.mockJWTService.AssertExpectations(suite.T())
 }
 
+func (suite *TokenBuilderTestSuite) TestBuildRefreshToken_RotationInheritsExpiry() {
+	// A rotated token inherits the expiry of the token it replaces, so its validity is the time
+	// remaining on the grant rather than a fresh period.
+	ctx := &RefreshTokenBuildContext{
+		ClientID:             "test-client",
+		Scopes:               []string{"read"},
+		GrantType:            string(providers.GrantTypeAuthorizationCode),
+		AccessTokenSubject:   "user123",
+		AccessTokenAudiences: []string{"app123"},
+		ExpiresAt:            time.Now().Unix() + 1000,
+	}
+
+	suite.mockJWTService.On("GenerateJWT",
+		mock.Anything, "test-client", "https://example.com",
+		mock.MatchedBy(func(validity int64) bool { return validity >= 998 && validity <= 1000 }),
+		mock.Anything, mock.Anything, mock.Anything,
+	).Return(testRefreshToken, time.Now().Unix(), nil)
+
+	result, err := suite.builder.BuildRefreshToken(context.Background(), ctx)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
+	assert.GreaterOrEqual(suite.T(), result.ExpiresIn, int64(998))
+	assert.LessOrEqual(suite.T(), result.ExpiresIn, int64(1000))
+	suite.mockJWTService.AssertExpectations(suite.T())
+}
+
+func (suite *TokenBuilderTestSuite) TestBuildRefreshToken_RotationPastExpiry_Errors() {
+	// Once the inherited expiry has passed there is no lifetime left to grant, so rotation fails
+	// rather than silently minting a fresh period.
+	ctx := &RefreshTokenBuildContext{
+		ClientID:             "test-client",
+		Scopes:               []string{"read"},
+		GrantType:            string(providers.GrantTypeAuthorizationCode),
+		AccessTokenSubject:   "user123",
+		AccessTokenAudiences: []string{"app123"},
+		ExpiresAt:            time.Now().Unix() - 1,
+	}
+
+	result, err := suite.builder.BuildRefreshToken(context.Background(), ctx)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "reached its expiry")
+	suite.mockJWTService.AssertNotCalled(suite.T(), "GenerateJWT")
+}
+
 func (suite *TokenBuilderTestSuite) TestBuildRefreshToken_Success_WithDPoPJkt() {
 	const testJkt = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
 
@@ -1237,6 +1269,11 @@ func (suite *TokenBuilderTestSuite) TestBuildIDToken_Success_WithScopeClaims() {
 func (suite *TokenBuilderTestSuite) TestBuildIDToken_Success_WithStandardOIDCScopes() {
 	oauthAppWithUserAttrs := &providers.OAuthClient{
 		ClientID: "test-client",
+		ScopeClaims: map[string][]string{
+			"openid":  {"sub"},
+			"profile": {"name"},
+			"email":   {"email", "email_verified"},
+		},
 		Token: &providers.OAuthTokenConfig{
 			IDToken: &providers.IDTokenConfig{
 				ValidityPeriod: 3600,
@@ -1499,7 +1536,7 @@ func (suite *TokenBuilderTestSuite) TestBuildIDToken_Success_WithEncryption_Inli
 			return strings.Count(string(payload), ".") == 2
 		}),
 		mock.Anything,
-		jwe.KeyEncAlgorithm("RSA-OAEP-256"),
+		"RSA-OAEP-256",
 		jwe.ContentEncAlgorithm("A256GCM"),
 		"JWT",
 		mock.Anything,
@@ -1617,7 +1654,7 @@ func (suite *TokenBuilderTestSuite) TestBuildIDToken_Error_EncryptionFailed() {
 	mockJWE := jwemock.NewJWEServiceInterfaceMock(suite.T())
 	mockJWE.On("Encrypt",
 		mock.Anything, mock.Anything, mock.Anything,
-		jwe.KeyEncAlgorithm("RSA-OAEP-256"),
+		"RSA-OAEP-256",
 		jwe.ContentEncAlgorithm("A256GCM"),
 		"JWT",
 		mock.Anything,
@@ -1687,7 +1724,7 @@ func (suite *TokenBuilderTestSuite) TestBuildIDToken_Success_WithEncryption_JWKS
 	mockJWE := jwemock.NewJWEServiceInterfaceMock(suite.T())
 	mockJWE.On("Encrypt",
 		mock.Anything, mock.Anything, mock.Anything,
-		jwe.KeyEncAlgorithm("RSA-OAEP-256"),
+		"RSA-OAEP-256",
 		jwe.ContentEncAlgorithm("A256GCM"),
 		"JWT",
 		mock.Anything,

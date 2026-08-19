@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package providers
 
@@ -105,6 +90,17 @@ func (o *OAuthClient) ClientAccessTokenConfig() *AccessTokenSubConfig {
 		return nil
 	}
 	return o.Token.AccessToken.ClientConfig
+}
+
+// ResolveDefaultAudience returns the aud claim for an access token that is not bound to a
+// resource server (an OIDC-only or scopeless request). It returns the application's configured
+// default audience when set; otherwise it falls back to the given client_id.
+func (o *OAuthClient) ResolveDefaultAudience(clientID string) string {
+	if o != nil && o.Token != nil && o.Token.AccessToken != nil &&
+		o.Token.AccessToken.DefaultAudience != "" {
+		return o.Token.AccessToken.DefaultAudience
+	}
+	return clientID
 }
 
 // ValidateRedirectURI validates the provided redirect URI against the registered list.

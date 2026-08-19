@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package userinfo
 
@@ -26,11 +11,9 @@ import (
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/thunder-id/thunderid/internal/actorprovider"
-	"github.com/thunder-id/thunderid/internal/oauth/oauth2/discovery"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/tests/mocks/attributecachemock"
 	"github.com/thunder-id/thunderid/tests/mocks/entityprovidermock"
@@ -65,11 +48,6 @@ func (suite *InitTestSuite) SetupTest() {
 	suite.mockAttributeCacheService = attributecachemock.NewAttributeCacheServiceInterfaceMock(suite.T())
 	suite.mockDiscoveryService = discoverymock.NewDiscoveryServiceInterfaceMock(suite.T())
 	suite.mockDPoPVerifier = dpopmock.NewVerifierInterfaceMock(suite.T())
-	suite.mockDiscoveryService.On("GetOAuth2AuthorizationServerMetadata", mock.Anything).
-		Return(&discovery.OAuth2AuthorizationServerMetadata{
-			UserInfoEndpoint: "https://localhost:8090/oauth2/userinfo",
-		})
-
 	config.ResetServerRuntime()
 	_ = config.InitializeServerRuntime(
 		"test-home",
@@ -88,7 +66,7 @@ func (suite *InitTestSuite) TestInitialize() {
 
 	service := Initialize(mux, suite.mockJWTService, nil, nil,
 		suite.mockTokenValidator,
-		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr()),
+		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr(), nil),
 		suite.mockAttributeCacheService, suite.mockDiscoveryService, suite.mockDPoPVerifier, testhelpers.OAuthConfig())
 
 	assert.NotNil(suite.T(), service)
@@ -99,7 +77,7 @@ func (suite *InitTestSuite) TestInitialize_RegistersRoutes() {
 
 	Initialize(mux, suite.mockJWTService, nil, nil,
 		suite.mockTokenValidator,
-		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr()),
+		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr(), nil),
 		suite.mockAttributeCacheService, suite.mockDiscoveryService, suite.mockDPoPVerifier, testhelpers.OAuthConfig())
 
 	// Verify that the routes are registered by attempting to get a handler for them.

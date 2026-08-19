@@ -1,28 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box} from '@wso2/oxygen-ui';
-import classNames from 'classnames';
 import {useMemo, type ReactElement} from 'react';
 import {ReorderableElement} from '../../steps/view/ReorderableElement';
 import useFlowPlugins from '@/features/flows/hooks/useFlowPlugins';
 import {type Element as FlowElement} from '@/features/flows/models/elements';
-import './BlockAdapter.scss';
 
 /**
  * Props interface of {@link BlockAdapter}
@@ -65,14 +48,13 @@ function BlockAdapter({
   }, [resource?.components, emitElementFilter]);
 
   return (
-    <Box className="adapter block-adapter">
+    <Box data-testid="block-adapter" sx={{display: 'block', width: '100%'}}>
       {filteredComponents.map((component: FlowElement, index: number) => (
         <ReorderableElement
           key={component.id}
           id={component.id}
           index={index}
           element={component}
-          className={classNames('flow-builder-step-content-form-field')}
           availableElements={availableElements}
           onAddElementToForm={onAddElementToForm}
           // Action blocks are managed as a single unit via the parent's chrome —

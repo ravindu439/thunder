@@ -46,7 +46,7 @@ permissions:
 
 env:
   RELEASE_GIT_USER_NAME: "thunderid-automation-bot"
-  RELEASE_GIT_USER_EMAIL: "thunderid-bot@wso2.com"
+  RELEASE_GIT_USER_EMAIL: "thunderid-bot@thunderid.dev"
   NODE_VERSION: "lts/*"
   PNPM_VERSION: "latest"
 

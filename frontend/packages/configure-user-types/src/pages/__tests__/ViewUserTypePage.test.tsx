@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any */
-import {render, screen, waitFor, within, userEvent} from '@thunderid/test-utils';
+import {fireEvent, render, screen, waitFor, within, userEvent} from '@thunderid/test-utils';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
+import UserTypeConstraints from '../../constants/user-type-constraints';
 import type {ApiUserType, ApiError, LibraryAttribute} from '../../types/user-types';
 import ViewUserTypePage from '../ViewUserTypePage';
 
@@ -76,7 +62,6 @@ const mockNavigate = vi.fn();
 const mockRefetch = vi.fn();
 const mockUpdateMutateAsync = vi.fn();
 const mockResetUpdateError = vi.fn();
-const mockShowToast = vi.fn();
 
 // Mock react-router
 vi.mock('react-router', async () => {
@@ -131,15 +116,6 @@ vi.mock('@thunderid/configure-organization-units', () => ({
     </div>
   ),
 }));
-
-// Mock shared-contexts (useToast)
-vi.mock('@thunderid/contexts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@thunderid/contexts')>();
-  return {
-    ...actual,
-    useToast: () => ({showToast: mockShowToast}),
-  };
-});
 
 /**
  * Helper to navigate to the Schema tab.
@@ -325,6 +301,45 @@ describe('ViewUserTypePage', () => {
         expect(screen.getByText('Updated Schema')).toBeInTheDocument();
       });
     });
+
+    it('hides the unsaved-changes bar when the name is retyped back to its original value', async () => {
+      const user = userEvent.setup();
+      render(<ViewUserTypePage />);
+
+      await user.click(screen.getByRole('button', {name: /edit user type name/i}));
+      let nameInput = screen.getByRole('textbox', {name: /user type name/i});
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Renamed Schema{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', {name: /edit user type name/i}));
+      nameInput = screen.getByRole('textbox', {name: /user type name/i});
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Employee Schema{Enter}');
+
+      await waitFor(() => {
+        expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+      });
+    });
+
+    it('discards a rename that exceeds the maximum length', async () => {
+      const user = userEvent.setup();
+      render(<ViewUserTypePage />);
+
+      await user.click(screen.getByRole('button', {name: /edit user type name/i}));
+      const nameInput = screen.getByRole('textbox', {name: /user type name/i});
+      await user.clear(nameInput);
+      fireEvent.change(nameInput, {target: {value: 'a'.repeat(UserTypeConstraints.NAME_MAX_LENGTH + 1)}});
+      fireEvent.keyDown(nameInput, {key: 'Enter'});
+
+      await waitFor(() => {
+        expect(screen.getByText('Employee Schema')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+    });
   });
 
   describe('General Tab', () => {
@@ -373,8 +388,11 @@ describe('ViewUserTypePage', () => {
       expect(screen.getByText('Display Attribute')).toBeInTheDocument();
     });
 
-    it('displays danger zone with delete button', () => {
+    it('displays danger zone with delete button', async () => {
+      const user = userEvent.setup();
       render(<ViewUserTypePage />);
+
+      await user.click(screen.getByRole('tab', {name: /advanced/i}));
 
       expect(screen.getByText('Danger Zone')).toBeInTheDocument();
       expect(screen.getByRole('button', {name: /^delete$/i})).toBeInTheDocument();
@@ -705,6 +723,8 @@ describe('ViewUserTypePage', () => {
       const user = userEvent.setup();
       render(<ViewUserTypePage />);
 
+      await user.click(screen.getByRole('tab', {name: /advanced/i}));
+
       const deleteButton = screen.getByRole('button', {name: /^delete$/i});
       await user.click(deleteButton);
 
@@ -719,6 +739,7 @@ describe('ViewUserTypePage', () => {
       const user = userEvent.setup();
       render(<ViewUserTypePage />);
 
+      await user.click(screen.getByRole('tab', {name: /advanced/i}));
       await user.click(screen.getByRole('button', {name: /^delete$/i}));
 
       await waitFor(() => {
@@ -883,7 +904,8 @@ describe('ViewUserTypePage', () => {
         expect(screen.getByText('PENDING')).toBeInTheDocument();
       });
 
-      // Save via the unsaved changes bar
+      // Save via the unsaved changes bar. Adding an enum value only widens the allowed set,
+      // which is not a breaking change, so no warning dialog appears and the save proceeds.
       const saveButton = screen.getByRole('button', {name: /^save$/i});
       await user.click(saveButton);
 
@@ -900,6 +922,96 @@ describe('ViewUserTypePage', () => {
           }),
         });
       });
+    });
+
+    it('warns before saving a breaking schema change and can be cancelled', async () => {
+      const user = userEvent.setup();
+
+      const userTypeWithEnum: ApiUserType = {
+        ...mockUserType,
+        schema: {
+          status: {
+            type: 'string',
+            required: true,
+            enum: ['ACTIVE', 'INACTIVE'],
+          },
+        },
+      };
+
+      mockUseGetUserType.mockReturnValue({
+        data: userTypeWithEnum,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      });
+
+      render(<ViewUserTypePage />);
+
+      await goToSchemaTab(user);
+      await expandProperty(user, 'status');
+
+      // Removing an allowed enum value narrows the set, a breaking change for existing users.
+      const activeChip = (await screen.findByText('ACTIVE')).closest('.MuiChip-root');
+      await user.click(within(activeChip as HTMLElement).getByTestId('CancelIcon'));
+
+      await waitFor(() => {
+        expect(screen.queryByText('ACTIVE')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', {name: /^save$/i}));
+
+      // The confirmation dialog appears instead of saving immediately and lists the affected attribute.
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/Confirm schema changes/i)).toBeInTheDocument();
+      expect(within(dialog).getByText('status')).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', {name: /cancel/i}));
+
+      expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when a schema change is not breaking', async () => {
+      const user = userEvent.setup();
+      mockUpdateMutateAsync.mockResolvedValue(undefined);
+
+      const userTypeWithEnum: ApiUserType = {
+        ...mockUserType,
+        schema: {
+          status: {
+            type: 'string',
+            required: true,
+            enum: ['ACTIVE', 'INACTIVE'],
+          },
+        },
+      };
+
+      mockUseGetUserType.mockReturnValue({
+        data: userTypeWithEnum,
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      });
+
+      render(<ViewUserTypePage />);
+
+      await goToSchemaTab(user);
+      await expandProperty(user, 'status');
+
+      // Adding an enum value only widens the allowed set, so no warning should appear.
+      const enumInput = await screen.findByPlaceholderText(/add value and press enter/i);
+      await user.type(enumInput, 'PENDING');
+      await user.click(screen.getByRole('button', {name: /^add$/i}));
+
+      await waitFor(() => {
+        expect(screen.getByText('PENDING')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', {name: /^save$/i}));
+
+      await waitFor(() => {
+        expect(mockUpdateMutateAsync).toHaveBeenCalled();
+      });
+      expect(screen.queryByText(/Confirm schema changes/i)).not.toBeInTheDocument();
     });
 
     it('saves schema with array type properties', async () => {
@@ -1172,9 +1284,15 @@ describe('ViewUserTypePage', () => {
       });
     });
 
-    it('handles save error and shows toast', async () => {
+    it('shows the mutation error inline via the unsaved changes bar', async () => {
       const user = userEvent.setup();
       mockUpdateMutateAsync.mockRejectedValue(new Error('Save failed'));
+      mockUseUpdateUserType.mockReturnValue({
+        mutateAsync: mockUpdateMutateAsync,
+        error: new Error('Save failed'),
+        reset: mockResetUpdateError,
+        isPending: false,
+      });
 
       render(<ViewUserTypePage />);
 
@@ -1185,8 +1303,24 @@ describe('ViewUserTypePage', () => {
       await user.click(saveButton);
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith('Save failed', 'error');
+        expect(screen.getByText('Failed to update user type. Please try again.')).toBeInTheDocument();
       });
+    });
+
+    it('resets the save error as soon as a field changes', async () => {
+      const user = userEvent.setup();
+      mockUseUpdateUserType.mockReturnValue({
+        mutateAsync: mockUpdateMutateAsync,
+        error: new Error('Save failed'),
+        reset: mockResetUpdateError,
+        isPending: false,
+      });
+
+      render(<ViewUserTypePage />);
+
+      await user.click(screen.getByTestId('select-ou-child'));
+
+      expect(mockResetUpdateError).toHaveBeenCalled();
     });
 
     it('shows validation error when saving with empty organization unit', async () => {
@@ -1222,7 +1356,7 @@ describe('ViewUserTypePage', () => {
       await user.click(saveButton);
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith('Please provide an organization unit ID', 'error');
+        expect(screen.getByText('Please provide an organization unit ID')).toBeInTheDocument();
       });
 
       expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
@@ -1399,6 +1533,7 @@ describe('ViewUserTypePage', () => {
       const saveButton = screen.getByRole('button', {name: /^save$/i});
       await user.click(saveButton);
 
+      // Widening the enum is not breaking, so the save proceeds without a warning.
       await waitFor(() => {
         expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
           userTypeId: 'schema-123',
@@ -1454,6 +1589,9 @@ describe('ViewUserTypePage', () => {
       // Save should not include the display attribute since it became ineligible.
       const saveButton = screen.getByRole('button', {name: /^save$/i});
       await user.click(saveButton);
+
+      // Editing the schema shows a warning; continue.
+      await user.click(await screen.findByRole('button', {name: /^continue$/i}));
 
       await waitFor(() => {
         expect(mockUpdateMutateAsync).toHaveBeenCalledWith({
@@ -1511,7 +1649,7 @@ describe('ViewUserTypePage', () => {
   });
 
   describe('Save Error Handling', () => {
-    it('handles non-Error save rejection with fallback message', async () => {
+    it('handles a non-Error save rejection without crashing', async () => {
       const user = userEvent.setup();
       mockUpdateMutateAsync.mockRejectedValue('string error');
 
@@ -1523,8 +1661,11 @@ describe('ViewUserTypePage', () => {
       await user.click(saveButton);
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('Failed to save user type'), 'error');
+        expect(mockUpdateMutateAsync).toHaveBeenCalled();
       });
+      // The unsaved changes bar stays up so the user can retry, since a non-Error
+      // rejection carries no message to resolve into the mutation's own error state.
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
     });
   });
 

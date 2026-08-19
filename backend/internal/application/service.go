@@ -1,34 +1,15 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
-
-	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
-	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
-
-	"encoding/json"
 
 	"github.com/thunder-id/thunderid/internal/application/model"
 	"github.com/thunder-id/thunderid/internal/cert"
@@ -37,14 +18,17 @@ import (
 	inboundmodel "github.com/thunder-id/thunderid/internal/inboundclient/model"
 	oauthutils "github.com/thunder-id/thunderid/internal/oauth/oauth2/utils"
 	oupkg "github.com/thunder-id/thunderid/internal/ou"
+	"github.com/thunder-id/thunderid/internal/serverconfig"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/cors"
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
 	i18nmgt "github.com/thunder-id/thunderid/internal/system/i18n/mgt"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
+	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // ApplicationServiceInterface defines the interface for the application service.
@@ -73,8 +57,9 @@ type applicationService struct {
 	entityProvider       entityprovider.EntityProviderInterface
 	ouService            oupkg.OrganizationUnitServiceInterface
 	i18nService          i18nmgt.I18nServiceInterface
-	cryptoSvc            kmprovider.RuntimeCryptoProvider
+	cryptoSvc            providers.RuntimeCryptoProvider
 	dependencyRegistry   resourcedependency.Registry
+	serverConfigService  serverconfig.ServerConfigService
 }
 
 // newApplicationService creates a new instance of ApplicationService.
@@ -83,7 +68,8 @@ func newApplicationService(
 	entityProvider entityprovider.EntityProviderInterface,
 	ouService oupkg.OrganizationUnitServiceInterface,
 	i18nService i18nmgt.I18nServiceInterface,
-	cryptoSvc kmprovider.RuntimeCryptoProvider,
+	cryptoSvc providers.RuntimeCryptoProvider,
+	serverConfigSvc serverconfig.ServerConfigService,
 ) ApplicationServiceInterface {
 	return &applicationService{
 		logger:               log.GetLogger().With(log.String(log.LoggerKeyComponentName, "ApplicationService")),
@@ -92,6 +78,7 @@ func newApplicationService(
 		ouService:            ouService,
 		i18nService:          i18nService,
 		cryptoSvc:            cryptoSvc,
+		serverConfigService:  serverConfigSvc,
 	}
 }
 
@@ -146,7 +133,7 @@ func (as *applicationService) CreateApplication(ctx context.Context, app *model.
 	// value for such apps is ignored. For eligible apps, an explicitly provided value (e.g.
 	// declarative resources) is preserved; otherwise one is generated.
 	flowSecret := ""
-	if isFlowSecretEligible(inboundAuthConfig) {
+	if isFlowSecretEligible(app.Type, inboundAuthConfig) {
 		flowSecret = app.FlowSecret
 		if flowSecret == "" {
 			generatedFlowSecret, secretErr := oauthutils.GenerateOAuth2ClientSecret()
@@ -185,6 +172,8 @@ func (as *applicationService) CreateApplication(ctx context.Context, app *model.
 		as.logger.Error(ctx, "Failed to create application", log.Error(err), log.String("appID", appID))
 		return nil, &tidcommon.InternalServerError
 	}
+
+	as.syncPasskeyOriginsToCORS(ctx, processedDTO.PasskeyAllowedOrigins)
 
 	appForReturn := *app
 	appForReturn.AuthFlowID = inboundClient.AuthFlowID
@@ -235,6 +224,11 @@ func (as *applicationService) ValidateApplication(ctx context.Context, app *mode
 
 	if svcErr := as.validateApplicationFields(ctx, app); svcErr != nil {
 		return nil, nil, svcErr
+	}
+
+	// A type is required on creation; there is no implicit default.
+	if app.Type == "" {
+		return nil, nil, &ErrorApplicationTypeRequired
 	}
 
 	appID := app.ID
@@ -434,6 +428,8 @@ func (as *applicationService) UpdateApplication(ctx context.Context, appID strin
 		return nil, svcErr
 	}
 
+	as.syncPasskeyOriginsToCORS(ctx, processedDTO.PasskeyAllowedOrigins)
+
 	appForReturn := *app
 	appForReturn.AuthFlowID = inboundClient.AuthFlowID
 	appForReturn.RegistrationFlowID = inboundClient.RegistrationFlowID
@@ -487,7 +483,7 @@ func (as *applicationService) updateEntityDataForApplicationUpdate(ctx context.C
 	// public nor redirect-based — may have one set; a value supplied for an ineligible app is
 	// ignored. Credential updates merge, so this preserves the stored client secret, and an empty
 	// value leaves the existing Flow Secret intact.
-	if app.FlowSecret != "" && isFlowSecretEligible(inboundAuthConfig) {
+	if app.FlowSecret != "" && isFlowSecretEligible(app.Type, inboundAuthConfig) {
 		flowSecretJSON, marshalErr := buildSystemCredentials("", app.FlowSecret)
 		if marshalErr != nil {
 			as.logger.Error(ctx, "Failed to build flow secret credentials for update", log.Error(marshalErr))
@@ -533,27 +529,28 @@ func (as *applicationService) updateEntityDataForApplicationUpdate(ctx context.C
 	return nil
 }
 
-// isFlowSecretEligible reports whether an application may hold a Flow Secret. Eligible apps initiate
-// flows directly: embedded apps with no OAuth config, or confidential non-redirect apps. Public,
-// redirect (authorization_code), and machine-to-machine (client_credentials as the only grant) apps
-// are not eligible.
-func isFlowSecretEligible(inboundAuthConfig *providers.InboundAuthConfigWithSecret) bool {
-	if inboundAuthConfig == nil || inboundAuthConfig.OAuthConfig == nil {
-		return true
-	}
-	oauthConfig := inboundAuthConfig.OAuthConfig
-	if oauthConfig.PublicClient {
+// isFlowSecretEligible reports whether an application may hold a Flow Secret. Browser (public
+// redirect), mobile (attestation), and m2m (direct token) apps never hold one. Full-stack, custom,
+// and mcp apps derive eligibility from the OAuth config shape: only confidential, non-redirect
+// clients (or embedded apps with no OAuth config) are eligible.
+func isFlowSecretEligible(appType model.ApplicationType,
+	inboundAuthConfig *providers.InboundAuthConfigWithSecret) bool {
+	switch appType {
+	case model.ApplicationTypeBrowser, model.ApplicationTypeMobile, model.ApplicationTypeM2M:
 		return false
+	default:
+		if inboundAuthConfig == nil || inboundAuthConfig.OAuthConfig == nil {
+			return true
+		}
+		oauthConfig := inboundAuthConfig.OAuthConfig
+		if oauthConfig.PublicClient {
+			return false
+		}
+		if slices.Contains(oauthConfig.GrantTypes, providers.GrantTypeAuthorizationCode) {
+			return false
+		}
+		return !isM2MGrantSet(oauthConfig.GrantTypes)
 	}
-	if slices.Contains(oauthConfig.GrantTypes, providers.GrantTypeAuthorizationCode) {
-		return false
-	}
-	// Machine-to-machine apps use client_credentials as their only grant; they obtain tokens directly
-	// and do not initiate flows, so they are not issued a Flow Secret.
-	if isM2MGrantSet(oauthConfig.GrantTypes) {
-		return false
-	}
-	return true
 }
 
 // isM2MGrantSet reports whether client_credentials is the only configured grant type.
@@ -810,12 +807,13 @@ func toInboundClient(dto *model.ApplicationProcessedDTO) inboundmodel.InboundCli
 		RecoveryFlowID:            dto.RecoveryFlowID,
 		IsRecoveryFlowEnabled:     dto.IsRecoveryFlowEnabled,
 		SignOutFlowID:             dto.SignOutFlowID,
-		IsSignOutFlowEnabled:      dto.IsSignOutFlowEnabled,
 		ThemeID:                   dto.ThemeID,
 		LayoutID:                  dto.LayoutID,
 		Assertion:                 dto.Assertion,
 		LoginConsent:              dto.LoginConsent,
 		AllowedUserTypes:          dto.AllowedUserTypes,
+		SubjectAttribute:          dto.SubjectAttribute,
+		PasskeyAllowedOrigins:     dto.PasskeyAllowedOrigins,
 		Attestation:               dto.Attestation,
 	}
 
@@ -835,6 +833,9 @@ func toInboundClient(dto *model.ApplicationProcessedDTO) inboundmodel.InboundCli
 	}
 	if len(dto.Contacts) > 0 {
 		props[propContacts] = dto.Contacts
+	}
+	if dto.Type != "" {
+		props[propType] = string(dto.Type)
 	}
 	if dto.Template != "" {
 		props[propTemplate] = dto.Template
@@ -863,12 +864,13 @@ func toProcessedDTO(
 			RecoveryFlowID:            dao.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     dao.IsRecoveryFlowEnabled,
 			SignOutFlowID:             dao.SignOutFlowID,
-			IsSignOutFlowEnabled:      dao.IsSignOutFlowEnabled,
 			ThemeID:                   dao.ThemeID,
 			LayoutID:                  dao.LayoutID,
 			Assertion:                 dao.Assertion,
 			LoginConsent:              dao.LoginConsent,
 			AllowedUserTypes:          dao.AllowedUserTypes,
+			SubjectAttribute:          dao.SubjectAttribute,
+			PasskeyAllowedOrigins:     dao.PasskeyAllowedOrigins,
 			Attestation:               dao.Attestation.WithoutCredentials(),
 		},
 	}
@@ -913,6 +915,9 @@ func toProcessedDTO(
 					dto.Contacts = append(dto.Contacts, s)
 				}
 			}
+		}
+		if t, ok := dao.Properties[propType].(string); ok {
+			dto.Type = model.ApplicationType(t)
 		}
 		if template, ok := dao.Properties[propTemplate].(string); ok {
 			dto.Template = template
@@ -1105,6 +1110,13 @@ func (as *applicationService) validateApplicationForUpdate(
 		return nil, nil, svcErr
 	}
 
+	// The application type is immutable. Reject a request that attempts to change it; inherit the
+	// existing type when the request omits it.
+	if app.Type != "" && app.Type != existingApp.Type {
+		return nil, nil, &ErrorApplicationTypeImmutable
+	}
+	app.Type = existingApp.Type
+
 	inboundAuthConfig, svcErr := as.processInboundAuthConfig(ctx, app, existingApp)
 	if svcErr != nil {
 		return nil, nil, svcErr
@@ -1145,6 +1157,21 @@ func (as *applicationService) validateApplicationFields(
 	}
 	if app.LogoURL != "" && !sysutils.IsValidLogoURI(app.LogoURL) {
 		return &ErrorInvalidLogoURL
+	}
+	if app.TosURI != "" && !sysutils.IsValidURI(app.TosURI) {
+		return &ErrorInvalidTosURI
+	}
+	if app.PolicyURI != "" && !sysutils.IsValidURI(app.PolicyURI) {
+		return &ErrorInvalidPolicyURI
+	}
+	// Reject an unrecognized application type. Requiring a type (create) and enforcing
+	// immutability (update) are handled by the respective callers.
+	switch app.Type {
+	case "", model.ApplicationTypeBrowser, model.ApplicationTypeFullStack,
+		model.ApplicationTypeMobile, model.ApplicationTypeM2M, model.ApplicationTypeMCP,
+		model.ApplicationTypeCustom:
+	default:
+		return &ErrorInvalidApplicationType
 	}
 	// Reject requests with more than one OAuth-typed inbound auth entry — at most one
 	// inbound auth config per protocol per application is allowed.
@@ -1316,10 +1343,10 @@ func translateOAuthValidationError(err error) *tidcommon.ServiceError {
 			Key:          "error.applicationservice.auth_code_requires_code_response_type_description",
 			DefaultValue: "authorization_code grant type requires 'code' response type",
 		})
-	case errors.Is(err, inboundclient.ErrOAuthRefreshTokenCannotBeSoleGrant):
+	case errors.Is(err, inboundclient.ErrOAuthRefreshTokenRequiresTokenIssuingGrant):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
-			Key:          "error.applicationservice.refresh_token_cannot_be_sole_grant_description",
-			DefaultValue: "refresh_token grant type cannot be used without another grant type",
+			Key:          "error.applicationservice.refresh_token_requires_token_issuing_grant_description",
+			DefaultValue: "refresh_token grant type requires a token-issuing grant type",
 		})
 	case errors.Is(err, inboundclient.ErrOAuthPKCERequiresAuthCode):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
@@ -1350,25 +1377,32 @@ func translateOAuthValidationError(err error) *tidcommon.ServiceError {
 			Key:          "error.applicationservice.private_key_jwt_cannot_have_client_secret_description",
 			DefaultValue: "private_key_jwt authentication method cannot have a client secret",
 		})
-	case errors.Is(err, inboundclient.ErrOAuthClientSecretCannotHaveCertificate):
-		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
-			Key:          "error.applicationservice.client_secret_cannot_have_certificate_description",
-			DefaultValue: "client_secret authentication methods cannot have a certificate",
-		})
 	case errors.Is(err, inboundclient.ErrOAuthNoneAuthRequiresPublicClient):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
 			Key:          "error.applicationservice.none_auth_method_requires_public_client_description",
 			DefaultValue: "'none' authentication method requires the client to be a public client",
 		})
-	case errors.Is(err, inboundclient.ErrOAuthNoneAuthCannotHaveCertOrSecret):
+	case errors.Is(err, inboundclient.ErrOAuthNoneAuthCannotHaveSecret):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
-			Key:          "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description",
-			DefaultValue: "'none' authentication method cannot have a certificate or client secret",
+			Key:          "error.applicationservice.none_auth_method_cannot_have_secret_description",
+			DefaultValue: "'none' authentication method cannot have a client secret",
 		})
 	case errors.Is(err, inboundclient.ErrOAuthClientCredentialsCannotUseNoneAuth):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
 			Key:          "error.applicationservice.client_credentials_cannot_use_none_auth_description",
 			DefaultValue: "client_credentials grant type cannot use 'none' authentication method",
+		})
+	case errors.Is(err, inboundclient.ErrOAuthClientJWTBearerCannotUseNoneAuth):
+		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
+			Key: "error.applicationservice.jwt_bearer_cannot_use_none_auth_description",
+			DefaultValue: "jwt-bearer grant type requires a confidential client and cannot use 'none' " +
+				"token endpoint authentication method",
+		})
+	case errors.Is(err, inboundclient.ErrOAuthClientIDJAGCannotUseNoneAuth):
+		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
+			Key: "error.applicationservice.idjag_cannot_use_none_auth_description",
+			DefaultValue: "ID-JAG configuration requires a confidential client and cannot use 'none' " +
+				"token endpoint authentication method",
 		})
 
 	// OAuth: public client
@@ -1430,11 +1464,6 @@ func translateUserInfoValidationError(err error) *tidcommon.ServiceError {
 			Key:          "error.applicationservice.userinfo_unsupported_response_type_description",
 			DefaultValue: "userinfo responseType is not supported",
 		})
-	case errors.Is(err, inboundclient.ErrOAuthUserInfoJWSRequiresSigningAlg):
-		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
-			Key:          "error.applicationservice.userinfo_jws_requires_signing_alg_description",
-			DefaultValue: "signingAlg is required when userinfo responseType is JWS",
-		})
 	case errors.Is(err, inboundclient.ErrOAuthUserInfoJWERequiresEncryption):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
 			Key:          "error.applicationservice.userinfo_jwe_requires_encryption_description",
@@ -1443,7 +1472,7 @@ func translateUserInfoValidationError(err error) *tidcommon.ServiceError {
 	case errors.Is(err, inboundclient.ErrOAuthUserInfoNestedJWTRequiresAll):
 		return tidcommon.CustomServiceError(ErrorInvalidOAuthConfiguration, tidcommon.I18nMessage{
 			Key: "error.applicationservice.userinfo_nested_jwt_requires_all_description",
-			DefaultValue: "signingAlg, encryptionAlg, and encryptionEnc are required " +
+			DefaultValue: "encryptionAlg and encryptionEnc are required " +
 				"when userinfo responseType is NESTED_JWT",
 		})
 	case errors.Is(err, inboundclient.ErrOAuthUserInfoAlgRequiresResponseType):
@@ -1533,6 +1562,10 @@ func translateInboundClientFKError(err error) *tidcommon.ServiceError {
 		return &ErrorInvalidUserType
 	case errors.Is(err, inboundclient.ErrUserSchemaLookupFailed):
 		return &tidcommon.InternalServerError
+	case errors.Is(err, inboundclient.ErrUniqueAttributeLookupFailed):
+		return &tidcommon.InternalServerError
+	case errors.Is(err, inboundclient.ErrFKInvalidSubjectAttributeMapping):
+		return &ErrorInvalidSubjectAttributeMapping
 	case errors.Is(err, inboundclient.ErrInvalidUserAttribute):
 		return &ErrorInvalidUserAttribute
 	}
@@ -1715,8 +1748,7 @@ func (as *applicationService) resolveAttestationCredentialsForPersist(
 		inboundClient.Attestation.Android.CertificateSha256Digests...)
 
 	if android.ServiceAccountCredentials != "" {
-		params := cryptolib.AlgorithmParams{Algorithm: cryptolib.AlgorithmAESGCM}
-		ciphertext, _, err := as.cryptoSvc.Encrypt(ctx, nil, params,
+		ciphertext, _, err := as.cryptoSvc.Encrypt(ctx, nil, string(cryptolib.AlgorithmAESGCM), nil,
 			[]byte(android.ServiceAccountCredentials))
 		if err != nil {
 			as.logger.Error(ctx, "Failed to encrypt attestation credentials",
@@ -1743,7 +1775,11 @@ func (as *applicationService) resolveAttestationCredentialsForPersist(
 		}
 	}
 
-	inboundClient.Attestation = &providers.AttestationConfig{Android: &android, Apple: inboundClient.Attestation.Apple}
+	inboundClient.Attestation = &providers.AttestationConfig{
+		Android: &android,
+		Apple:   inboundClient.Attestation.Apple,
+		DevMode: inboundClient.Attestation.DevMode,
+	}
 	return nil
 }
 
@@ -1783,14 +1819,16 @@ func buildApplicationResponse(dto *model.ApplicationProcessedDTO) *providers.App
 			RecoveryFlowID:            dto.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     dto.IsRecoveryFlowEnabled,
 			SignOutFlowID:             dto.SignOutFlowID,
-			IsSignOutFlowEnabled:      dto.IsSignOutFlowEnabled,
 			ThemeID:                   dto.ThemeID,
 			LayoutID:                  dto.LayoutID,
 			Assertion:                 dto.Assertion,
 			AllowedUserTypes:          dto.AllowedUserTypes,
+			SubjectAttribute:          dto.SubjectAttribute,
+			PasskeyAllowedOrigins:     dto.PasskeyAllowedOrigins,
 			LoginConsent:              dto.LoginConsent,
 			Attestation:               dto.Attestation,
 		},
+		Type:      string(dto.Type),
 		Template:  dto.Template,
 		URL:       dto.URL,
 		LogoURL:   dto.LogoURL,
@@ -1842,12 +1880,14 @@ func buildBasicApplicationResponse(
 		RecoveryFlowID:            cfg.RecoveryFlowID,
 		IsRecoveryFlowEnabled:     cfg.IsRecoveryFlowEnabled,
 		SignOutFlowID:             cfg.SignOutFlowID,
-		IsSignOutFlowEnabled:      cfg.IsSignOutFlowEnabled,
 		ThemeID:                   cfg.ThemeID,
 		LayoutID:                  cfg.LayoutID,
 		IsReadOnly:                cfg.IsReadOnly,
 	}
 	if cfg.Properties != nil {
+		if t, ok := cfg.Properties[propType].(string); ok {
+			resp.Type = model.ApplicationType(t)
+		}
 		if t, ok := cfg.Properties[propTemplate].(string); ok {
 			resp.Template = t
 		}
@@ -1892,14 +1932,16 @@ func buildBaseApplicationProcessedDTO(appID string, app *model.ApplicationDTO,
 			RecoveryFlowID:            app.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     app.IsRecoveryFlowEnabled,
 			SignOutFlowID:             app.SignOutFlowID,
-			IsSignOutFlowEnabled:      app.IsSignOutFlowEnabled,
 			ThemeID:                   app.ThemeID,
 			LayoutID:                  app.LayoutID,
 			Assertion:                 assertion,
 			AllowedUserTypes:          app.AllowedUserTypes,
+			SubjectAttribute:          app.SubjectAttribute,
+			PasskeyAllowedOrigins:     app.PasskeyAllowedOrigins,
 			LoginConsent:              app.LoginConsent,
 			Attestation:               app.Attestation,
 		},
+		Type:      app.Type,
 		Template:  app.Template,
 		URL:       app.URL,
 		LogoURL:   app.LogoURL,
@@ -1976,14 +2018,16 @@ func buildReturnApplicationDTO(
 			RecoveryFlowID:            app.RecoveryFlowID,
 			IsRecoveryFlowEnabled:     app.IsRecoveryFlowEnabled,
 			SignOutFlowID:             app.SignOutFlowID,
-			IsSignOutFlowEnabled:      app.IsSignOutFlowEnabled,
 			ThemeID:                   app.ThemeID,
 			LayoutID:                  app.LayoutID,
 			Assertion:                 assertion,
 			AllowedUserTypes:          app.AllowedUserTypes,
+			SubjectAttribute:          app.SubjectAttribute,
+			PasskeyAllowedOrigins:     app.PasskeyAllowedOrigins,
 			LoginConsent:              app.LoginConsent,
 			Attestation:               app.Attestation.WithoutCredentials(),
 		},
+		Type:      app.Type,
 		Template:  app.Template,
 		URL:       app.URL,
 		LogoURL:   app.LogoURL,
@@ -2090,4 +2134,74 @@ func (as *applicationService) cleanupStaleI18nKeys(
 		return &tidcommon.InternalServerError
 	}
 	return nil
+}
+
+// syncPasskeyOriginsToCORS merges the application's passkey allowed origins into the CORS writable
+// layer so the browser can reach the ThunderID server from those origins. This is additive: origins
+// already present are skipped; origins removed from an application are not pruned here.
+func (as *applicationService) syncPasskeyOriginsToCORS(ctx context.Context, origins []string) {
+	if as.serverConfigService == nil || len(origins) == 0 {
+		return
+	}
+
+	writableAny, svcErr := as.serverConfigService.GetWritableConfig(ctx, string(serverconfig.ConfigNameCORS))
+	if svcErr != nil {
+		as.logger.Warn(ctx, "Failed to read CORS writable config for passkey origin sync",
+			log.String("error", svcErr.ErrorDescription.DefaultValue))
+		return
+	}
+
+	cfg, _ := writableAny.(cors.OriginConfig)
+
+	existingJSON, err := json.Marshal(cfg.AllowedOrigins)
+	if err != nil {
+		as.logger.Warn(ctx, "Failed to marshal existing CORS allowed origins", log.Error(err))
+		return
+	}
+	existingItems := make([]json.RawMessage, 0, len(cfg.AllowedOrigins))
+	_ = json.Unmarshal(existingJSON, &existingItems)
+
+	existingLiterals := make(map[string]struct{}, len(existingItems))
+	for _, item := range existingItems {
+		var s string
+		if json.Unmarshal(item, &s) == nil {
+			existingLiterals[s] = struct{}{}
+		}
+	}
+
+	added := false
+	for _, origin := range origins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" || strings.Contains(trimmed, "*") || trimmed == "null" {
+			continue
+		}
+		if _, err := cors.ParseOrigin(trimmed); err != nil {
+			as.logger.Debug(ctx, "Skipping invalid passkey origin for CORS sync",
+				log.String("origin", trimmed), log.String("error", err.Error()))
+			continue
+		}
+		if _, found := existingLiterals[trimmed]; found {
+			continue
+		}
+		originJSON, _ := json.Marshal(trimmed)
+		existingItems = append(existingItems, json.RawMessage(originJSON))
+		existingLiterals[trimmed] = struct{}{}
+		added = true
+	}
+
+	if !added {
+		return
+	}
+
+	newConfigJSON, err := json.Marshal(map[string]any{"allowedOrigins": existingItems})
+	if err != nil {
+		as.logger.Warn(ctx, "Failed to marshal updated CORS config", log.Error(err))
+		return
+	}
+	if svcErr := as.serverConfigService.SetConfig(
+		ctx, serverconfig.ConfigNameCORS, json.RawMessage(newConfigJSON),
+	); svcErr != nil {
+		as.logger.Warn(ctx, "Failed to update CORS config with passkey allowed origins",
+			log.String("error", svcErr.ErrorDescription.DefaultValue))
+	}
 }

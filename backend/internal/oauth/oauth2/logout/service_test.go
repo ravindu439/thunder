@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package logout
 
@@ -28,6 +13,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	flowcommon "github.com/thunder-id/thunderid/internal/flow/common"
 	"github.com/thunder-id/thunderid/internal/flow/flowexec"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
@@ -37,7 +23,10 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/jose/jwtmock"
 )
 
-const testIssuer = "https://issuer.test"
+const (
+	testIssuer      = "https://issuer.test"
+	testExecutionID = "exec-1"
+)
 
 type LogoutServiceTestSuite struct {
 	suite.Suite
@@ -82,7 +71,7 @@ func (suite *LogoutServiceTestSuite) TestInitiateSignOutFlow_StoresContextAndIni
 	flowSvc.EXPECT().InitiateFlow(mock.Anything, mock.Anything).RunAndReturn(
 		func(_ context.Context, ic *flowexec.FlowInitContext) (string, *tidcommon.ServiceError) {
 			captured = ic
-			return "exec-1", nil
+			return testExecutionID, nil
 		})
 	svc := suite.newServiceWithStore(store, flowSvc)
 
@@ -92,13 +81,35 @@ func (suite *LogoutServiceTestSuite) TestInitiateSignOutFlow_StoresContextAndIni
 
 	suite.Nil(svcErr)
 	suite.Require().NotNil(initiation)
-	suite.Equal("exec-1", initiation.ExecutionID)
+	suite.Equal(testExecutionID, initiation.ExecutionID)
 	suite.Equal("logout-1", initiation.LogoutID)
 	// The flow carries no post-logout data — it stays protocol-agnostic.
 	suite.Require().NotNil(captured)
 	suite.Equal("app-1", captured.ApplicationID)
 	suite.Equal("SIGNOUT", captured.FlowType)
 	suite.Empty(captured.RuntimeData)
+}
+
+func (suite *LogoutServiceTestSuite) TestInitiateSignOutFlow_PromptRequiredSetsRuntimeData() {
+	store := newLogoutRequestStoreInterfaceMock(suite.T())
+	store.EXPECT().AddRequest(mock.Anything, mock.Anything).Return("logout-1", nil)
+	flowSvc := flowexecmock.NewFlowExecServiceInterfaceMock(suite.T())
+	var captured *flowexec.FlowInitContext
+	flowSvc.EXPECT().InitiateFlow(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, ic *flowexec.FlowInitContext) (string, *tidcommon.ServiceError) {
+			captured = ic
+			return "exec-1", nil
+		})
+	svc := suite.newServiceWithStore(store, flowSvc)
+
+	_, svcErr := svc.InitiateSignOutFlow(context.Background(), &LogoutResolution{
+		AppID: "app-1", PromptRequired: true,
+	})
+
+	suite.Nil(svcErr)
+	// The confirmation requirement is carried to the flow so a conditional prompt node can read it.
+	suite.Require().NotNil(captured)
+	suite.Equal("true", captured.RuntimeData[flowcommon.RuntimeKeyLogoutPromptRequired])
 }
 
 func (suite *LogoutServiceTestSuite) TestCompleteSignOut_ReturnsRedirectWithStateAndConsumes() {
@@ -141,6 +152,141 @@ func (suite *LogoutServiceTestSuite) TestCompleteSignOut_UnknownID() {
 	suite.Empty(redirectURI)
 }
 
+func (suite *LogoutServiceTestSuite) TestInitiateSignOutFlow_StripsIDTokenHintFromInitiatorRequest() {
+	// id_token_hint has already been consumed by the OAuth layer at Resolve() to identify the
+	// target client; it must not be persisted into the flow context store as part of the initiator
+	// request. Other logout params (state, client_id, post_logout_redirect_uri) are not
+	// credential-bearing and must be preserved.
+	store := newLogoutRequestStoreInterfaceMock(suite.T())
+	store.EXPECT().AddRequest(mock.Anything, mock.Anything).Return("logout-1", nil)
+	flowSvc := flowexecmock.NewFlowExecServiceInterfaceMock(suite.T())
+	var captured *flowexec.FlowInitContext
+	flowSvc.EXPECT().InitiateFlow(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, ic *flowexec.FlowInitContext) (string, *tidcommon.ServiceError) {
+			captured = ic
+			return testExecutionID, nil
+		})
+	svc := suite.newServiceWithStore(store, flowSvc)
+
+	_, svcErr := svc.InitiateSignOutFlow(context.Background(), &LogoutResolution{
+		AppID: "app-1",
+		QueryParams: map[string][]string{
+			"id_token_hint":            {"header.payload.sig"},
+			"client_id":                {"client-x"},
+			"post_logout_redirect_uri": {"https://rp.example/after"},
+			"state":                    {"xyz"},
+		},
+	})
+
+	suite.Nil(svcErr)
+	suite.Require().NotNil(captured)
+	suite.Require().NotNil(captured.InitiatorRequest)
+	forwarded := captured.InitiatorRequest.QueryParams
+	suite.NotContains(forwarded, "id_token_hint")
+	suite.Equal([]string{"client-x"}, forwarded["client_id"])
+	suite.Equal([]string{"https://rp.example/after"}, forwarded["post_logout_redirect_uri"])
+	suite.Equal([]string{"xyz"}, forwarded["state"])
+}
+
+func (suite *LogoutServiceTestSuite) TestFilterQueryParams() {
+	testCases := []struct {
+		name     string
+		input    map[string][]string
+		exclude  []string
+		expected map[string][]string
+	}{
+		{
+			name:     "NilInputReturnedAsIs",
+			input:    nil,
+			exclude:  []string{"id_token_hint"},
+			expected: nil,
+		},
+		{
+			name:     "EmptyInputReturnedAsIs",
+			input:    map[string][]string{},
+			exclude:  []string{"id_token_hint"},
+			expected: map[string][]string{},
+		},
+		{
+			name: "NoExcludeReturnsCopy",
+			input: map[string][]string{
+				"client_id": {"c1"},
+				"state":     {"s1"},
+			},
+			exclude: nil,
+			expected: map[string][]string{
+				"client_id": {"c1"},
+				"state":     {"s1"},
+			},
+		},
+		{
+			name: "RemovesNamedKey",
+			input: map[string][]string{
+				"id_token_hint": {"header.payload.sig"},
+				"client_id":     {"c1"},
+			},
+			exclude: []string{"id_token_hint"},
+			expected: map[string][]string{
+				"client_id": {"c1"},
+			},
+		},
+		{
+			name: "RemovesMultipleKeys",
+			input: map[string][]string{
+				"a": {"1"},
+				"b": {"2"},
+				"c": {"3"},
+			},
+			exclude: []string{"a", "c"},
+			expected: map[string][]string{
+				"b": {"2"},
+			},
+		},
+		{
+			name: "UnknownExcludeIsNoOp",
+			input: map[string][]string{
+				"client_id": {"c1"},
+			},
+			exclude: []string{"not_present"},
+			expected: map[string][]string{
+				"client_id": {"c1"},
+			},
+		},
+		{
+			name: "MatchIsCaseSensitive",
+			input: map[string][]string{
+				"ID_Token_Hint": {"header.payload.sig"},
+				"id_token_hint": {"other"},
+			},
+			exclude: []string{"id_token_hint"},
+			expected: map[string][]string{
+				"ID_Token_Hint": {"header.payload.sig"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			result := filterQueryParams(tc.input, tc.exclude...)
+			suite.Equal(tc.expected, result)
+		})
+	}
+}
+
+func (suite *LogoutServiceTestSuite) TestFilterQueryParams_DoesNotMutateInput() {
+	input := map[string][]string{
+		"id_token_hint": {"header.payload.sig"},
+		"client_id":     {"c1"},
+	}
+
+	_ = filterQueryParams(input, "id_token_hint")
+
+	// Original map must remain intact — filterQueryParams returns a copy.
+	suite.Contains(input, "id_token_hint")
+	suite.Equal([]string{"header.payload.sig"}, input["id_token_hint"])
+	suite.Equal([]string{"c1"}, input["client_id"])
+}
+
 func clientWithPostLogout(uris ...string) *providers.OAuthClient {
 	return &providers.OAuthClient{ID: "app-1", ClientID: "client-x", PostLogoutRedirectURIs: uris}
 }
@@ -154,6 +300,20 @@ func makeIDToken(iss, aud string) string {
 		enc(map[string]interface{}{"iss": iss, "aud": aud}) + ".sig"
 }
 
+// makeTypedToken builds a token with an arbitrary typ header and extra claims, for asserting that
+// only ID tokens are accepted as an id_token_hint.
+func makeTypedToken(typ, iss, aud string, extra map[string]interface{}) string {
+	enc := func(v interface{}) string {
+		b, _ := json.Marshal(v)
+		return base64.RawURLEncoding.EncodeToString(b)
+	}
+	claims := map[string]interface{}{"iss": iss, "aud": aud}
+	for k, v := range extra {
+		claims[k] = v
+	}
+	return enc(map[string]string{"alg": "RS256", "typ": typ}) + "." + enc(claims) + ".sig"
+}
+
 func makeIDTokenMultiAud(iss string, aud []string, azp string) string {
 	enc := func(v interface{}) string {
 		b, _ := json.Marshal(v)
@@ -163,14 +323,34 @@ func makeIDTokenMultiAud(iss string, aud []string, azp string) string {
 		enc(map[string]interface{}{"iss": iss, "aud": aud, "azp": azp}) + ".sig"
 }
 
-func (suite *LogoutServiceTestSuite) TestResolve_RedirectWithoutIDTokenHintRejected() {
-	svc, _, _ := suite.newService()
+func (suite *LogoutServiceTestSuite) TestResolve_ClientIDWithRedirectWithoutIDTokenHint() {
+	svc, _, actor := suite.newService()
+	actor.EXPECT().GetOAuthClientByClientID(mock.Anything, "client-x").
+		Return(clientWithPostLogout("https://rp.example/after"), nil)
 
-	_, err := svc.Resolve(context.Background(), LogoutRequest{
+	res, err := svc.Resolve(context.Background(), LogoutRequest{
 		ClientID: "client-x", PostLogoutRedirectURI: "https://rp.example/after",
 	})
 
-	suite.Require().ErrorIs(err, errIDTokenHintRequired)
+	// id_token_hint is not required: the redirect is confirmed by the client's registered
+	// allow-list, and the missing hint marks the logout for End-User confirmation.
+	suite.Require().NoError(err)
+	suite.Equal("app-1", res.AppID)
+	suite.Equal("https://rp.example/after", res.PostLogoutRedirectURI)
+	suite.True(res.PromptRequired)
+}
+
+func (suite *LogoutServiceTestSuite) TestResolve_UnregisteredRedirectWithoutIDTokenHintRejected() {
+	svc, _, actor := suite.newService()
+	actor.EXPECT().GetOAuthClientByClientID(mock.Anything, "client-x").
+		Return(clientWithPostLogout("https://rp.example/after"), nil)
+
+	// Dropping the mandatory id_token_hint must not weaken redirect-target validation.
+	_, err := svc.Resolve(context.Background(), LogoutRequest{
+		ClientID: "client-x", PostLogoutRedirectURI: "https://evil.example/steal",
+	})
+
+	suite.Require().ErrorIs(err, errInvalidPostLogoutRedirectURI)
 }
 
 func (suite *LogoutServiceTestSuite) TestResolve_UnregisteredRedirectRejected() {
@@ -197,6 +377,8 @@ func (suite *LogoutServiceTestSuite) TestResolve_ClientIDWithoutRedirect() {
 	suite.Require().NoError(err)
 	suite.Equal("app-1", res.AppID)
 	suite.Empty(res.PostLogoutRedirectURI)
+	// No id_token_hint supplied, so the logout must be confirmed with the End-User.
+	suite.True(res.PromptRequired)
 }
 
 func (suite *LogoutServiceTestSuite) TestResolve_NoClientReference() {
@@ -232,6 +414,8 @@ func (suite *LogoutServiceTestSuite) TestResolve_IDTokenHintIdentifiesClient() {
 	suite.Equal("app-1", res.AppID)
 	suite.Equal("https://rp.example/after", res.PostLogoutRedirectURI)
 	suite.Equal("xyz", res.State)
+	// A valid id_token_hint establishes legitimacy, so no confirmation prompt is forced.
+	suite.False(res.PromptRequired)
 }
 
 func (suite *LogoutServiceTestSuite) TestResolve_IDTokenHintPrefersAzpForMultiAudience() {
@@ -262,6 +446,32 @@ func (suite *LogoutServiceTestSuite) TestResolve_IDTokenHintBadSignature() {
 	token := makeIDToken(testIssuer, "client-x")
 	jwtSvc.EXPECT().VerifyJWTSignature(mock.Anything, token).
 		Return(&tidcommon.ServiceError{Code: "bad", Type: tidcommon.ClientErrorType})
+
+	_, err := svc.Resolve(context.Background(), LogoutRequest{IDTokenHint: token})
+
+	suite.Require().ErrorIs(err, errInvalidIDTokenHint)
+}
+
+// An access token issued to an application with no configured default audience carries
+// aud=client_id, so it resolves to a valid client. It must still be rejected as an id_token_hint:
+// accepting it would let anyone holding such a token suppress the End-User sign-out confirmation.
+func (suite *LogoutServiceTestSuite) TestResolve_AccessTokenAsIDTokenHintRejected() {
+	svc, jwtSvc, _ := suite.newService()
+	token := makeTypedToken("at+jwt", testIssuer, "client-x", nil)
+	jwtSvc.EXPECT().VerifyJWTSignature(mock.Anything, token).Return(nil)
+
+	_, err := svc.Resolve(context.Background(), LogoutRequest{IDTokenHint: token})
+
+	suite.Require().ErrorIs(err, errInvalidIDTokenHint)
+}
+
+// A refresh token shares the generic JWT typ with ID tokens, so it is separated by its
+// access_token_sub claim, the same way the ID-JAG subject token check does it.
+func (suite *LogoutServiceTestSuite) TestResolve_RefreshTokenAsIDTokenHintRejected() {
+	svc, jwtSvc, _ := suite.newService()
+	token := makeTypedToken("JWT", testIssuer, "client-x",
+		map[string]interface{}{"access_token_sub": "user-1"})
+	jwtSvc.EXPECT().VerifyJWTSignature(mock.Anything, token).Return(nil)
 
 	_, err := svc.Resolve(context.Background(), LogoutRequest{IDTokenHint: token})
 

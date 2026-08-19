@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package model defines OAuth-related types for inbound client configuration.
 //
@@ -22,21 +7,7 @@
 package model
 
 import (
-	"github.com/thunder-id/thunderid/internal/system/jose/jwe"
-	"github.com/thunder-id/thunderid/internal/system/jose/jws"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
-)
-
-// Supported JOSE algorithms for userinfo responses.
-var (
-	SupportedUserInfoSigningAlgs = []string{
-		string(jws.RS256), string(jws.RS512), string(jws.PS256),
-		string(jws.ES256), string(jws.ES384), string(jws.ES512),
-		string(jws.EdDSA),
-		string(jws.MLDSA44), string(jws.MLDSA65), string(jws.MLDSA87),
-	}
-	SupportedUserInfoEncryptionAlgs = []string{string(jwe.RSAOAEP), string(jwe.RSAOAEP256)}
-	SupportedUserInfoEncryptionEncs = []string{string(jwe.A128CBCHS256), string(jwe.A256GCM)}
 )
 
 // OAuthConfig is the wire output shape (GET responses). ClientSecret is structurally absent.
@@ -61,12 +32,6 @@ type OAuthConfig struct {
 	Certificate                        *providers.Certificate            `json:"certificate,omitempty"              yaml:"certificate,omitempty"`
 	AcrValues                          []string                          `json:"acrValues,omitempty"                yaml:"acrValues,omitempty"`
 }
-
-// SupportedIDTokenEncryptionAlgs lists JWE key-management algorithms supported for ID token encryption.
-var SupportedIDTokenEncryptionAlgs = []string{string(jwe.RSAOAEP), string(jwe.RSAOAEP256)}
-
-// SupportedIDTokenEncryptionEncs lists JWE content-encryption algorithms supported for ID token encryption.
-var SupportedIDTokenEncryptionEncs = []string{string(jwe.A128CBCHS256), string(jwe.A256GCM)}
 
 // InboundAuthConfig is the wire output wrapper (GET responses).
 type InboundAuthConfig struct {

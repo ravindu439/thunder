@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
 import {render, screen} from '@thunderid/test-utils';
@@ -74,20 +59,18 @@ describe('ConfigureName', () => {
     expect(mockOnAgentNameChange).toHaveBeenLastCalledWith('o');
   });
 
-  it('should render name suggestions', () => {
+  it('should render a name suggestion', () => {
     renderComponent();
 
-    mockSuggestions.forEach((suggestion) => {
-      expect(screen.getByText(suggestion)).toBeInTheDocument();
-    });
+    expect(screen.getByText('Billing Service')).toBeInTheDocument();
   });
 
-  it('should call onAgentNameChange when clicking a suggestion chip', async () => {
+  it('should call onAgentNameChange when clicking the suggestion', async () => {
     const user = userEvent.setup();
     renderComponent();
 
-    const chip = screen.getByText('Billing Service');
-    await user.click(chip);
+    const suggestion = screen.getByText('Billing Service');
+    await user.click(suggestion);
 
     expect(mockOnAgentNameChange).toHaveBeenCalledWith('Billing Service');
   });
@@ -119,6 +102,32 @@ describe('ConfigureName', () => {
     expect(mockOnAgentNameChange).toHaveBeenCalledWith('');
   });
 
+  describe('length validation', () => {
+    it('should show a maximum length error when the name is too long', () => {
+      renderComponent({agentName: 'a'.repeat(101)});
+
+      expect(screen.getByText('Agent name cannot exceed 100 characters')).toBeInTheDocument();
+    });
+
+    it('should not show a length error when the name is empty', () => {
+      renderComponent({agentName: ''});
+
+      expect(screen.queryByText('Agent name cannot exceed 100 characters')).not.toBeInTheDocument();
+    });
+
+    it('should not show a length error for a single character name', () => {
+      renderComponent({agentName: 'A'});
+
+      expect(screen.queryByText('Agent name cannot exceed 100 characters')).not.toBeInTheDocument();
+    });
+
+    it('should not show a length error when the name is at the maximum length', () => {
+      renderComponent({agentName: 'a'.repeat(100)});
+
+      expect(screen.queryByText('Agent name cannot exceed 100 characters')).not.toBeInTheDocument();
+    });
+  });
+
   describe('onReadyChange callback', () => {
     it('should call onReadyChange with true when agentName is not empty', () => {
       const mockOnReadyChange = vi.fn();
@@ -137,6 +146,20 @@ describe('ConfigureName', () => {
     it('should call onReadyChange with false when agentName contains only whitespace', () => {
       const mockOnReadyChange = vi.fn();
       renderComponent({agentName: '   ', onReadyChange: mockOnReadyChange});
+
+      expect(mockOnReadyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('should call onReadyChange with true for a single character name', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({agentName: 'A', onReadyChange: mockOnReadyChange});
+
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
+    });
+
+    it('should call onReadyChange with false when agentName exceeds the maximum length', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({agentName: 'a'.repeat(101), onReadyChange: mockOnReadyChange});
 
       expect(mockOnReadyChange).toHaveBeenCalledWith(false);
     });

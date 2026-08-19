@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, it, expect} from 'vitest';
 import {
@@ -25,24 +10,20 @@ import {
 
 describe('application-create-flow models', () => {
   describe('ApplicationCreateFlowStep', () => {
-    it('should have NAME step', () => {
-      expect(ApplicationCreateFlowStep.NAME).toBe('NAME');
+    it('should have DETAILS step', () => {
+      expect(ApplicationCreateFlowStep.DETAILS).toBe('DETAILS');
+    });
+
+    it('should have SECURITY step', () => {
+      expect(ApplicationCreateFlowStep.SECURITY).toBe('SECURITY');
     });
 
     it('should have DESIGN step', () => {
       expect(ApplicationCreateFlowStep.DESIGN).toBe('DESIGN');
     });
 
-    it('should have OPTIONS step', () => {
-      expect(ApplicationCreateFlowStep.OPTIONS).toBe('OPTIONS');
-    });
-
-    it('should have EXPERIENCE step', () => {
-      expect(ApplicationCreateFlowStep.EXPERIENCE).toBe('EXPERIENCE');
-    });
-
-    it('should have STACK step', () => {
-      expect(ApplicationCreateFlowStep.STACK).toBe('STACK');
+    it('should have ORGANIZATION_UNIT step', () => {
+      expect(ApplicationCreateFlowStep.ORGANIZATION_UNIT).toBe('ORGANIZATION_UNIT');
     });
 
     it('should have CONFIGURE step', () => {
@@ -57,14 +38,14 @@ describe('application-create-flow models', () => {
       expect(ApplicationCreateFlowStep.CLIENT_TYPE).toBe('CLIENT_TYPE');
     });
 
-    it('should have exactly 9 steps', () => {
-      expect(Object.keys(ApplicationCreateFlowStep)).toHaveLength(9);
+    it('should have exactly 7 steps', () => {
+      expect(Object.keys(ApplicationCreateFlowStep)).toHaveLength(7);
     });
   });
 
   describe('ApplicationCreateFlowSignInApproach', () => {
-    it('should have INBUILT approach', () => {
-      expect(ApplicationCreateFlowSignInApproach.INBUILT).toBe('INBUILT');
+    it('should have REDIRECT_BASED approach', () => {
+      expect(ApplicationCreateFlowSignInApproach.REDIRECT_BASED).toBe('REDIRECT_BASED');
     });
 
     it('should have EMBEDDED approach', () => {

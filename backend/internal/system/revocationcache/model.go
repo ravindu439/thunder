@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package revocationcache
 
@@ -22,8 +7,23 @@ import "time"
 
 // revokedEntry is one non-expired deny-list record returned by a syncSource and held in the cache.
 type revokedEntry struct {
-	// JTI is the token identifier and the cache lookup key.
-	JTI string
-	// ExpiryTime is the revoked token's original expiry; the entry is prunable once it passes.
+	// Value is the cache lookup key: the jti for a single-token entry, the tfid for a family entry.
+	Value string
+	// ExpiryTime is the revoked token's (or family's) original expiry; the entry is prunable once it
+	// passes.
 	ExpiryTime time.Time
+	// RevokedAt is the latest establishment time affected by this criterion.
+	RevokedAt time.Time
+	// Boundary indicates that only artifacts established at or before RevokedAt are revoked.
+	Boundary bool
+}
+
+// revokedSnapshot is one source read. Dimensions are separate so values of different types cannot collide.
+type revokedSnapshot struct {
+	// Tokens holds the revoked single-token entries (keyed by jti).
+	Tokens []revokedEntry
+	// Families holds the revoked token-family entries (keyed by tfid).
+	Families []revokedEntry
+	// Subjects holds revoked user-subject entries.
+	Subjects []revokedEntry
 }

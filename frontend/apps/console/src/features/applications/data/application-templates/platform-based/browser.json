@@ -1,7 +1,28 @@
 {
   "id": "browser",
+  "type": "browser",
   "displayName": "Browser",
   "description": "Web application running in browser",
+  "quickstarts": [
+    {
+      "label": "JavaScript",
+      "docsUrl": "{{applications.templates.browser.docs}}"
+    }
+  ],
+  "playgrounds": [
+    {
+      "label": "JavaScript",
+      "environment": "stackblitz",
+      "url": "{{applications.templates.browser.playground}}"
+    }
+  ],
+  "capabilities": {
+    "cors": true
+  },
+  "creationFlow": {
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "SECURITY", "DESIGN", "CONFIGURE", "COMPLETE"],
+    "previewSteps": ["DETAILS", "SECURITY", "DESIGN"]
+  },
   "defaults": {
     "name": "Browser Application",
     "inboundAuthConfig": [
@@ -21,9 +42,18 @@
   },
   "fieldConstraints": {
     "oauth2": {
-      "publicClient": {"readOnly": true, "value": true},
-      "pkceRequired": {"readOnly": true, "value": true},
-      "tokenEndpointAuthMethod": {"readOnly": true, "value": "none"}
+      "publicClient": {
+        "readOnly": true,
+        "value": true
+      },
+      "pkceRequired": {
+        "readOnly": true,
+        "value": true
+      },
+      "tokenEndpointAuthMethod": {
+        "readOnly": true,
+        "value": "none"
+      }
     }
   }
 }

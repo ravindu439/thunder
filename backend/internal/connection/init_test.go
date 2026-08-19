@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package connection provides tests for the connections API. This file holds the shared
 // test fixtures plus the route-registration (Initialize) integration test.
@@ -35,6 +20,8 @@ import (
 	ncommon "github.com/thunder-id/thunderid/internal/notification/common"
 	"github.com/thunder-id/thunderid/internal/system/cmodels"
 	"github.com/thunder-id/thunderid/internal/system/config"
+	"github.com/thunder-id/thunderid/internal/system/kmprovider/defaultkm"
+	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
@@ -45,12 +32,17 @@ import (
 // testCryptoKey is the shared key used so secret property encryption works in tests.
 const testCryptoKey = "0579f866ac7c9273580d0ff163fa01a7b2401a7ff3ddc3e3b14ae3136fa6025e"
 
-// initConfigWithTestCryptoKey initializes the server runtime with the test crypto key.
-func initConfigWithTestCryptoKey() {
+// initConfigWithTestCryptoKey initializes the server runtime with the test crypto key and
+// wires cmodels' package-level config crypto provider so secret Property encryption works.
+func initConfigWithTestCryptoKey(t *testing.T) {
+	t.Helper()
 	config.ResetServerRuntime()
-	_ = config.InitializeServerRuntime("/tmp/test", &config.Config{
+	require.NoError(t, config.InitializeServerRuntime("/tmp/test", &config.Config{
 		Crypto: config.CryptoConfig{Encryption: engineconfig.EncryptionConfig{Key: testCryptoKey}},
-	})
+	}))
+	_, cfgCryptoSvc, err := defaultkm.Initialize(nil)
+	require.NoError(t, err)
+	cmodels.SetConfigCryptoProvider(cfgCryptoSvc)
 }
 
 // newConnectionTestHandler returns a connection handler over fresh mock IdP and
@@ -59,7 +51,7 @@ func initConfigWithTestCryptoKey() {
 func newConnectionTestHandler(t *testing.T) (*handler, *idpmock.IDPServiceInterfaceMock,
 	*notificationmock.NotificationSenderMgtSvcInterfaceMock) {
 	t.Helper()
-	initConfigWithTestCryptoKey()
+	initConfigWithTestCryptoKey(t)
 	t.Cleanup(config.ResetServerRuntime)
 	mockIDP := idpmock.NewIDPServiceInterfaceMock(t)
 	mockNotif := notificationmock.NewNotificationSenderMgtSvcInterfaceMock(t)
@@ -90,7 +82,7 @@ func TestInitSuite(t *testing.T) {
 }
 
 func (s *InitTestSuite) SetupTest() {
-	initConfigWithTestCryptoKey()
+	initConfigWithTestCryptoKey(s.T())
 	s.mockIDP = idpmock.NewIDPServiceInterfaceMock(s.T())
 	s.mockNotif = notificationmock.NewNotificationSenderMgtSvcInterfaceMock(s.T())
 	s.mux = http.NewServeMux()
@@ -146,6 +138,16 @@ func (s *InitTestSuite) TestRouteTable() {
 	s.mockNotif.On("DeleteSender", mock.Anything, "sg-1").
 		Return((*tidcommon.ServiceError)(nil))
 
+	emptyUsages := &resourcedependency.DependenciesResponse{
+		Usages: []resourcedependency.ResourceDependency{},
+	}
+	s.mockIDP.On("GetIDPUsages", mock.Anything, "gh-1").
+		Return(emptyUsages, (*tidcommon.ServiceError)(nil))
+	s.mockNotif.On("GetSenderUsages", mock.Anything, "tw-1").
+		Return(emptyUsages, (*tidcommon.ServiceError)(nil))
+	s.mockNotif.On("GetSenderUsages", mock.Anything, "sg-1").
+		Return(emptyUsages, (*tidcommon.ServiceError)(nil))
+
 	body, _ := json.Marshal(githubConnectionRequest{
 		Name: "GH", ClientID: "c", ClientSecret: "s", RedirectURI: "https://app/cb",
 	})
@@ -170,6 +172,8 @@ func (s *InitTestSuite) TestRouteTable() {
 		{http.MethodPut, "/connections/github/gh-1", body, http.StatusOK},
 		{http.MethodDelete, "/connections/github/gh-1", nil, http.StatusNoContent},
 		{http.MethodOptions, "/connections/github/gh-1", nil, http.StatusNoContent},
+		{http.MethodGet, "/connections/github/gh-1/usages", nil, http.StatusOK},
+		{http.MethodOptions, "/connections/github/gh-1/usages", nil, http.StatusNoContent},
 		{http.MethodPost, "/connections/twilio", twilioBody, http.StatusCreated},
 		{http.MethodGet, "/connections/twilio", nil, http.StatusOK},
 		{http.MethodOptions, "/connections/twilio", nil, http.StatusNoContent},
@@ -177,6 +181,8 @@ func (s *InitTestSuite) TestRouteTable() {
 		{http.MethodPut, "/connections/twilio/tw-1", twilioBody, http.StatusOK},
 		{http.MethodDelete, "/connections/twilio/tw-1", nil, http.StatusNoContent},
 		{http.MethodOptions, "/connections/twilio/tw-1", nil, http.StatusNoContent},
+		{http.MethodGet, "/connections/twilio/tw-1/usages", nil, http.StatusOK},
+		{http.MethodOptions, "/connections/twilio/tw-1/usages", nil, http.StatusNoContent},
 		{http.MethodPost, "/connections/sms-gateway", smsGatewayBody, http.StatusCreated},
 		{http.MethodGet, "/connections/sms-gateway", nil, http.StatusOK},
 		{http.MethodOptions, "/connections/sms-gateway", nil, http.StatusNoContent},
@@ -184,6 +190,8 @@ func (s *InitTestSuite) TestRouteTable() {
 		{http.MethodPut, "/connections/sms-gateway/sg-1", smsGatewayBody, http.StatusOK},
 		{http.MethodDelete, "/connections/sms-gateway/sg-1", nil, http.StatusNoContent},
 		{http.MethodOptions, "/connections/sms-gateway/sg-1", nil, http.StatusNoContent},
+		{http.MethodGet, "/connections/sms-gateway/sg-1/usages", nil, http.StatusOK},
+		{http.MethodOptions, "/connections/sms-gateway/sg-1/usages", nil, http.StatusNoContent},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader(tc.body))

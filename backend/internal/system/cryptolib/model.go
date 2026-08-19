@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package cryptolib provides pure cryptographic primitives: signing, encryption,
 // decryption, hashing, and secure token utilities. It has no internal dependencies
@@ -156,18 +141,4 @@ type ECDHESParams struct {
 	ContentEncryptionAlgorithm Algorithm
 	APU                        []byte
 	APV                        []byte
-}
-
-// CryptoDetails carries algorithm-specific outputs from an Encrypt operation.
-// EPK is the generated ephemeral public key for ECDH-ES variants, to be embedded in the JWE header.
-// CEK is the content encryption key generated or derived during key establishment.
-// Nil CryptoDetails is returned for algorithms that produce no extra output (e.g. AES-GCM).
-// For RSA-OAEP, RSA-OAEP-256 and ECDH-ES variants, both EPK (where applicable) and CEK are populated.
-// CEK is nil for AES-GCM; EPK is nil for RSA-OAEP and RSA-OAEP-256 (no ephemeral key is generated).
-// IV and Tag are set only for AES-GCM Key Wrap (A128GCMKW etc.) and must be embedded in the JWE protected header.
-type CryptoDetails struct {
-	EPK gocrypto.PublicKey // ECDH-ES variants only; nil for RSA-OAEP, RSA-OAEP-256 and AES-GCM
-	CEK []byte             // Generated or derived CEK; nil for AES-GCM
-	IV  []byte             // AES-GCM Key Wrap only: IV used to wrap the CEK
-	Tag []byte             // AES-GCM Key Wrap only: authentication tag from wrapping the CEK
 }

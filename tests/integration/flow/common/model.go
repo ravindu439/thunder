@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package common
 
 type I18nMessage struct {
-	Key          string `json:"key,omitempty"`
-	DefaultValue string `json:"defaultValue,omitempty"`
+	Key          string            `json:"key,omitempty"`
+	DefaultValue string            `json:"defaultValue,omitempty"`
+	Params       map[string]string `json:"params,omitempty"`
 }
 
 // TestSuiteConfig holds common configuration for test suites
@@ -36,13 +22,13 @@ type TestSuiteConfig struct {
 }
 
 type FlowStep struct {
-	ExecutionID    string   `json:"executionId"`
-	FlowStatus     string   `json:"flowStatus"`
-	Type           string   `json:"type,omitempty"`
-	Data           FlowData `json:"data,omitempty"`
-	Assertion      string   `json:"assertion,omitempty"`
+	ExecutionID    string         `json:"executionId"`
+	FlowStatus     string         `json:"flowStatus"`
+	Type           string         `json:"type,omitempty"`
+	Data           FlowData       `json:"data,omitempty"`
+	Assertion      string         `json:"assertion,omitempty"`
 	Error          *ErrorResponse `json:"error,omitempty"`
-	ChallengeToken string   `json:"challengeToken,omitempty"`
+	ChallengeToken string         `json:"challengeToken,omitempty"`
 }
 
 type FlowData struct {

@@ -1,23 +1,9 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   PageLoadingAnimation,
+  QueryErrorNotice,
   ResourceAvatar,
   SettingsCard,
   UnsavedChangesBar,
@@ -26,6 +12,7 @@ import {
 import {useResolveDisplayName} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
 import type {User} from '@thunderid/types';
+import {isEqualIgnoringEmpty} from '@thunderid/utils';
 import {
   Box,
   Stack,
@@ -57,6 +44,10 @@ import CredentialsTabPanel, {type CredentialFieldInfo} from '../components/edit-
 import EditUserAttributes from '../components/edit-user/EditUserAttributes';
 import QuickCopySection from '../components/edit-user/QuickCopySection';
 import UserDeleteDialog from '../components/UserDeleteDialog';
+import UserConstants from '../constants/user-constants';
+import useUserRoutes from '../hooks/useUserRoutes';
+import {dropNonConformingOptionalAttributes} from '../utils/dropNonConformingAttributes';
+import getUserErrorMessage from '../utils/getUserErrorMessage';
 
 interface TabPanelProps {
   children?: ReactNode;
@@ -90,6 +81,7 @@ export default function UserEditPage() {
   const logger = useLogger('UserEditPage');
   const {resolveDisplayName} = useResolveDisplayName({handlers: {t}});
   const {userId} = useParams<{userId: string}>();
+  const routes = useUserRoutes();
 
   const [activeTab, setActiveTab] = useState(0);
   const [editedUser, setEditedUser] = useState<Partial<User>>({});
@@ -104,7 +96,12 @@ export default function UserEditPage() {
   const updateUserMutation = useUpdateUser();
 
   // Get all schemas to find the schema ID from the schema name
-  const {data: userTypeList} = useGetUserTypes();
+  const {
+    data: userTypeList,
+    isLoading: isUserTypeListLoading,
+    error: userTypeListError,
+    refetch: refetchUserTypeList,
+  } = useGetUserTypes();
 
   // Find the schema ID based on the user's type (which is the schema name)
   const matchedSchema = userTypeList?.types?.find((s) => s.name === user?.type);
@@ -113,7 +110,12 @@ export default function UserEditPage() {
   const trimmedOuId = matchedSchema?.ouId?.trim();
   const schemaOuId = trimmedOuId === '' ? undefined : trimmedOuId;
 
-  const {data: userTypeDetails, isLoading: isSchemaLoading, error: schemaError} = useGetUserType(schemaId);
+  const {
+    data: userTypeDetails,
+    isLoading: isSchemaLoading,
+    error: schemaError,
+    refetch: refetchUserType,
+  } = useGetUserType(schemaId);
 
   const credentialFields: CredentialFieldInfo[] = useMemo(() => {
     if (!userTypeDetails?.schema) return [];
@@ -155,13 +157,30 @@ export default function UserEditPage() {
     setActiveTab(newValue);
   };
 
-  const handleFieldChange = useCallback((field: keyof User, value: unknown) => {
-    setEditedUser((prev) => ({...prev, [field]: value}));
-  }, []);
+  // useMutation returns a fresh object every render, so depending on the mutation itself gave
+  // this callback a new identity every render, which looped consumers that stage from an effect.
+  const {isError: isUpdateUserError, reset: resetUpdateUser} = updateUserMutation;
+
+  const handleFieldChange = useCallback(
+    (field: keyof User, value: unknown) => {
+      // A save error is stale once the form changes.
+      if (isUpdateUserError) {
+        resetUpdateUser();
+      }
+      setEditedUser((prev) => ({...prev, [field]: value}));
+    },
+    [isUpdateUserError, resetUpdateUser],
+  );
 
   const handleSave = useCallback(async () => {
     const organizationUnitId = schemaOuId ?? user?.ouId;
     if (!userId || !organizationUnitId || !user?.type) return;
+
+    // Drop stale optional attribute values so an untouched mismatch doesn't block the update.
+    const attributes = dropNonConformingOptionalAttributes(
+      editedUser.attributes ?? user.attributes ?? {},
+      userTypeDetails?.schema,
+    );
 
     try {
       await updateUserMutation.mutateAsync({
@@ -169,51 +188,66 @@ export default function UserEditPage() {
         data: {
           ouId: organizationUnitId,
           type: user.type,
-          attributes: editedUser.attributes ?? user.attributes,
+          attributes,
         },
       });
       setEditedUser({});
-      setAttributesResetKey((key) => key + 1);
       await refetch();
+      setAttributesResetKey((key) => key + 1);
     } catch (err) {
       logger.error('Failed to update user', {error: err});
     }
-  }, [schemaOuId, user, userId, editedUser, updateUserMutation, refetch, logger]);
+  }, [schemaOuId, user, userId, editedUser, userTypeDetails, updateUserMutation, refetch, logger]);
 
-  const hasChanges = Object.keys(editedUser).length > 0;
+  const hasChanges = useMemo(
+    () => Object.entries(editedUser).some(([key, value]) => !isEqualIgnoringEmpty(value, user?.[key as keyof User])),
+    [editedUser, user],
+  );
 
   const handleBack = async () => {
-    await navigate('/users');
+    await navigate(routes.list());
   };
 
   const handleDeleteSuccess = () => {
     (async () => {
-      await navigate('/users');
+      await navigate(routes.list());
     })().catch((error: unknown) => {
       logger.error('Failed to navigate after deleting user', {error});
     });
   };
 
   // Loading state
-  if (isUserLoading || isSchemaLoading) {
+  if (isUserLoading || isUserTypeListLoading || isSchemaLoading) {
     return <PageLoadingAnimation />;
   }
 
   // Error state
-  if (userError ?? schemaError) {
+  if (userError ?? userTypeListError ?? schemaError) {
     return (
       <PageContent>
-        <Alert severity="error" sx={{mb: 2}}>
-          {userError?.message ?? schemaError?.message ?? 'Failed to load user information'}
-        </Alert>
-        <Button
-          onClick={() => {
-            handleBack().catch(() => null);
+        <QueryErrorNotice
+          error={(userError ?? userTypeListError ?? schemaError)!}
+          t={(key, options) => t(key.includes(':') ? key : `users:${key}`, options)}
+          resolveErrorMessage={getUserErrorMessage}
+          variant="block"
+          title={t('users:manageUser.loadError', 'Failed to load user information')}
+          onRetry={() => {
+            // The error state covers all three queries, so retry only the one(s) that failed.
+            if (userError) void refetch();
+            if (userTypeListError) void refetchUserTypeList();
+            if (schemaError) void refetchUserType();
           }}
-          startIcon={<ArrowLeft size={16} />}
-        >
-          {t('users:manageUser.back')}
-        </Button>
+          action={
+            <Button
+              onClick={() => {
+                handleBack().catch(() => null);
+              }}
+              startIcon={<ArrowLeft size={16} />}
+            >
+              {t('users:manageUser.back', 'Back to Users')}
+            </Button>
+          }
+        />
       </PageContent>
     );
   }
@@ -345,30 +379,6 @@ export default function UserEditPage() {
               </FormControl>
             </Stack>
           </SettingsCard>
-
-          {/* Danger Zone */}
-          {!user.isReadOnly && (
-            <SettingsCard
-              title={t('users:manageUser.sections.dangerZone.title', 'Danger Zone')}
-              description={t(
-                'users:manageUser.sections.dangerZone.description',
-                'Irreversible and destructive actions.',
-              )}
-            >
-              <Typography variant="h6" gutterBottom color="error">
-                {t('users:manageUser.sections.dangerZone.deleteUser', 'Delete User')}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
-                {t(
-                  'users:manageUser.sections.dangerZone.deleteUserDescription',
-                  'Once deleted, this user cannot be recovered. All associated data will be permanently removed.',
-                )}
-              </Typography>
-              <Button variant="contained" color="error" onClick={() => setDeleteDialogOpen(true)}>
-                {t('common:actions.delete', 'Delete')}
-              </Button>
-            </SettingsCard>
-          )}
         </Stack>
       ),
     },
@@ -394,6 +404,34 @@ export default function UserEditPage() {
     });
   }
 
+  if (!user.isReadOnly) {
+    tabs.push({
+      key: 'advanced',
+      label: t('users:manageUser.tabs.advanced', 'Advanced'),
+      render: () => (
+        <Stack spacing={3}>
+          <SettingsCard
+            title={t('users:manageUser.sections.dangerZone.title', 'Danger Zone')}
+            description={t('users:manageUser.sections.dangerZone.description', 'Irreversible and destructive actions.')}
+          >
+            <Typography variant="h6" gutterBottom color="error">
+              {t('users:manageUser.sections.dangerZone.deleteUser', 'Delete User')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
+              {t(
+                'users:manageUser.sections.dangerZone.deleteUserDescription',
+                'Once deleted, this user cannot be recovered. All associated data will be permanently removed.',
+              )}
+            </Typography>
+            <Button variant="contained" color="error" onClick={() => setDeleteDialogOpen(true)}>
+              {t('common:actions.delete', 'Delete')}
+            </Button>
+          </SettingsCard>
+        </Stack>
+      ),
+    });
+  }
+
   const safeActiveTab = activeTab >= tabs.length ? 0 : activeTab;
 
   return (
@@ -405,11 +443,15 @@ export default function UserEditPage() {
       )}
       {/* Header */}
       <PageTitle>
-        <PageTitle.BackButton component={<Link to="/users" />}>
+        <PageTitle.BackButton component={<Link to={routes.list()} />}>
           {t('users:manageUser.back', 'Back to Users')}
         </PageTitle.BackButton>
         <PageTitle.Avatar>
-          <ResourceAvatar value={picture} fallback={getInitials(displayName)} size={55} />
+          <ResourceAvatar
+            value={picture}
+            fallback={`${UserConstants.DEFAULT_AVATAR_PREFIX}${getInitials(displayName)}`}
+            size={55}
+          />
         </PageTitle.Avatar>
         <PageTitle.Header>
           <Typography variant="h3">{displayName}</Typography>
@@ -456,7 +498,18 @@ export default function UserEditPage() {
           savingLabel={t('users:manageUser.saving', 'Saving…')}
           isSaving={updateUserMutation.isPending}
           saveDisabled={user.isReadOnly === true}
+          error={
+            updateUserMutation.error
+              ? getUserErrorMessage(
+                  updateUserMutation.error,
+                  (key, options) => t(key.includes(':') ? key : `users:${key}`, options),
+                  'update.error',
+                  'Failed to update user. Please try again.',
+                )
+              : undefined
+          }
           onReset={() => {
+            updateUserMutation.reset();
             setEditedUser({});
             setAttributesResetKey((key) => key + 1);
           }}

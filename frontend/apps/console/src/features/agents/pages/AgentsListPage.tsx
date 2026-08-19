@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {ExternalLink} from '@thunderid/components';
 import {useGetAgentTypes} from '@thunderid/configure-agent-types';
 import {useLogger} from '@thunderid/logger/react';
 import {Button, PageContent, PageTitle} from '@wso2/oxygen-ui';
@@ -23,6 +9,7 @@ import {FileCog, Plus} from '@wso2/oxygen-ui-icons-react';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
+import RouteConfig from '../../../configs/RouteConfig';
 import AgentsList from '../components/AgentsList';
 import {DEFAULT_AGENT_TYPE_NAME} from '../models/agent';
 
@@ -39,7 +26,7 @@ export default function AgentsListPage(): JSX.Element {
   const handleSchemaClick = (): void => {
     if (!defaultAgentType) return;
     (async () => {
-      await navigate(`/agent-types/${defaultAgentType.id}`);
+      await navigate(RouteConfig.agentTypes.detail(defaultAgentType.id));
     })().catch((error: unknown) => {
       logger.error('Failed to navigate to agent type page', {error});
     });
@@ -50,7 +37,8 @@ export default function AgentsListPage(): JSX.Element {
       <PageTitle>
         <PageTitle.Header>{t('agents:listing.title', 'Agents')}</PageTitle.Header>
         <PageTitle.SubHeader>
-          {t('agents:listing.subtitle', 'Manage service identities and machine clients')}
+          {t('agents:listing.subtitle', 'Manage service identities and machine clients')}{' '}
+          <ExternalLink docKey="agents" confirmBeforeNavigate={false} />
         </PageTitle.SubHeader>
         <PageTitle.Actions>
           <Button
@@ -68,7 +56,7 @@ export default function AgentsListPage(): JSX.Element {
             startIcon={<Plus size={18} />}
             onClick={() => {
               (async () => {
-                await navigate('/agents/create');
+                await navigate(RouteConfig.agents.create());
               })().catch((error: unknown) => {
                 logger.error('Failed to navigate to create agent page', {error});
               });

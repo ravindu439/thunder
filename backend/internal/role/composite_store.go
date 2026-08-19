@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -22,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
@@ -373,6 +359,18 @@ func (c *compositeRoleStore) DeleteAssignmentsByAssignee(
 	return c.dbStore.DeleteAssignmentsByAssignee(ctx, assigneeType, assigneeID)
 }
 
+// GetReferencedPermissions returns the permissions referenced by database-backed roles only.
+// Declarative roles are immutable, so their permissions are never pruned.
+func (c *compositeRoleStore) GetReferencedPermissions(ctx context.Context) ([]ResourcePermissions, error) {
+	return c.dbStore.GetReferencedPermissions(ctx)
+}
+
+// DeleteRolePermission removes the permission from the database store only.
+func (c *compositeRoleStore) DeleteRolePermission(
+	ctx context.Context, resourceServerID, permission string) (int64, error) {
+	return c.dbStore.DeleteRolePermission(ctx, resourceServerID, permission)
+}
+
 // AddAssignments adds assignments to a role in the database store only.
 func (c *compositeRoleStore) AddAssignments(ctx context.Context, id string, assignments []RoleAssignment) error {
 	return c.dbStore.AddAssignments(ctx, id, assignments)
@@ -525,6 +523,79 @@ func (c *compositeRoleStore) crossStoreAuthorizedPermissions(
 	return result, nil
 }
 
+// GetAllPermissionsForAssignees returns every permission the entity and/or groups hold, unioned
+// across the three places a role-to-assignee binding can live: a database role with a database
+// assignment, a declarative role with a YAML-declared assignment, and a declarative role whose
+// assignment was added at runtime. The third case is why no single store can answer this.
+func (c *compositeRoleStore) GetAllPermissionsForAssignees(
+	ctx context.Context, entityID string, groupIDs []string,
+) ([]ResourcePermissions, error) {
+	if entityID == "" && len(groupIDs) == 0 {
+		return []ResourcePermissions{}, nil
+	}
+
+	dbPerms, err := c.dbStore.GetAllPermissionsForAssignees(ctx, entityID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	filePerms, err := c.fileStore.GetAllPermissionsForAssignees(ctx, entityID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	crossStorePerms, err := c.crossStoreAllPermissions(ctx, entityID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	return mergeResourcePermissions(dbPerms, filePerms, crossStorePerms), nil
+}
+
+// crossStoreAllPermissions resolves declarative roles whose assignment rows live in the database.
+// It differs from crossStoreAuthorizedPermissions on corruption: a removed role (ErrRoleNotFound)
+// confers nothing and is skipped, while a corrupt one is returned as an error, since its contents
+// are unknown.
+func (c *compositeRoleStore) crossStoreAllPermissions(
+	ctx context.Context, entityID string, groupIDs []string,
+) ([]ResourcePermissions, error) {
+	roleIDs, err := c.dbStore.GetEntityRoleIDs(ctx, entityID, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(roleIDs) == 0 {
+		return []ResourcePermissions{}, nil
+	}
+
+	byResourceServer := make(map[string][]string)
+	for _, id := range roleIDs {
+		exists, err := c.fileStore.IsRoleExist(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			// Role is DB-only; already covered by the DB-store enumeration.
+			continue
+		}
+		role, err := c.fileStore.GetRole(ctx, id)
+		if err != nil {
+			if errors.Is(err, ErrRoleNotFound) {
+				continue
+			}
+			log.GetLogger().Error(ctx,
+				"Failed to load declarative role for cross-store permission enumeration",
+				log.String("roleID", id), log.Error(err))
+			return nil, fmt.Errorf("composite role store: load declarative role %q: %w", id, err)
+		}
+		for _, rp := range role.Permissions {
+			byResourceServer[rp.ResourceServerID] = append(
+				byResourceServer[rp.ResourceServerID], rp.Permissions...)
+		}
+	}
+
+	return resourcePermissionsFromMap(byResourceServer), nil
+}
+
 // GetEntityRoleIDs returns the IDs of roles assigned to an entity (directly or via groups).
 // Delegates to the database store since assignments are persisted there even for declarative
 // roles. The file store has no independent record of API-added assignments.
@@ -610,7 +681,10 @@ func mergeAssignments(dbAssignments, fileAssignments []RoleAssignment) []RoleAss
 	return result
 }
 
-// mergePermissions deduplicates and merges permissions from database and file stores.
+// mergePermissions deduplicates and merges permissions from database and file stores. The result is
+// sorted, because map iteration order is randomized: callers that page over the merged list (such as
+// GetUserRoles) would otherwise return a different order on every call, repeating entries on one page
+// and dropping them from another.
 func mergePermissions(dbPerms, filePerms []string) []string {
 	permMap := make(map[string]bool)
 
@@ -626,5 +700,6 @@ func mergePermissions(dbPerms, filePerms []string) []string {
 	for perm := range permMap {
 		result = append(result, perm)
 	}
+	slices.Sort(result)
 	return result
 }

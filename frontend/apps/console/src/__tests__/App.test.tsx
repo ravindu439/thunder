@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor} from '@testing-library/react';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -66,6 +51,11 @@ vi.mock('@thunderid/configure-connections', async (importOriginal) => ({
   ConnectionCreateWizardPage: () => (
     <div data-testid="connection-create-wizard-page">Connection Create Wizard Page</div>
   ),
+  TrustedIssuerDetailPage: () => <div data-testid="trusted-issuer-detail-page">Trusted Issuer Detail Page</div>,
+}));
+
+vi.mock('../features/agents/pages/AgentEditPage', () => ({
+  default: () => <div data-testid="agent-edit-page">Agent Edit Page</div>,
 }));
 
 vi.mock('../features/applications/pages/ApplicationsListPage', () => ({
@@ -80,20 +70,37 @@ vi.mock('../features/applications/pages/ApplicationEditPage', () => ({
   default: () => <div data-testid="application-edit-page">Application Edit Page</div>,
 }));
 
-vi.mock('../features/design/pages/LayoutBuilderPage', () => ({
-  default: () => <div data-testid="layout-builder-page">Layout Builder Page</div>,
+vi.mock('@thunderid/configure-design', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-design')>()),
+  LayoutBuilderPage: () => <div data-testid="layout-builder-page">Layout Builder Page</div>,
+  LayoutBuilderProvider: ({children}: {children: React.ReactNode}) => children as React.ReactElement,
+  DesignPage: () => <div data-testid="design-page">Design Page</div>,
+  ThemeBuilderPage: () => <div data-testid="theme-builder-page">Theme Builder Page</div>,
+  ThemeCreatePage: () => <div data-testid="theme-create-page">Theme Create Page</div>,
+  ThemeBuilderProvider: ({children}: {children: React.ReactNode}) => children as React.ReactElement,
 }));
 
-vi.mock('../features/design/contexts/LayoutBuilder/LayoutBuilderProvider', () => ({
-  default: ({children}: {children: React.ReactNode}) => children as React.ReactElement,
+vi.mock('@thunderid/configure-groups', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-groups')>()),
+  GroupsListPage: () => <div data-testid="groups-list-page">Groups List Page</div>,
+  GroupEditPage: () => <div data-testid="group-edit-page">Group Edit Page</div>,
+  CreateGroupPage: () => <div data-testid="create-group-page">Create Group Page</div>,
+  GroupCreateProvider: ({children}: {children: React.ReactNode}) => children as React.ReactElement,
 }));
 
-vi.mock('../features/import-export/pages/ExportPage', () => ({
-  default: () => <div data-testid="export-page">Export Page</div>,
-}));
-
-vi.mock('../features/import-export/pages/ImportConfigurationSummaryPage', () => ({
-  default: () => <div data-testid="import-configuration-summary-page">Import Configuration Summary Page</div>,
+vi.mock('@thunderid/configure-import-export', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-import-export')>()),
+  ExportPage: () => <div data-testid="export-page">Export Page</div>,
+  ImportConfigurationSummaryPage: () => (
+    <div data-testid="import-configuration-summary-page">Import Configuration Summary Page</div>
+  ),
+  ImportConfigurationUploadPage: () => (
+    <div data-testid="import-configuration-upload-page">Import Configuration Upload Page</div>
+  ),
+  ImportConfigurationValidatePage: () => (
+    <div data-testid="import-configuration-validate-page">Import Configuration Validate Page</div>
+  ),
+  ImportExportPage: () => <div data-testid="import-export-page">Import Export Page</div>,
 }));
 
 vi.mock('@thunderid/configure-resource-servers', () => ({
@@ -139,6 +146,14 @@ describe('App', () => {
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId('application-edit-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads AgentEditPage lazily via the monaco-setup chain', async () => {
+    window.history.pushState({}, '', '/agents/agent-123');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-edit-page')).toBeInTheDocument();
     });
   });
 
@@ -243,6 +258,86 @@ describe('App', () => {
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId('connection-configure-wizard-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads TrustedIssuerDetailPage lazily at /trusted-issuers/:id', async () => {
+    window.history.pushState({}, '', '/trusted-issuers/ti-1');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('trusted-issuer-detail-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads DesignPage lazily at /design', async () => {
+    window.history.pushState({}, '', '/design');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('design-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads ThemeCreatePage lazily at /design/themes/create', async () => {
+    window.history.pushState({}, '', '/design/themes/create');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('theme-create-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads ThemeBuilderPage lazily at /design/themes/:themeId', async () => {
+    window.history.pushState({}, '', '/design/themes/theme-123');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('theme-builder-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads GroupsListPage lazily at /groups', async () => {
+    window.history.pushState({}, '', '/groups');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('groups-list-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads GroupEditPage lazily at /groups/:groupId', async () => {
+    window.history.pushState({}, '', '/groups/group-123');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('group-edit-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads CreateGroupPage lazily at /groups/create', async () => {
+    window.history.pushState({}, '', '/groups/create');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('create-group-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads ImportExportPage lazily at /import-export', async () => {
+    window.history.pushState({}, '', '/import-export');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('import-export-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads ImportConfigurationUploadPage lazily at /import-configuration', async () => {
+    window.history.pushState({}, '', '/import-configuration');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('import-configuration-upload-page')).toBeInTheDocument();
+    });
+  });
+
+  it('loads ImportConfigurationValidatePage lazily at /import-configuration/validate', async () => {
+    window.history.pushState({}, '', '/import-configuration/validate');
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId('import-configuration-validate-page')).toBeInTheDocument();
     });
   });
 });

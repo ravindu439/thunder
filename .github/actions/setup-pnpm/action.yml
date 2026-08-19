@@ -1,7 +1,7 @@
 # TODO: Remove this action and use the individual setup-node and setup-pnpm actions directly in workflows.
 
 name: Setup Node.js and pnpm
-description: Installs Node.js and pnpm with lockfile-based caching.
+description: Installs Node.js and pnpm with a rolling cache of the pnpm store.
 
 inputs:
   node-version:
@@ -12,16 +12,47 @@ inputs:
     description: pnpm version to use
     required: false
     default: 'latest'
+  cache-store:
+    description: >-
+      Whether to cache the pnpm store. Set to false in jobs that never run
+      `pnpm install`, so they cannot publish an empty store for the rest of the
+      run to restore.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
   steps:
+    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      with:
+        run_install: false
+        version: ${{ inputs.pnpm-version }}
+
     - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: ${{ inputs.node-version }}
 
-    - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+    - name: 🗂️ Resolve the pnpm store path
+      if: inputs.cache-store == 'true'
+      shell: bash
+      run: echo "PNPM_STORE_PATH=$(pnpm store path --silent)" >> "$GITHUB_ENV"
+
+    # The store is cached here rather than through setup-node's `cache: pnpm`
+    # because that key is a bare lockfile hash. actions/cache never overwrites an
+    # existing key, so the first job to finish froze the store for every later job
+    # and every later run: a job that only runs `pnpm audit` published a 5 MB
+    # store, and the rest then re-downloaded everything on what the log calls a
+    # cache hit. The run id and attempt make every run, and every re-run of it,
+    # write a fresh entry, and the restore-keys fall back to the newest previous
+    # one. The attempt matters because a failed attempt still saves at post time,
+    # so without it a partial store from attempt 1 would be frozen in for the
+    # attempts that follow.
+    - name: 🗂️ Cache the pnpm store
+      if: inputs.cache-store == 'true'
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
       with:
-        run_install: false
-        cache_dependency_path: pnpm-lock.yaml
-        version: ${{ inputs.pnpm-version }}
+        path: ${{ env.PNPM_STORE_PATH }}
+        key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}--${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+          pnpm-store-${{ runner.os }}-

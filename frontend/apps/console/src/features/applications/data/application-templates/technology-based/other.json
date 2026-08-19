@@ -1,7 +1,25 @@
 {
   "id": "other",
+  "type": "browser",
   "displayName": "Other",
   "description": "Custom application with standard OAuth2 configuration",
+  "quickstarts": [
+    {
+      "label": "JavaScript",
+      "docsUrl": "{{applications.templates.browser.docs}}"
+    }
+  ],
+  "playgrounds": [
+    {
+      "label": "JavaScript",
+      "environment": "stackblitz",
+      "url": "{{applications.templates.browser.playground}}"
+    }
+  ],
+  "creationFlow": {
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "SECURITY", "DESIGN", "CONFIGURE", "COMPLETE"],
+    "previewSteps": ["DETAILS", "SECURITY", "DESIGN"]
+  },
   "defaults": {
     "name": "Custom Application",
     "inboundAuthConfig": [

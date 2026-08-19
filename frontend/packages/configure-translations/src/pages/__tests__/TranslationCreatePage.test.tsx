@@ -1,25 +1,13 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
-import {render, renderHook, screen} from '@thunderid/test-utils';
+import {render, renderHook, screen, within} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
 import {describe, expect, it, vi, beforeAll, beforeEach} from 'vitest';
+import type {ReviewLocaleCodeProps} from '@/components/create-translation/ReviewLocaleCode';
+import type {SelectCountryProps} from '@/components/create-translation/SelectCountry';
+import type {SelectLanguageProps} from '@/components/create-translation/SelectLanguage';
 import type {TranslationCreateContextType} from '@/contexts/TranslationCreate/TranslationCreateContext';
 import {TranslationCreateFlowStep} from '@/models/translation-create-flow';
 import TranslationCreatePage from '@/pages/TranslationCreatePage';
@@ -38,27 +26,26 @@ const {mockRefetch, mockCreateTranslationsMutateAsync} = vi.hoisted(() => ({
   mockCreateTranslationsMutateAsync: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('@thunderid/i18n', () => ({
-  useGetTranslations: vi.fn().mockReturnValue({data: undefined, isLoading: false, refetch: mockRefetch}),
-  useCreateTranslations: vi.fn().mockReturnValue({mutateAsync: mockCreateTranslationsMutateAsync}),
-  I18nDefaultConstants: {
-    FALLBACK_LANGUAGE: 'en-US',
-  },
-  enUS: {},
-}));
+vi.mock('@thunderid/i18n', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@thunderid/i18n')>();
+  return {
+    ...actual,
+    useGetTranslations: vi.fn().mockReturnValue({data: undefined, isLoading: false, refetch: mockRefetch}),
+    useCreateTranslations: vi.fn().mockReturnValue({mutateAsync: mockCreateTranslationsMutateAsync}),
+  };
+});
 
 vi.mock('@thunderid/logger/react', () => ({
   useLogger: () => ({error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn()}),
 }));
 
 // Stub step components so we can control onReadyChange
-const mockSelectCountry = vi.fn();
-const mockSelectLanguage = vi.fn();
-const mockReviewLocaleCode = vi.fn();
-const mockInitializeLanguage = vi.fn();
+const mockSelectCountry = vi.fn<(props: SelectCountryProps) => void>();
+const mockSelectLanguage = vi.fn<(props: SelectLanguageProps) => void>();
+const mockReviewLocaleCode = vi.fn<(props: ReviewLocaleCodeProps) => void>();
 
 vi.mock('@/components/create-translation/SelectCountry', () => ({
-  default: (props: {onReadyChange?: (v: boolean) => void}) => {
+  default: (props: SelectCountryProps) => {
     mockSelectCountry(props);
     return (
       <div data-testid="select-country">
@@ -71,7 +58,7 @@ vi.mock('@/components/create-translation/SelectCountry', () => ({
 }));
 
 vi.mock('@/components/create-translation/SelectLanguage', () => ({
-  default: (props: {onReadyChange?: (v: boolean) => void}) => {
+  default: (props: SelectLanguageProps) => {
     mockSelectLanguage(props);
     return (
       <div data-testid="select-language">
@@ -84,16 +71,9 @@ vi.mock('@/components/create-translation/SelectLanguage', () => ({
 }));
 
 vi.mock('@/components/create-translation/ReviewLocaleCode', () => ({
-  default: (props: {onReadyChange?: (v: boolean) => void}) => {
+  default: (props: ReviewLocaleCodeProps) => {
     mockReviewLocaleCode(props);
     return <div data-testid="review-locale-code" />;
-  },
-}));
-
-vi.mock('@/components/create-translation/InitializeLanguage', () => ({
-  default: (props: unknown) => {
-    mockInitializeLanguage(props);
-    return <div data-testid="initialize-language" />;
   },
 }));
 
@@ -108,12 +88,8 @@ const baseContext: TranslationCreateContextType = {
   localeCodeOverride: '',
   setLocaleCodeOverride: vi.fn(),
   localeCode: '',
-  populateFromEnglish: true,
-  setPopulateFromEnglish: vi.fn(),
   isCreating: false,
   setIsCreating: vi.fn(),
-  progress: 0,
-  setProgress: vi.fn(),
   error: null,
   setError: vi.fn(),
   reset: vi.fn(),
@@ -126,7 +102,7 @@ vi.mock('@/contexts/TranslationCreate/useTranslationCreate', () => ({
 }));
 
 describe('TranslationCreatePage', () => {
-  let t: (key: string) => string;
+  let t: (key: string, options?: Record<string, unknown>) => string;
 
   beforeAll(() => {
     ({t} = renderHook(() => useTranslation()).result.current);
@@ -147,7 +123,7 @@ describe('TranslationCreatePage', () => {
     it('renders the current step breadcrumb label', () => {
       render(<TranslationCreatePage />);
 
-      expect(screen.getByText('language.create.steps.country')).toBeInTheDocument();
+      expect(screen.getByText(t('translations:language.create.steps.country'))).toBeInTheDocument();
     });
 
     it('renders the SelectCountry step on mount', () => {
@@ -171,12 +147,14 @@ describe('TranslationCreatePage', () => {
     it('renders the Create button on the final step', () => {
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
       });
 
       render(<TranslationCreatePage />);
 
-      expect(screen.getByText('language.create.createButton')).toBeInTheDocument();
+      expect(
+        screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})),
+      ).toBeInTheDocument();
     });
 
     it('renders the SelectLanguage step when currentStep is LANGUAGE', () => {
@@ -203,17 +181,6 @@ describe('TranslationCreatePage', () => {
       expect(screen.getByTestId('review-locale-code')).toBeInTheDocument();
     });
 
-    it('renders the InitializeLanguage step when currentStep is INITIALIZE', () => {
-      mockUseTranslationCreate.mockReturnValue({
-        ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
-      });
-
-      render(<TranslationCreatePage />);
-
-      expect(screen.getByTestId('initialize-language')).toBeInTheDocument();
-    });
-
     it('renders an error alert when error is set', () => {
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
@@ -223,6 +190,135 @@ describe('TranslationCreatePage', () => {
       render(<TranslationCreatePage />);
 
       expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    });
+
+    it('clears the error when the alert is dismissed', async () => {
+      const setError = vi.fn();
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        error: 'Something went wrong',
+        setError,
+      });
+
+      const user = userEvent.setup();
+      render(<TranslationCreatePage />);
+
+      await user.click(within(screen.getByRole('alert')).getByRole('button', {name: /close/i}));
+
+      expect(setError).toHaveBeenCalledWith(null);
+    });
+
+    it('does not render the SelectLanguage step when no country is selected yet', () => {
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LANGUAGE,
+        selectedCountry: null,
+      });
+
+      render(<TranslationCreatePage />);
+
+      expect(screen.queryByTestId('select-language')).not.toBeInTheDocument();
+    });
+
+    it('renders nothing for an unrecognized step', () => {
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: 'UNKNOWN_STEP' as TranslationCreateFlowStep,
+      });
+
+      render(<TranslationCreatePage />);
+
+      expect(screen.queryByTestId('select-country')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('select-language')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('review-locale-code')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Clearing stale errors on edit', () => {
+    it('clears the error when the country changes', () => {
+      const setError = vi.fn();
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        setError,
+      });
+
+      render(<TranslationCreatePage />);
+
+      mockSelectCountry.mock.calls[0][0].onCountryChange({name: 'France', regionCode: 'FR', flag: '🇫🇷'});
+
+      expect(setError).toHaveBeenCalledWith(null);
+    });
+
+    it('clears the error when the language changes', () => {
+      const setError = vi.fn();
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LANGUAGE,
+        selectedCountry: {name: 'France', regionCode: 'FR', flag: '🇫🇷'},
+        setError,
+      });
+
+      render(<TranslationCreatePage />);
+
+      mockSelectLanguage.mock.calls[0][0].onLocaleChange({code: 'fr-FR', displayName: 'French', flag: '🇫🇷'});
+
+      expect(setError).toHaveBeenCalledWith(null);
+    });
+
+    it('clears the error when the locale code override changes', () => {
+      const setError = vi.fn();
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
+        selectedLocale: {code: 'fr-FR', displayName: 'French', flag: '🇫🇷'},
+        setError,
+      });
+
+      render(<TranslationCreatePage />);
+
+      mockReviewLocaleCode.mock.calls[0][0].onLocaleCodeChange('fr');
+
+      expect(setError).toHaveBeenCalledWith(null);
+    });
+  });
+
+  describe('Step readiness for the locale code step', () => {
+    it('enables Create once ReviewLocaleCode reports ready', () => {
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
+        selectedLocale: {code: 'fr-FR', displayName: 'French', flag: '🇫🇷'},
+      });
+
+      render(<TranslationCreatePage />);
+
+      mockReviewLocaleCode.mock.calls[0][0].onReadyChange(true);
+
+      expect(
+        screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})).closest('button'),
+      ).not.toBeDisabled();
+    });
+  });
+
+  describe('Resetting on country change', () => {
+    it('resets the selected locale and language readiness when the country changes', () => {
+      const setSelectedLocale = vi.fn();
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        selectedCountry: {name: 'France', regionCode: 'FR', flag: '🇫🇷'},
+        setSelectedLocale,
+      });
+
+      const {rerender} = render(<TranslationCreatePage />);
+
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        selectedCountry: {name: 'Germany', regionCode: 'DE', flag: '🇩🇪'},
+        setSelectedLocale,
+      });
+      rerender(<TranslationCreatePage />);
+
+      expect(setSelectedLocale).toHaveBeenCalledWith(null);
     });
   });
 
@@ -300,16 +396,31 @@ describe('TranslationCreatePage', () => {
       expect(screen.getByText(t('common:actions.continue')).closest('button')).toBeDisabled();
     });
 
-    it('disables the close button while isCreating is true', () => {
+    it('logs and does not throw when navigating away on close fails', async () => {
+      mockNavigate.mockRejectedValueOnce(new Error('navigation failed'));
+
+      const user = userEvent.setup();
+      render(<TranslationCreatePage />);
+
+      const closeButton = screen.getAllByRole('button')[0];
+      await user.click(closeButton);
+
+      expect(mockNavigate).toHaveBeenCalledWith('/translations');
+    });
+
+    it('does not navigate when the close button is clicked while isCreating is true', async () => {
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
         isCreating: true,
       });
 
+      const user = userEvent.setup();
       render(<TranslationCreatePage />);
 
       const closeButton = screen.getAllByRole('button')[0];
-      expect(closeButton).toBeDisabled();
+      await user.click(closeButton);
+
+      expect(mockNavigate).not.toHaveBeenCalled();
     });
   });
 
@@ -338,7 +449,6 @@ describe('TranslationCreatePage', () => {
 
     it('creates translations when Create is clicked on the final step', async () => {
       const setIsCreating = vi.fn();
-      const setProgress = vi.fn();
       const setError = vi.fn();
 
       mockRefetch.mockResolvedValue({
@@ -352,18 +462,16 @@ describe('TranslationCreatePage', () => {
 
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
         localeCode: 'fr-FR',
-        populateFromEnglish: true,
         setIsCreating,
-        setProgress,
         setError,
       });
 
       const user = userEvent.setup();
       render(<TranslationCreatePage />);
 
-      await user.click(screen.getByText('language.create.createButton'));
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
 
       expect(setIsCreating).toHaveBeenCalledWith(true);
       expect(mockRefetch).toHaveBeenCalled();
@@ -390,20 +498,19 @@ describe('TranslationCreatePage', () => {
 
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
         localeCode: 'fr-FR',
         setError,
         setIsCreating,
-        setProgress: vi.fn(),
       });
 
       const user = userEvent.setup();
       render(<TranslationCreatePage />);
 
-      await user.click(screen.getByText('language.create.createButton'));
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
 
       await vi.waitFor(() => {
-        expect(setError).toHaveBeenCalledWith('language.add.error');
+        expect(setError).toHaveBeenCalledWith('Failed to add language. Please try again.');
         expect(setIsCreating).toHaveBeenCalledWith(false);
       });
     });
@@ -424,35 +531,86 @@ describe('TranslationCreatePage', () => {
 
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
         localeCode: 'fr-FR',
         setError,
         setIsCreating,
-        setProgress: vi.fn(),
       });
 
       const user = userEvent.setup();
       render(<TranslationCreatePage />);
 
-      await user.click(screen.getByText('language.create.createButton'));
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
 
       await vi.waitFor(() => {
-        expect(setError).toHaveBeenCalledWith('language.add.error');
+        expect(setError).toHaveBeenCalledWith('Failed to add language. Please try again.');
         expect(setIsCreating).toHaveBeenCalledWith(false);
       });
+    });
+
+    it('logs when navigation after a successful create fails', async () => {
+      const setIsCreating = vi.fn();
+
+      mockRefetch.mockResolvedValue({
+        data: {translations: {common: {'actions.save': 'Save'}}},
+        error: null,
+      });
+      mockNavigate.mockRejectedValueOnce(new Error('navigation failed'));
+
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
+        localeCode: 'fr-FR',
+        setIsCreating,
+      });
+
+      const user = userEvent.setup();
+      render(<TranslationCreatePage />);
+
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
+
+      await vi.waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/translations/fr-FR');
+        expect(setIsCreating).toHaveBeenCalledWith(false);
+      });
+    });
+
+    it('logs when fetching en-US translations rejects outright during create', async () => {
+      const setError = vi.fn();
+
+      mockRefetch.mockRejectedValueOnce(new Error('network down'));
+
+      mockUseTranslationCreate.mockReturnValue({
+        ...baseContext,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
+        localeCode: 'fr-FR',
+        setError,
+      });
+
+      const user = userEvent.setup();
+      render(<TranslationCreatePage />);
+
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
+
+      await vi.waitFor(() => {
+        expect(mockRefetch).toHaveBeenCalled();
+      });
+      // handleCreate rejects outright (no internal catch around fetchEnTranslations), so it's
+      // caught by handleNext's own .catch() instead of resolving via setError.
+      expect(setError).not.toHaveBeenCalledWith('Failed to add language. Please try again.');
     });
 
     it('does not start creation when localeCode is empty', async () => {
       mockUseTranslationCreate.mockReturnValue({
         ...baseContext,
-        currentStep: TranslationCreateFlowStep.INITIALIZE,
+        currentStep: TranslationCreateFlowStep.LOCALE_CODE,
         localeCode: '',
       });
 
       const user = userEvent.setup();
       render(<TranslationCreatePage />);
 
-      await user.click(screen.getByText('language.create.createButton'));
+      await user.click(screen.getByText(t('translations:language.create.createButton', {defaultValue: 'Create'})));
 
       expect(mockRefetch).not.toHaveBeenCalled();
     });
@@ -472,7 +630,7 @@ describe('TranslationCreatePage', () => {
       render(<TranslationCreatePage />);
 
       // Click on the first breadcrumb (COUNTRY)
-      await user.click(screen.getByText('language.create.steps.country'));
+      await user.click(screen.getByText(t('translations:language.create.steps.country')));
 
       expect(setCurrentStep).toHaveBeenCalledWith(TranslationCreateFlowStep.COUNTRY);
     });

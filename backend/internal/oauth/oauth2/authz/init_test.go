@@ -1,26 +1,10 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -30,7 +14,9 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/thunder-id/thunderid/internal/actorprovider"
+	"github.com/thunder-id/thunderid/internal/runtimestore/inmemory"
 	"github.com/thunder-id/thunderid/internal/system/config"
+	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/tests/mocks/entityprovidermock"
 	"github.com/thunder-id/thunderid/tests/mocks/flow/flowexecmock"
 	"github.com/thunder-id/thunderid/tests/mocks/inboundclientmock"
@@ -91,9 +77,10 @@ func (suite *InitTestSuite) TestInitialize() {
 
 	service, err := Initialize(
 		mux,
-		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr()),
+		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr(), nil),
 		suite.mockResourceService,
-		suite.mockJWTService, suite.mockFlowExecService, nil, testhelpers.OAuthConfig(),
+		suite.mockJWTService, suite.mockFlowExecService, nil, nil, testhelpers.OAuthConfig(),
+		inmemory.Initialize("test-deployment"), transaction.NewNoOpTransactioner(),
 	)
 
 	assert.NoError(suite.T(), err)
@@ -106,9 +93,10 @@ func (suite *InitTestSuite) TestInitialize_RegistersRoutes() {
 
 	_, err := Initialize(
 		mux,
-		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr()),
+		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr(), nil),
 		suite.mockResourceService,
-		suite.mockJWTService, suite.mockFlowExecService, nil, testhelpers.OAuthConfig(),
+		suite.mockJWTService, suite.mockFlowExecService, nil, nil, testhelpers.OAuthConfig(),
+		inmemory.Initialize("test-deployment"), transaction.NewNoOpTransactioner(),
 	)
 	assert.NoError(suite.T(), err)
 
@@ -123,9 +111,10 @@ func (suite *InitTestSuite) TestRegisterRoutes_CORSConfiguration() {
 
 	_, err := Initialize(
 		mux,
-		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr()),
+		actorprovider.Initialize(suite.mockInboundClient, suite.mockEntityProvider, noopAuthnMgr(), nil),
 		suite.mockResourceService,
-		suite.mockJWTService, suite.mockFlowExecService, nil, testhelpers.OAuthConfig(),
+		suite.mockJWTService, suite.mockFlowExecService, nil, nil, testhelpers.OAuthConfig(),
+		inmemory.Initialize("test-deployment"), transaction.NewNoOpTransactioner(),
 	)
 	assert.NoError(suite.T(), err)
 
@@ -156,20 +145,4 @@ func (suite *InitTestSuite) TestRegisterRoutes_CORSConfiguration() {
 			}
 		})
 	}
-}
-
-func (suite *InitTestSuite) TestWithFrameProtection() {
-	// RFC 9700 §4.16: Authorization servers MUST prevent clickjacking attacks.
-	handler := withFrameProtection(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	req := httptest.NewRequest("GET", "/oauth2/authorize", nil)
-	rec := httptest.NewRecorder()
-
-	handler(rec, req)
-
-	assert.Equal(suite.T(), http.StatusOK, rec.Code)
-	assert.Equal(suite.T(), "DENY", rec.Header().Get("X-Frame-Options"))
-	assert.Equal(suite.T(), "frame-ancestors 'none'", rec.Header().Get("Content-Security-Policy"))
 }

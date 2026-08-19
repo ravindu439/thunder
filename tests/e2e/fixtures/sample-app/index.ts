@@ -1,20 +1,14 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-export { test, expect } from "./sample-app.fixture";
+import { mergeTests } from "@playwright/test";
+import { test as sampleAppTest } from "./sample-app.fixture";
+import { test as supportTest } from "../console/console-support.fixture";
+
+// console-support.fixture is an independent branch off the raw Playwright base (same shape as
+// sample-app.fixture), built to be merged in like this - see fixtures/console/index.ts.
+export const test = mergeTests(sampleAppTest, supportTest);
+
+export { expect } from "@playwright/test";
 export { SampleAppLoginPage } from "../../pages/sample-app";
+export { UsersApi, type ApiUser } from "../../utils/users-api";

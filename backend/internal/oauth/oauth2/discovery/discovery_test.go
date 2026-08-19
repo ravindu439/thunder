@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package discovery provides tests for the OAuth2 and OIDC discovery endpoints.
 package discovery
@@ -37,9 +22,17 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
+	joseconfig "github.com/thunder-id/thunderid/internal/system/jose/config"
+	"github.com/thunder-id/thunderid/internal/system/jose/jwe"
 	"github.com/thunder-id/thunderid/tests/mocks/crypto/cryptomock"
 )
+
+// newTestJWEService builds a real jwe service backed by the given crypto provider, for tests that
+// need discoveryService to read the alg/enc lists it exposes.
+func newTestJWEService(cryptoProvider providers.RuntimeCryptoProvider) jwe.JWEServiceInterface {
+	svc, _ := jwe.Initialize(cryptoProvider, joseconfig.Config{})
+	return svc
+}
 
 type DiscoveryTestSuite struct {
 	suite.Suite
@@ -87,13 +80,20 @@ func (suite *DiscoveryTestSuite) SetupTest() {
 					"urn:thunder:acr:generated-code": {"OTP"},
 				},
 			},
+			DCR:             engineconfig.DCRConfig{Enabled: boolPtr(true)},
+			TokenRevocation: engineconfig.OAuthTokenRevocationConfig{Enabled: boolPtr(true)},
+			Logout:          engineconfig.LogoutConfig{Enabled: boolPtr(true)},
 		},
 	}
 	_ = config.InitializeServerRuntime("test", testConfig)
 
 	suite.oauthCfg = oauthCfgFromServerConfig(testConfig)
 	suite.cryptoMock = cryptomock.NewRuntimeCryptoProviderMock(suite.T())
-	suite.discoveryService = newDiscoveryService(suite.cryptoMock, suite.oauthCfg)
+	suite.cryptoMock.EXPECT().GetSupportedSigningAlgorithms().
+		Return(testConfig.OAuth.DPoP.AllowedAlgs).Maybe()
+	suite.cryptoMock.EXPECT().GetSupportedEncryptionAlgorithms().
+		Return([]string{string(cryptolib.AlgorithmRSAOAEP256)}).Maybe()
+	suite.discoveryService = newDiscoveryService(suite.cryptoMock, newTestJWEService(suite.cryptoMock), suite.oauthCfg)
 	suite.handler = newDiscoveryHandler(suite.discoveryService)
 }
 
@@ -119,8 +119,12 @@ func (suite *DiscoveryTestSuite) TestOAuth2AuthorizationServerMetadata() {
 	assert.NotEmpty(suite.T(), metadata.JWKSUri)
 	assert.NotEmpty(suite.T(), metadata.RegistrationEndpoint)
 	assert.NotEmpty(suite.T(), metadata.IntrospectionEndpoint)
-	assert.NotEmpty(suite.T(), metadata.UserInfoEndpoint)
 	assert.NotEmpty(suite.T(), metadata.RevocationEndpoint)
+
+	body, err := json.Marshal(metadata)
+	assert.NoError(suite.T(), err)
+	assert.NotContains(suite.T(), string(body), "userinfo_endpoint")
+	assert.NotContains(suite.T(), string(body), "scopes_supported")
 
 	// Verify only implemented grant types are present
 	assert.Contains(suite.T(), metadata.GrantTypesSupported, "authorization_code")
@@ -147,8 +151,8 @@ func (suite *DiscoveryTestSuite) TestCIBAMetadataAdvertised() {
 }
 
 func (suite *DiscoveryTestSuite) TestOIDCDiscovery() {
-	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{}).
-		Return([]kmprovider.PublicKeyInfo{{KeyID: "k1", Algorithm: cryptolib.AlgorithmRS256}}, nil)
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
 
 	req := httptest.NewRequest("GET", "/.well-known/openid-configuration", nil)
 	w := httptest.NewRecorder()
@@ -165,6 +169,10 @@ func (suite *DiscoveryTestSuite) TestOIDCDiscovery() {
 	assert.NotEmpty(suite.T(), metadata.SubjectTypesSupported)
 	assert.NotEmpty(suite.T(), metadata.ClaimsSupported)
 	assert.NotEmpty(suite.T(), metadata.IDTokenSigningAlgValuesSupported)
+	assert.NotEmpty(suite.T(), metadata.UserInfoEndpoint)
+	assert.NotEmpty(suite.T(), metadata.ScopesSupported)
+	assert.Contains(suite.T(), metadata.ScopesSupported, "openid")
+	assert.NotEmpty(suite.T(), metadata.EndSessionEndpoint)
 
 	// Verify OIDC-specific fields
 	assert.Contains(suite.T(), metadata.SubjectTypesSupported, constants.SubjectTypePublic)
@@ -188,12 +196,22 @@ func (suite *DiscoveryTestSuite) TestDPoPSigningAlgValuesAdvertised() {
 	oauth2Meta := suite.discoveryService.GetOAuth2AuthorizationServerMetadata(context.Background())
 	assert.Equal(suite.T(), expected, oauth2Meta.DPoPSigningAlgValuesSupported)
 
-	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{}).
-		Return([]kmprovider.PublicKeyInfo{{KeyID: "k1", Algorithm: cryptolib.AlgorithmRS256}}, nil)
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
 
 	oidcMeta, err := suite.discoveryService.GetOIDCMetadata(context.Background())
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), expected, oidcMeta.DPoPSigningAlgValuesSupported)
+}
+
+// TestTokenEndpointAuthSigningAlgValuesAdvertised verifies the discovery metadata publishes
+// token_endpoint_auth_signing_alg_values_supported with FAPI 2.0 permitted algorithms (RFC 8414).
+func (suite *DiscoveryTestSuite) TestTokenEndpointAuthSigningAlgValuesAdvertised() {
+	oauth2Meta := suite.discoveryService.GetOAuth2AuthorizationServerMetadata(context.Background())
+	assert.NotEmpty(suite.T(), oauth2Meta.TokenEndpointAuthSigningAlgValuesSupported)
+	assert.Contains(suite.T(), oauth2Meta.TokenEndpointAuthSigningAlgValuesSupported, "ES256")
+	assert.Contains(suite.T(), oauth2Meta.TokenEndpointAuthSigningAlgValuesSupported, "PS256")
+	assert.Contains(suite.T(), oauth2Meta.TokenEndpointAuthSigningAlgValuesSupported, "EdDSA")
 }
 
 func (suite *DiscoveryTestSuite) TestDPoPSigningAlgValuesOmittedWhenUnconfigured() {
@@ -205,13 +223,43 @@ func (suite *DiscoveryTestSuite) TestDPoPSigningAlgValuesOmittedWhenUnconfigured
 	_ = config.InitializeServerRuntime("test", testConfig)
 	defer config.ResetServerRuntime()
 
-	svc := newDiscoveryService(suite.cryptoMock, oauthCfgFromServerConfig(testConfig))
+	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return(nil)
+
+	svc := newDiscoveryService(cryptoMock, newTestJWEService(cryptoMock), oauthCfgFromServerConfig(testConfig))
 	oauth2Meta := svc.GetOAuth2AuthorizationServerMetadata(context.Background())
 	assert.Nil(suite.T(), oauth2Meta.DPoPSigningAlgValuesSupported)
 
 	body, err := json.Marshal(oauth2Meta)
 	assert.NoError(suite.T(), err)
 	assert.NotContains(suite.T(), string(body), "dpop_signing_alg_values_supported")
+}
+
+func (suite *DiscoveryTestSuite) TestDCRRevocationLogoutEndpointsOmittedWhenDisabled() {
+	config.ResetServerRuntime()
+	testConfig := &config.Config{
+		Server: engineconfig.ServerConfig{Hostname: "localhost", Port: 8080},
+		JWT:    engineconfig.JWTConfig{Issuer: "https://auth.example.com"},
+	}
+	_ = config.InitializeServerRuntime("test", testConfig)
+	defer config.ResetServerRuntime()
+
+	svc := newDiscoveryService(
+		suite.cryptoMock, newTestJWEService(suite.cryptoMock), oauthCfgFromServerConfig(testConfig))
+	oauth2Meta := svc.GetOAuth2AuthorizationServerMetadata(context.Background())
+	assert.Empty(suite.T(), oauth2Meta.RegistrationEndpoint)
+	assert.Empty(suite.T(), oauth2Meta.RevocationEndpoint)
+
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
+	oidcMeta, err := svc.GetOIDCMetadata(context.Background())
+	assert.NoError(suite.T(), err)
+	assert.Empty(suite.T(), oidcMeta.EndSessionEndpoint)
+
+	body, err := json.Marshal(oauth2Meta)
+	assert.NoError(suite.T(), err)
+	assert.NotContains(suite.T(), string(body), "registration_endpoint")
+	assert.NotContains(suite.T(), string(body), "revocation_endpoint")
 }
 
 // TestGrantTypeIsValid tests the GrantType.IsValid() method
@@ -260,7 +308,7 @@ func TestTokenEndpointAuthMethodIsValid(t *testing.T) {
 // TestGetSupportedResponseTypes tests the GetSupportedResponseTypes function
 // This is a standalone test for constants - doesn't require discovery service setup
 func TestGetSupportedResponseTypes(t *testing.T) {
-	supported := constants.GetSupportedResponseTypes()
+	supported := constants.GetSupportedResponseTypes(oauthconfig.Config{})
 
 	assert.NotNil(t, supported)
 	assert.Equal(t, 1, len(supported))
@@ -268,10 +316,17 @@ func TestGetSupportedResponseTypes(t *testing.T) {
 	assert.Equal(t, []string{"code"}, supported)
 }
 
+func TestGetSupportedResponseTypes_ConfiguredAllowList(t *testing.T) {
+	cfg := oauthconfig.Config{
+		OAuth: engineconfig.OAuthConfig{AllowedResponseTypes: []string{"code"}},
+	}
+	assert.Equal(t, []string{"code"}, constants.GetSupportedResponseTypes(cfg))
+}
+
 // TestGetSupportedGrantTypes tests the GetSupportedGrantTypes function
 // This is a standalone test for constants - doesn't require discovery service setup
 func TestGetSupportedGrantTypes(t *testing.T) {
-	supported := constants.GetSupportedGrantTypes()
+	supported := constants.GetSupportedGrantTypes(oauthconfig.Config{})
 
 	assert.NotNil(t, supported)
 	assert.Equal(t, 6, len(supported))
@@ -285,10 +340,17 @@ func TestGetSupportedGrantTypes(t *testing.T) {
 	assert.NotContains(t, supported, "implicit")
 }
 
+func TestGetSupportedGrantTypes_ConfiguredAllowList(t *testing.T) {
+	cfg := oauthconfig.Config{
+		OAuth: engineconfig.OAuthConfig{AllowedGrantTypes: []string{"client_credentials", "refresh_token"}},
+	}
+	assert.Equal(t, []string{"client_credentials", "refresh_token"}, constants.GetSupportedGrantTypes(cfg))
+}
+
 // TestGetSupportedTokenEndpointAuthMethods tests the GetSupportedTokenEndpointAuthMethods function
 // This is a standalone test for constants - doesn't require discovery service setup
 func TestGetSupportedTokenEndpointAuthMethods(t *testing.T) {
-	supported := constants.GetSupportedTokenEndpointAuthMethods()
+	supported := constants.GetSupportedTokenEndpointAuthMethods(oauthconfig.Config{})
 
 	assert.NotNil(t, supported)
 	assert.Equal(t, 4, len(supported))
@@ -297,6 +359,13 @@ func TestGetSupportedTokenEndpointAuthMethods(t *testing.T) {
 	assert.Contains(t, supported, "none")
 	assert.Contains(t, supported, "private_key_jwt")
 	assert.NotContains(t, supported, "client_secret_jwt")
+}
+
+func TestGetSupportedTokenEndpointAuthMethods_ConfiguredAllowList(t *testing.T) {
+	cfg := oauthconfig.Config{
+		OAuth: engineconfig.OAuthConfig{AllowedAuthMethods: []string{"client_secret_basic"}},
+	}
+	assert.Equal(t, []string{"client_secret_basic"}, constants.GetSupportedTokenEndpointAuthMethods(cfg))
 }
 
 // TestGetSupportedSubjectTypes tests the GetSupportedSubjectTypes function
@@ -326,11 +395,11 @@ func TestGetStandardClaims(t *testing.T) {
 }
 
 func (suite *DiscoveryTestSuite) TestInitialize() {
-	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{}).
-		Return([]kmprovider.PublicKeyInfo{{KeyID: "k1", Algorithm: cryptolib.AlgorithmRS256}}, nil)
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
 
 	mux := http.NewServeMux()
-	service := Initialize(mux, suite.cryptoMock, suite.oauthCfg)
+	service := Initialize(mux, suite.cryptoMock, newTestJWEService(suite.cryptoMock), suite.oauthCfg)
 
 	assert.NotNil(suite.T(), service)
 	assert.Implements(suite.T(), (*DiscoveryServiceInterface)(nil), service)
@@ -372,7 +441,8 @@ func (suite *DiscoveryTestSuite) TestGetBaseURL_WithPublicHostname() {
 	}
 	_ = config.InitializeServerRuntime("test", testConfig)
 
-	service := newDiscoveryService(suite.cryptoMock, oauthCfgFromServerConfig(testConfig))
+	service := newDiscoveryService(
+		suite.cryptoMock, newTestJWEService(suite.cryptoMock), oauthCfgFromServerConfig(testConfig))
 	metadata := service.GetOAuth2AuthorizationServerMetadata(context.Background())
 	assert.Contains(suite.T(), metadata.AuthorizationEndpoint, "public.thunder.io")
 	config.ResetServerRuntime()
@@ -392,7 +462,8 @@ func (suite *DiscoveryTestSuite) TestGetBaseURL_WithHTTPOnly() {
 	}
 	_ = config.InitializeServerRuntime("test", testConfig)
 
-	service := newDiscoveryService(suite.cryptoMock, oauthCfgFromServerConfig(testConfig))
+	service := newDiscoveryService(
+		suite.cryptoMock, newTestJWEService(suite.cryptoMock), oauthCfgFromServerConfig(testConfig))
 	metadata := service.GetOAuth2AuthorizationServerMetadata(context.Background())
 	assert.Contains(suite.T(), metadata.AuthorizationEndpoint, "http://")
 	config.ResetServerRuntime()
@@ -400,13 +471,15 @@ func (suite *DiscoveryTestSuite) TestGetBaseURL_WithHTTPOnly() {
 
 func (suite *DiscoveryTestSuite) TestOIDCDiscovery_MultipleKeyAlgorithms() {
 	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
-	cryptoMock.EXPECT().GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{}).
-		Return([]kmprovider.PublicKeyInfo{
-			{KeyID: "k1", Algorithm: cryptolib.AlgorithmRS256},
-			{KeyID: "k2", Algorithm: cryptolib.AlgorithmES256},
-			{KeyID: "k3", Algorithm: cryptolib.AlgorithmEdDSA},
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return(suite.oauthCfg.OAuth.DPoP.AllowedAlgs)
+	cryptoMock.EXPECT().GetSupportedEncryptionAlgorithms().Return([]string{string(cryptolib.AlgorithmRSAOAEP256)})
+	cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{
+			{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)},
+			{KeyID: "k2", Algorithm: string(cryptolib.AlgorithmES256)},
+			{KeyID: "k3", Algorithm: string(cryptolib.AlgorithmEdDSA)},
 		}, nil)
-	svc := newDiscoveryService(cryptoMock, suite.oauthCfg)
+	svc := newDiscoveryService(cryptoMock, newTestJWEService(cryptoMock), suite.oauthCfg)
 	meta, err := svc.GetOIDCMetadata(context.Background())
 	assert.NoError(suite.T(), err)
 	algs := meta.IDTokenSigningAlgValuesSupported
@@ -419,12 +492,14 @@ func (suite *DiscoveryTestSuite) TestOIDCDiscovery_MultipleKeyAlgorithms() {
 
 func (suite *DiscoveryTestSuite) TestOIDCDiscovery_DeduplicatesAlgorithms() {
 	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
-	cryptoMock.EXPECT().GetPublicKeys(mock.Anything, kmprovider.PublicKeyFilter{}).
-		Return([]kmprovider.PublicKeyInfo{
-			{KeyID: "k1", Algorithm: cryptolib.AlgorithmRS256},
-			{KeyID: "k2", Algorithm: cryptolib.AlgorithmRS256},
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return(suite.oauthCfg.OAuth.DPoP.AllowedAlgs)
+	cryptoMock.EXPECT().GetSupportedEncryptionAlgorithms().Return([]string{string(cryptolib.AlgorithmRSAOAEP256)})
+	cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{
+			{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)},
+			{KeyID: "k2", Algorithm: string(cryptolib.AlgorithmRS256)},
 		}, nil)
-	svc := newDiscoveryService(cryptoMock, suite.oauthCfg)
+	svc := newDiscoveryService(cryptoMock, newTestJWEService(cryptoMock), suite.oauthCfg)
 	meta, err := svc.GetOIDCMetadata(context.Background())
 	assert.NoError(suite.T(), err)
 	algs := meta.IDTokenSigningAlgValuesSupported
@@ -432,3 +507,106 @@ func (suite *DiscoveryTestSuite) TestOIDCDiscovery_DeduplicatesAlgorithms() {
 	assert.Equal(suite.T(), 1, len(algs))
 	assert.Contains(suite.T(), algs, "RS256")
 }
+
+func (suite *DiscoveryTestSuite) TestAuthorizationGrantProfilesSupported_JWTBearerEnabled() {
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
+
+	meta, err := suite.discoveryService.GetOIDCMetadata(context.Background())
+	assert.NoError(suite.T(), err)
+
+	// Default config allows the JWT Bearer grant type, so the ID-JAG profile should be advertised.
+	assert.Contains(suite.T(), meta.GrantTypesSupported, string(providers.GrantTypeJWTBearer))
+	assert.Contains(
+		suite.T(), meta.AuthorizationGrantProfilesSupported, constants.SupportedAuthorizationGrantProfileIDJAG)
+}
+
+func (suite *DiscoveryTestSuite) TestAuthorizationGrantProfilesSupported_JWTBearerDisabled() {
+	testConfig := &config.Config{
+		Server: engineconfig.ServerConfig{Hostname: "localhost", Port: 8080},
+		JWT:    engineconfig.JWTConfig{Issuer: "https://auth.example.com"},
+		OAuth: engineconfig.OAuthConfig{
+			AllowedGrantTypes: []string{"client_credentials", "refresh_token"},
+		},
+	}
+	cryptoMock := cryptomock.NewRuntimeCryptoProviderMock(suite.T())
+	cryptoMock.EXPECT().GetSupportedSigningAlgorithms().Return(suite.oauthCfg.OAuth.DPoP.AllowedAlgs).Maybe()
+	cryptoMock.EXPECT().GetSupportedEncryptionAlgorithms().
+		Return([]string{string(cryptolib.AlgorithmRSAOAEP256)}).Maybe()
+	cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
+
+	svc := newDiscoveryService(cryptoMock, newTestJWEService(cryptoMock), oauthCfgFromServerConfig(testConfig))
+	meta, err := svc.GetOIDCMetadata(context.Background())
+	assert.NoError(suite.T(), err)
+
+	assert.NotContains(suite.T(), meta.GrantTypesSupported, string(providers.GrantTypeJWTBearer))
+	assert.Empty(suite.T(), meta.AuthorizationGrantProfilesSupported)
+
+	body, err := json.Marshal(meta)
+	assert.NoError(suite.T(), err)
+	assert.NotContains(suite.T(), string(body), "authorization_grant_profiles_supported")
+}
+
+func (suite *DiscoveryTestSuite) TestAuthorizationGrantProfilesSupported_AdvertisedOverHTTP() {
+	suite.cryptoMock.EXPECT().GetPublicKeys(mock.Anything, providers.PublicKeyFilter{}).
+		Return([]providers.PublicKeyInfo{{KeyID: "k1", Algorithm: string(cryptolib.AlgorithmRS256)}}, nil)
+
+	req := httptest.NewRequest("GET", "/.well-known/openid-configuration", nil)
+	w := httptest.NewRecorder()
+	suite.handler.HandleOIDCDiscovery(w, req)
+	assert.Equal(suite.T(), http.StatusOK, w.Code)
+
+	var metadata OIDCProviderMetadata
+	err := json.NewDecoder(w.Body).Decode(&metadata)
+	assert.NoError(suite.T(), err)
+	assert.Equal(
+		suite.T(),
+		[]string{constants.SupportedAuthorizationGrantProfileIDJAG},
+		metadata.AuthorizationGrantProfilesSupported,
+	)
+}
+
+func (suite *DiscoveryTestSuite) TestAuthorizationGrantProfilesSupported_OnOAuth2AuthorizationServerMetadata() {
+	req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	w := httptest.NewRecorder()
+
+	suite.handler.HandleOAuth2AuthorizationServerMetadata(w, req)
+
+	assert.Equal(suite.T(), http.StatusOK, w.Code)
+
+	var metadata OAuth2AuthorizationServerMetadata
+	err := json.NewDecoder(w.Body).Decode(&metadata)
+	assert.NoError(suite.T(), err)
+
+	// Default config allows the JWT Bearer grant type, so the ID-JAG profile should be
+	// advertised on the OAuth 2.0 Authorization Server Metadata endpoint too.
+	assert.Contains(suite.T(), metadata.GrantTypesSupported, string(providers.GrantTypeJWTBearer))
+	assert.Equal(
+		suite.T(),
+		[]string{constants.SupportedAuthorizationGrantProfileIDJAG},
+		metadata.AuthorizationGrantProfilesSupported,
+	)
+}
+
+func (suite *DiscoveryTestSuite) TestAuthorizationGrantProfilesSupported_NotOnOAuth2ServerMetadataWhenUnsupported() {
+	testConfig := &config.Config{
+		Server: engineconfig.ServerConfig{Hostname: "localhost", Port: 8080},
+		JWT:    engineconfig.JWTConfig{Issuer: "https://auth.example.com"},
+		OAuth: engineconfig.OAuthConfig{
+			AllowedGrantTypes: []string{"client_credentials", "refresh_token"},
+		},
+	}
+	svc := newDiscoveryService(
+		suite.cryptoMock, newTestJWEService(suite.cryptoMock), oauthCfgFromServerConfig(testConfig))
+	handler := newDiscoveryHandler(svc)
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-authorization-server", nil)
+	w := httptest.NewRecorder()
+	handler.HandleOAuth2AuthorizationServerMetadata(w, req)
+
+	assert.Equal(suite.T(), http.StatusOK, w.Code)
+	assert.NotContains(suite.T(), w.Body.String(), "authorization_grant_profiles_supported")
+}
+
+func boolPtr(b bool) *bool { return &b }

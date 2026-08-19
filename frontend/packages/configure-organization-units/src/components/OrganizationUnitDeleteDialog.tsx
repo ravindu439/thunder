@@ -1,26 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {getErrorMessage} from '@thunderid/utils';
 import {Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button, Alert} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import useDeleteOrganizationUnit from '../api/useDeleteOrganizationUnit';
-import type {ApiError, I18nMessage} from '../models/api-error';
 
 export interface OrganizationUnitDeleteDialogProps {
   /**
@@ -39,53 +24,31 @@ export interface OrganizationUnitDeleteDialogProps {
    * Callback when the organization unit is successfully deleted
    */
   onSuccess?: () => void;
-  /**
-   * Callback when the deletion fails, receives the error message
-   */
-  onError?: (message: string) => void;
 }
 
 /**
- * Resolves a backend error field to a display string. The field may be a plain
- * string or a translatable {@link I18nMessage} object; objects are reduced to
- * their `defaultValue` so they are never rendered directly as React children.
- */
-function resolveField(value: I18nMessage | string | undefined): string | null {
-  if (typeof value === 'string') {
-    return value.trim() ? value : null;
-  }
-
-  const defaultValue = value?.defaultValue;
-
-  return defaultValue?.trim() ? defaultValue : null;
-}
-
-/**
- * Extracts a user-friendly error message from the API error response.
- */
-function getErrorMessage(err: Error, fallback: string): string {
-  const {response} = err as Error & {response?: {data?: ApiError}};
-  const description = resolveField(response?.data?.description);
-  const message = err.message?.trim() ? err.message : null;
-
-  return description ?? message ?? fallback;
-}
-
-/**
- * Dialog component for confirming organization unit deletion
+ * Dialog component for confirming organization unit deletion. Owns the delete mutation itself, so
+ * a failure renders inline here rather than closing the dialog and handing the message to a
+ * parent — the parent only learns about a successful deletion.
  */
 export default function OrganizationUnitDeleteDialog({
   open,
   organizationUnitId,
   onClose,
   onSuccess = undefined,
-  onError = undefined,
 }: OrganizationUnitDeleteDialogProps): JSX.Element {
   const {t} = useTranslation();
   const deleteOrganizationUnit = useDeleteOrganizationUnit();
 
+  // Resolves an error through the `organizationUnits` catalog. `t` defaults to the `common`
+  // namespace, so this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with
+  // `organizationUnits:`, per getErrorMessage's namespace-resolution contract.
+  const tForErrors = (key: string, options?: Record<string, unknown>): string =>
+    t(key.includes(':') ? key : `organizationUnits:${key}`, options);
+
   const handleCancel = (): void => {
     if (deleteOrganizationUnit.isPending) return;
+    deleteOrganizationUnit.reset();
     onClose();
   };
 
@@ -97,13 +60,17 @@ export default function OrganizationUnitDeleteDialog({
         onClose();
         onSuccess?.();
       },
-      onError: (err: Error) => {
-        const message = getErrorMessage(err, t('organizationUnits:delete.dialog.error'));
-        onClose();
-        onError?.(message);
-      },
     });
   };
+
+  const errorMessage = deleteOrganizationUnit.error
+    ? getErrorMessage(
+        deleteOrganizationUnit.error,
+        tForErrors,
+        'delete.dialog.error',
+        'Failed to delete organization unit. Please try again.',
+      )
+    : null;
 
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="sm" fullWidth>
@@ -113,6 +80,11 @@ export default function OrganizationUnitDeleteDialog({
         <Alert severity="warning" sx={{mb: 2}}>
           {t('organizationUnits:delete.dialog.disclaimer')}
         </Alert>
+        {errorMessage && (
+          <Alert severity="error" sx={{mb: 2}}>
+            {errorMessage}
+          </Alert>
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={handleCancel} disabled={deleteOrganizationUnit.isPending}>

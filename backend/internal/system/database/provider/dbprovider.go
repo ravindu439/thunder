@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package provider provides functionality for managing database connections and clients.
 package provider
@@ -32,6 +17,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/database/model"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 const (
@@ -56,10 +42,10 @@ type DBProviderInterface interface {
 	GetRuntimeTransientDBClient() (DBClientInterface, error)
 	GetEntityDBClient() (DBClientInterface, error)
 	GetRuntimePersistentDBClient() (DBClientInterface, error)
-	GetConfigDBTransactioner() (transaction.Transactioner, error)
-	GetEntityDBTransactioner() (transaction.Transactioner, error)
-	GetRuntimeTransientDBTransactioner() (transaction.Transactioner, error)
-	GetRuntimePersistentDBTransactioner() (transaction.Transactioner, error)
+	GetConfigDBTransactioner() (providers.Transactioner, error)
+	GetEntityDBTransactioner() (providers.Transactioner, error)
+	GetRuntimeTransientDBTransactioner() (providers.Transactioner, error)
+	GetRuntimePersistentDBTransactioner() (providers.Transactioner, error)
 }
 
 // DBProviderCloser is a separate interface for closing the provider.
@@ -138,18 +124,18 @@ func (d *dbProvider) GetRuntimePersistentDBClient() (DBClientInterface, error) {
 
 // GetConfigDBTransactioner returns a transactioner for the config database.
 // The transactioner manages database transactions with automatic nesting detection.
-func (d *dbProvider) GetConfigDBTransactioner() (transaction.Transactioner, error) {
+func (d *dbProvider) GetConfigDBTransactioner() (providers.Transactioner, error) {
 	return d.getTransactioner(d.GetConfigDBClient, dbNameConfig)
 }
 
 // GetEntityDBTransactioner returns a transactioner for the entity database.
 // The transactioner manages database transactions with automatic nesting detection.
-func (d *dbProvider) GetEntityDBTransactioner() (transaction.Transactioner, error) {
+func (d *dbProvider) GetEntityDBTransactioner() (providers.Transactioner, error) {
 	return d.getTransactioner(d.GetEntityDBClient, dbNameEntity)
 }
 
 // GetRuntimeTransientDBTransactioner returns a transactioner for the runtime transient database.
-func (d *dbProvider) GetRuntimeTransientDBTransactioner() (transaction.Transactioner, error) {
+func (d *dbProvider) GetRuntimeTransientDBTransactioner() (providers.Transactioner, error) {
 	// When the runtime store is Redis, a no-op transactioner is returned since Redis does
 	// not support SQL-style transactions.
 	if config.GetServerRuntime().Config.Database.RuntimeTransient.Type == DataSourceTypeRedis {
@@ -160,7 +146,7 @@ func (d *dbProvider) GetRuntimeTransientDBTransactioner() (transaction.Transacti
 
 // GetRuntimePersistentDBTransactioner returns a transactioner for the runtime persistent database.
 // The transactioner manages database transactions with automatic nesting detection.
-func (d *dbProvider) GetRuntimePersistentDBTransactioner() (transaction.Transactioner, error) {
+func (d *dbProvider) GetRuntimePersistentDBTransactioner() (providers.Transactioner, error) {
 	return d.getTransactioner(d.GetRuntimePersistentDBClient, dbNameRuntimePersistent)
 }
 
@@ -168,7 +154,7 @@ func (d *dbProvider) GetRuntimePersistentDBTransactioner() (transaction.Transact
 func (d *dbProvider) getTransactioner(
 	clientGetter func() (DBClientInterface, error),
 	dbName string,
-) (transaction.Transactioner, error) {
+) (providers.Transactioner, error) {
 	client, err := clientGetter()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %s database client: %w", dbName, err)

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package logout implements the OIDC RP-Initiated Logout 1.0 end_session_endpoint
 // (GET/POST /oauth2/logout). It resolves the target application from id_token_hint (or client_id),
@@ -26,11 +11,13 @@ import (
 	"context"
 	"errors"
 
+	flowcommon "github.com/thunder-id/thunderid/internal/flow/common"
 	"github.com/thunder-id/thunderid/internal/flow/flowexec"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	oauth2utils "github.com/thunder-id/thunderid/internal/oauth/oauth2/utils"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/log"
+	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
@@ -41,7 +28,6 @@ var (
 	errClientRequired               = errors.New("id_token_hint or client_id is required")
 	errInvalidClient                = errors.New("invalid client")
 	errInvalidPostLogoutRedirectURI = errors.New("invalid post_logout_redirect_uri")
-	errIDTokenHintRequired          = errors.New("id_token_hint is required when post_logout_redirect_uri is provided")
 )
 
 // LogoutRequest holds the RP-initiated logout parameters received from the request.
@@ -50,6 +36,8 @@ type LogoutRequest struct {
 	ClientID              string
 	PostLogoutRedirectURI string
 	State                 string
+	Headers               map[string][]string
+	QueryParams           map[string][]string
 }
 
 // LogoutResolution is the validated target of a logout request.
@@ -57,6 +45,12 @@ type LogoutResolution struct {
 	AppID                 string
 	PostLogoutRedirectURI string
 	State                 string
+	Headers               map[string][]string
+	QueryParams           map[string][]string
+	// PromptRequired reports whether the sign-out flow must confirm the logout with the End-User.
+	// Per OIDC RP-Initiated Logout the OP MUST ask when no id_token_hint was supplied; it is set
+	// true in that case so a conditional sign-out flow can decide whether to render its prompt.
+	PromptRequired bool
 }
 
 // SignOutInitiation is the result of starting an RP-initiated sign-out: the stored logout-request id
@@ -117,10 +111,24 @@ func (s *logoutService) InitiateSignOutFlow(
 		return nil, &tidcommon.InternalServerError
 	}
 
-	executionID, svcErr := s.flowExecService.InitiateFlow(ctx, &flowexec.FlowInitContext{
+	// id_token_hint is used by the OAuth layer to resolve the target client; the sign-out flow
+	// itself never consumes it. Strip it from the forwarded initiator request so we don't persist a
+	// JWT with user identity claims into the flow context store.
+	forwardedQueryParams := filterQueryParams(resolution.QueryParams, constants.RequestParamIDTokenHint)
+
+	initContext := &flowexec.FlowInitContext{
 		ApplicationID: resolution.AppID,
 		FlowType:      string(providers.FlowTypeSignOut),
-	})
+		InitiatorRequest: &providers.InitiatorRequest{
+			Headers:     sysutils.FilterSensitiveHeaders(resolution.Headers),
+			QueryParams: forwardedQueryParams,
+		},
+	}
+	if resolution.PromptRequired {
+		initContext.RuntimeData = map[string]string{flowcommon.RuntimeKeyLogoutPromptRequired: "true"}
+	}
+
+	executionID, svcErr := s.flowExecService.InitiateFlow(ctx, initContext)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -161,13 +169,13 @@ func (s *logoutService) CompleteSignOut(ctx context.Context, logoutID string) (s
 
 // Resolve identifies the client from id_token_hint (preferred) or the client_id parameter, validates
 // any post_logout_redirect_uri against the client's registered list, and returns the logout target.
+//
+// id_token_hint is not required: a request carrying only client_id is accepted, and any
+// post_logout_redirect_uri is still confirmed legitimate by matching the client's registered list
+// (the OP's "other means" of confirming the redirection target per OIDC RP-Initiated Logout). When no
+// id_token_hint is supplied the resolution is marked PromptRequired so the sign-out flow can confirm
+// the logout with the End-User, as the spec requires in that case.
 func (s *logoutService) Resolve(ctx context.Context, req LogoutRequest) (*LogoutResolution, error) {
-	// Per OIDC RP-Initiated Logout, if post_logout_redirect_uri is supplied the id_token_hint MUST be
-	// supplied too; the OP must not redirect to the URI without a valid hint.
-	if req.PostLogoutRedirectURI != "" && req.IDTokenHint == "" {
-		return nil, errIDTokenHintRequired
-	}
-
 	clientID := req.ClientID
 	if req.IDTokenHint != "" {
 		hintClientID, err := s.clientIDFromIDTokenHint(ctx, req.IDTokenHint)
@@ -207,6 +215,9 @@ func (s *logoutService) Resolve(ctx context.Context, req LogoutRequest) (*Logout
 		AppID:                 client.ID,
 		PostLogoutRedirectURI: req.PostLogoutRedirectURI,
 		State:                 req.State,
+		Headers:               req.Headers,
+		QueryParams:           req.QueryParams,
+		PromptRequired:        req.IDTokenHint == "",
 	}, nil
 }
 
@@ -217,14 +228,47 @@ func (s *logoutService) clientIDFromIDTokenHint(ctx context.Context, idTokenHint
 	if svcErr := s.jwtService.VerifyJWTSignature(ctx, idTokenHint); svcErr != nil {
 		return "", errInvalidIDTokenHint
 	}
+	header, err := jwt.DecodeJWTHeader(idTokenHint)
+	if err != nil {
+		return "", errInvalidIDTokenHint
+	}
+	// The hint must be an ID token, not any other JWT this server signs. An access token issued to an
+	// application with no configured default audience carries aud=client_id, so without this check it
+	// would resolve to a client and be accepted as a hint, which suppresses the End-User sign-out
+	// confirmation.
+	if typ, _ := header["typ"].(string); typ != jwt.TokenTypeJWT {
+		return "", errInvalidIDTokenHint
+	}
 	payload, err := jwt.DecodeJWTPayload(idTokenHint)
 	if err != nil {
+		return "", errInvalidIDTokenHint
+	}
+	if _, isRefreshToken := payload[constants.ClaimAccessTokenSubject]; isRefreshToken {
 		return "", errInvalidIDTokenHint
 	}
 	if iss, _ := payload[constants.ClaimIss].(string); iss != s.issuer {
 		return "", errInvalidIDTokenHint
 	}
 	return audienceClientID(payload), nil
+}
+
+// filterQueryParams returns a copy of the given query-parameter map with the named keys removed.
+func filterQueryParams(params map[string][]string, exclude ...string) map[string][]string {
+	if len(params) == 0 {
+		return params
+	}
+	excluded := make(map[string]struct{}, len(exclude))
+	for _, name := range exclude {
+		excluded[name] = struct{}{}
+	}
+	filtered := make(map[string][]string, len(params))
+	for name, values := range params {
+		if _, drop := excluded[name]; drop {
+			continue
+		}
+		filtered[name] = values
+	}
+	return filtered
 }
 
 // audienceClientID extracts the client id from an ID token. When the token has multiple audiences the

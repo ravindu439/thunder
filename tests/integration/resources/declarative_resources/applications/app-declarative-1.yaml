@@ -3,6 +3,7 @@ id: decl-app-1
 name: Declarative Test Application
 description: A declarative test application for integration testing
 ouId: decl-ou-1
+type: browser
 template: web
 authFlowId: decl-flow-1
 registrationFlowId: decl-reg-flow-1

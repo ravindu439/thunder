@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard, getInitials} from '@thunderid/components';
+import {QueryErrorNotice, SettingsCard, getInitials} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import type {User} from '@thunderid/types';
 import {Box, DataGrid, Avatar} from '@wso2/oxygen-ui';
@@ -50,7 +35,7 @@ export default function ManageUsersSection({organizationUnitId}: ManageUsersSect
   const {t} = useTranslation();
   const dataGridLocaleText = useDataGridLocaleText();
 
-  const {data: usersData, isLoading} = useGetOrganizationUnitUsers(organizationUnitId);
+  const {data: usersData, isLoading, error, refetch} = useGetOrganizationUnitUsers(organizationUnitId);
 
   const columns: DataGrid.GridColDef<User>[] = useMemo(
     () => [
@@ -77,6 +62,7 @@ export default function ManageUsersSection({organizationUnitId}: ManageUsersSect
                   width: 30,
                   height: 30,
                   bgcolor: 'primary.main',
+                  color: 'primary.contrastText',
                   fontSize: '0.875rem',
                 }}
               >
@@ -109,10 +95,34 @@ export default function ManageUsersSection({organizationUnitId}: ManageUsersSect
     [t],
   );
 
+  if (error) {
+    return (
+      <SettingsCard
+        title={t('organizationUnits:edit.users.sections.manage.title', 'Users')}
+        description={t(
+          'organizationUnits:edit.users.sections.manage.description',
+          'View users belonging to this organization unit',
+        )}
+      >
+        <QueryErrorNotice
+          error={error}
+          t={(key, options) => t(key.includes(':') ? key : `organizationUnits:${key}`, options)}
+          variant="inline"
+          onRetry={() => void refetch()}
+          fallbackKey="organizationUnits:edit.users.sections.manage.error"
+          fallbackDefaultValue="Failed to load users"
+        />
+      </SettingsCard>
+    );
+  }
+
   return (
     <SettingsCard
-      title={t('organizationUnits:edit.users.sections.manage.title')}
-      description={t('organizationUnits:edit.users.sections.manage.description')}
+      title={t('organizationUnits:edit.users.sections.manage.title', 'Users')}
+      description={t(
+        'organizationUnits:edit.users.sections.manage.description',
+        'View users belonging to this organization unit',
+      )}
       slotProps={{
         content: {
           sx: {

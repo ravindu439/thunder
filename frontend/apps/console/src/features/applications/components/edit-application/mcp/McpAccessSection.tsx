@@ -1,23 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {zodResolver} from '@hookform/resolvers/zod';
 import {SettingsCard} from '@thunderid/components';
+import {InboundAuthTypes} from '@thunderid/configure-applications';
+import type {Application, OAuth2Config} from '@thunderid/configure-applications';
 import {useGetUserTypes} from '@thunderid/configure-user-types';
 import {
   Autocomplete,
@@ -39,9 +26,6 @@ import {useEffect, useState} from 'react';
 import {Controller, useForm} from 'react-hook-form';
 import {useTranslation} from 'react-i18next';
 import {z} from 'zod';
-import type {Application} from '../../../models/application';
-import {InboundAuthTypes} from '../../../models/inbound-auth';
-import type {OAuth2Config} from '../../../models/oauth';
 import validateMcpRedirectUri from '../../../utils/validateMcpRedirectUri';
 
 /**
@@ -80,7 +64,7 @@ export interface McpAccessSectionProps {
 
 /**
  * Section component for an MCP client's access settings, in order: the allowed user
- * types (which user schemas may authorize this client), its optional client URI, and its
+ * types (which user types can sign up through this client), its optional client URI, and its
  * authorized redirect URIs — matching the React-template General tab's Access card layout.
  *
  * Redirect URIs are validated against the MCP redirect URI rule (loopback or HTTPS) instead
@@ -148,6 +132,11 @@ export default function McpAccessSection({
   const [redirectUris, setRedirectUris] = useState<string[]>(() => oauth2Config?.redirectUris ?? []);
   const [uriErrors, setUriErrors] = useState<Record<number, string>>({});
 
+  // An empty list renders as a bare "Add" button with no field to type into, which reads as
+  // broken rather than "nothing added yet". Show one empty row by default instead; typing into it
+  // (or removing it) operates on the real (currently empty) list via the index above.
+  const displayRedirectUris = redirectUris.length > 0 ? redirectUris : [''];
+
   const updateRedirectUris = (uris: string[]): void => {
     if (!oauth2Config) return;
 
@@ -196,8 +185,11 @@ export default function McpAccessSection({
     }
   };
 
+  // Appends relative to what's on screen (displayRedirectUris), not the possibly-empty backing
+  // `redirectUris` array — otherwise the first click while the list is empty turns [] into [''],
+  // which renders identically to the placeholder row already shown and looks like nothing happened.
   const handleAddUri = (): void => {
-    setRedirectUris((prev) => [...prev, '']);
+    setRedirectUris([...displayRedirectUris, '']);
   };
 
   const handleRemoveUri = (index: number): void => {
@@ -314,7 +306,7 @@ export default function McpAccessSection({
           </Typography>
 
           <Stack spacing={2} id="mcp-redirect-uris-section">
-            {redirectUris.map((uri, index) => (
+            {displayRedirectUris.map((uri, index) => (
               // IMPORTANT: Do not remove the suppression since it affects functionality.
               // eslint-disable-next-line react/no-array-index-key
               <Stack key={index} direction="row" spacing={1} alignItems="flex-start">
@@ -348,7 +340,8 @@ export default function McpAccessSection({
 
             <Box>
               <Button
-                variant="outlined"
+                variant="text"
+                color="primary"
                 size="small"
                 startIcon={<Plus size={16} />}
                 onClick={handleAddUri}

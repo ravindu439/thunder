@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {screen, fireEvent, waitFor, within, renderWithProviders, act, renderHook} from '@thunderid/test-utils';
+import {screen, fireEvent, waitFor, within, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
 import {describe, it, expect, vi, beforeEach, beforeAll} from 'vitest';
 import type {OrganizationUnitListResponse} from '../../models/responses';
@@ -53,9 +38,13 @@ vi.mock('@/api/useGetOrganizationUnits', () => ({
 // Mock ThunderID — stable reference to avoid useCallback churn
 const mockHttpRequest = vi.fn();
 const stableHttp = {request: mockHttpRequest};
-vi.mock('@thunderid/react', () => ({
-  useThunderID: () => ({http: stableHttp}),
-}));
+vi.mock('@thunderid/react', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useThunderID: () => ({http: stableHttp}),
+  };
+});
 
 // Mock useOrganizationUnit hook with React state for reactivity
 // Allow tests to pre-seed expandedItems via mockOrganizationUnitConfig.initialExpandedItems
@@ -88,10 +77,18 @@ vi.mock('@thunderid/contexts', async (importOriginal) => {
 
 // Mock delete hook — controllable per test
 const mockDeleteMutate = vi.fn();
-const mockDeleteHook = {mutate: mockDeleteMutate, isPending: false};
+const mockDeleteReset = vi.fn();
+const mockDeleteHook: {
+  mutate: typeof mockDeleteMutate;
+  isPending: boolean;
+  error: Error | null;
+  reset: typeof mockDeleteReset;
+} = {mutate: mockDeleteMutate, isPending: false, error: null, reset: mockDeleteReset};
 vi.mock('@/api/useDeleteOrganizationUnit', () => ({
   default: () => mockDeleteHook,
 }));
+
+const mockRefetchOrganizationUnits = vi.fn();
 
 describe('OrganizationUnitsTreeView', () => {
   let t: (key: string) => string;
@@ -112,11 +109,16 @@ describe('OrganizationUnitsTreeView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockNavigate.mockReset();
+    mockDeleteMutate.mockReset();
+    mockDeleteReset.mockReset();
+    mockDeleteHook.error = null;
+    mockDeleteHook.isPending = false;
     mockOrganizationUnitConfig.initialExpandedItems = [];
     mockUseGetOrganizationUnits.mockReturnValue({
       data: mockOUData,
       isLoading: false,
       error: null,
+      refetch: mockRefetchOrganizationUnits,
     });
   });
 
@@ -134,14 +136,32 @@ describe('OrganizationUnitsTreeView', () => {
       data: undefined,
       isLoading: false,
       error: new Error('Network error'),
+      refetch: mockRefetchOrganizationUnits,
     });
 
     renderWithProviders(<OrganizationUnitsTreeView />);
 
     await waitFor(() => {
       expect(screen.getByText(t('organizationUnits:listing.error.title'))).toBeInTheDocument();
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:listing.error.unknown'))).toBeInTheDocument();
     });
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  it('should retry the query when Refresh is clicked on the read error state', async () => {
+    mockUseGetOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetchOrganizationUnits,
+    });
+
+    renderWithProviders(<OrganizationUnitsTreeView />);
+
+    const refreshButton = await screen.findByRole('button', {name: /refresh/i});
+    fireEvent.click(refreshButton);
+
+    expect(mockRefetchOrganizationUnits).toHaveBeenCalled();
   });
 
   it('should show fallback error message when error has no message', async () => {
@@ -149,6 +169,7 @@ describe('OrganizationUnitsTreeView', () => {
       data: undefined,
       isLoading: false,
       error: {},
+      refetch: mockRefetchOrganizationUnits,
     });
 
     renderWithProviders(<OrganizationUnitsTreeView />);
@@ -305,7 +326,7 @@ describe('OrganizationUnitsTreeView', () => {
     });
   });
 
-  it('should show success snackbar after successful deletion', async () => {
+  it('should close the dialog and reset tree state after successful deletion', async () => {
     mockDeleteMutate.mockImplementation((_id: string, options: {onSuccess: () => void}) => {
       options.onSuccess();
     });
@@ -327,21 +348,21 @@ describe('OrganizationUnitsTreeView', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByText(t('common:actions.delete')));
 
+    // useDeleteOrganizationUnit's own onSuccess toast covers the success message — the dialog
+    // just closes, it does not render a second success notification of its own.
     await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).toBeInTheDocument();
+      expect(screen.queryByText(t('organizationUnits:delete.dialog.title'))).not.toBeInTheDocument();
     });
   });
 
-  it('should show error snackbar after failed deletion', async () => {
-    mockDeleteMutate.mockImplementation((_id: string, options: {onError: (err: Error) => void}) => {
-      options.onError(
-        Object.assign(new Error('Delete failed'), {
-          response: {data: {code: 'ERR', message: 'fail', description: 'Server error occurred'}},
-        }),
-      );
+  it('should not close the dialog and should show the resolved error inline after failed deletion', async () => {
+    mockDeleteMutate.mockImplementation(() => {
+      mockDeleteHook.error = Object.assign(new Error('Delete failed'), {
+        response: {data: {code: 'ERR'}},
+      });
     });
 
-    renderWithProviders(<OrganizationUnitsTreeView />);
+    const {rerender} = renderWithProviders(<OrganizationUnitsTreeView />);
 
     await waitFor(() => {
       expect(screen.getByText('Root Organization')).toBeInTheDocument();
@@ -357,9 +378,11 @@ describe('OrganizationUnitsTreeView', () => {
     // Use within to scope to the dialog's Delete button (avoids ambiguity with menu item)
     const dialog2 = screen.getByRole('dialog');
     fireEvent.click(within(dialog2).getByText(t('common:actions.delete')));
+    rerender(<OrganizationUnitsTreeView />);
 
     await waitFor(() => {
-      expect(screen.getByText('Server error occurred')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:delete.dialog.title'))).toBeInTheDocument();
+      expect(screen.getByText('Failed to delete organization unit. Please try again.')).toBeInTheDocument();
     });
   });
 
@@ -495,45 +518,6 @@ describe('OrganizationUnitsTreeView', () => {
     await waitFor(() => {
       expect(screen.getByText('Root Organization')).toBeInTheDocument();
       expect(screen.getByText('Engineering')).toBeInTheDocument();
-    });
-  });
-
-  it('should close snackbar when close action is triggered', async () => {
-    // Trigger a success snackbar first
-    mockDeleteMutate.mockImplementation((_id: string, options: {onSuccess: () => void}) => {
-      options.onSuccess();
-    });
-
-    renderWithProviders(<OrganizationUnitsTreeView />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Root Organization')).toBeInTheDocument();
-    });
-
-    // Click row delete action to trigger snackbar
-    fireEvent.click(screen.getAllByLabelText(t('common:actions.delete'))[0]);
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:delete.dialog.title'))).toBeInTheDocument();
-    });
-
-    // Use within to scope to the dialog's Delete button (avoids ambiguity with menu item)
-    const dialog3 = screen.getByRole('dialog');
-    fireEvent.click(within(dialog3).getByText(t('common:actions.delete')));
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).toBeInTheDocument();
-    });
-
-    // Close the snackbar via the Alert close button
-    const alert = screen.getByRole('alert');
-    const alertCloseButton = alert.querySelector('button');
-    if (alertCloseButton) {
-      fireEvent.click(alertCloseButton);
-    }
-
-    await waitFor(() => {
-      expect(screen.queryByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).not.toBeInTheDocument();
     });
   });
 
@@ -885,19 +869,21 @@ describe('OrganizationUnitsTreeView', () => {
     });
   });
 
-  it('should use fallback error message when error.message is missing', async () => {
+  it('should never surface the raw error message, even when the error carries one', async () => {
     const errorWithMessage = {message: 'Server unavailable'};
     mockUseGetOrganizationUnits.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: errorWithMessage,
+      refetch: mockRefetchOrganizationUnits,
     });
 
     renderWithProviders(<OrganizationUnitsTreeView />);
 
     await waitFor(() => {
-      expect(screen.getByText('Server unavailable')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:listing.error.unknown'))).toBeInTheDocument();
     });
+    expect(screen.queryByText('Server unavailable')).not.toBeInTheDocument();
   });
 
   it('should log error when add root navigation fails via keyboard', async () => {
@@ -1038,73 +1024,6 @@ describe('OrganizationUnitsTreeView', () => {
 
     await waitFor(() => {
       expect(stableLogger.error).toHaveBeenCalledWith('Failed to load more root organization units', expect.anything());
-    });
-  });
-
-  it('should close the snackbar automatically after the auto-hide duration', async () => {
-    mockDeleteMutate.mockImplementation((_id: string, options: {onSuccess: () => void}) => {
-      options.onSuccess();
-    });
-
-    renderWithProviders(<OrganizationUnitsTreeView />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Root Organization')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getAllByLabelText(t('common:actions.delete'))[0]);
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:delete.dialog.title'))).toBeInTheDocument();
-    });
-
-    const dialog = screen.getByRole('dialog');
-    fireEvent.click(within(dialog).getByText(t('common:actions.delete')));
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).toBeInTheDocument();
-    });
-
-    await waitFor(
-      () => {
-        expect(
-          screen.queryByText(t('organizationUnits:edit.general.dangerZone.delete.success')),
-        ).not.toBeInTheDocument();
-      },
-      {timeout: 7000},
-    );
-  });
-
-  it('should close the snackbar when clicking outside (clickaway)', async () => {
-    mockDeleteMutate.mockImplementation((_id: string, options: {onSuccess: () => void}) => {
-      options.onSuccess();
-    });
-
-    renderWithProviders(<OrganizationUnitsTreeView />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Root Organization')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getAllByLabelText(t('common:actions.delete'))[0]);
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:delete.dialog.title'))).toBeInTheDocument();
-    });
-
-    const dialog = screen.getByRole('dialog');
-    fireEvent.click(within(dialog).getByText(t('common:actions.delete')));
-
-    await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).toBeInTheDocument();
-    });
-
-    act(() => {
-      fireEvent.click(document.body);
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByText(t('organizationUnits:edit.general.dangerZone.delete.success'))).not.toBeInTheDocument();
     });
   });
 });

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
@@ -76,17 +61,17 @@ const sidebar: SidebarsConfig = {
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/signed-in',
-                  label: '<ThunderIDSignedIn />',
+                  label: '<SignedIn />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/signed-out',
-                  label: '<ThunderIDSignedOut />',
+                  label: '<SignedOut />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/loading',
-                  label: '<ThunderIDLoading />',
+                  label: '<Loading />',
                 },
               ],
             },
@@ -98,17 +83,17 @@ const sidebar: SidebarsConfig = {
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/sign-in-button',
-                  label: '<ThunderIDSignInButton />',
+                  label: '<SignInButton />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/sign-out-button',
-                  label: '<ThunderIDSignOutButton />',
+                  label: '<SignOutButton />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/sign-up-button',
-                  label: '<ThunderIDSignUpButton />',
+                  label: '<SignUpButton />',
                 },
               ],
             },
@@ -120,17 +105,17 @@ const sidebar: SidebarsConfig = {
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/user',
-                  label: '<ThunderIDUser />',
+                  label: '<User />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/user-profile',
-                  label: '<ThunderIDUserProfile />',
+                  label: '<UserProfile />',
                 },
                 {
                   type: 'doc',
                   id: 'sdks/nuxt/apis/components/user-dropdown',
-                  label: '<ThunderIDUserDropdown />',
+                  label: '<UserDropdown />',
                 },
               ],
             },

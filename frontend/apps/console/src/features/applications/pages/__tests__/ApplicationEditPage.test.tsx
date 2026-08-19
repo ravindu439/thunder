@@ -1,29 +1,21 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {UseQueryResult, UseMutationResult} from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
+import {useGetApplication} from '@thunderid/configure-applications';
+import type {Application} from '@thunderid/configure-applications';
 import {render, screen, waitFor, fireEvent, within} from '@thunderid/test-utils';
+import {useState} from 'react';
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest';
-import useGetApplication from '../../api/useGetApplication';
 import useUpdateApplication from '../../api/useUpdateApplication';
+import EditAccessSettings from '../../components/edit-application/access/EditAccessSettings';
 import EditAdvancedSettings from '../../components/edit-application/advanced-settings/EditAdvancedSettings';
-import type {Application} from '../../models/application';
+import EditCustomizationSettings from '../../components/edit-application/customization-settings/EditCustomizationSettings';
+import McpConnectTab from '../../components/edit-application/mcp/McpConnectTab';
+import EditTokenSettings from '../../components/edit-application/token-settings/EditTokenSettings';
+import EditTokenSettingsTabs from '../../components/edit-application/token-settings/EditTokenSettingsTabs';
+import ApplicationConstants from '../../constants/application-constants';
 import {getIntegrationGuideForTemplate} from '../../utils/getIntegrationGuidesForTemplate';
 import getTemplateMetadata from '../../utils/getTemplateMetadata';
 import ApplicationEditPage from '../ApplicationEditPage';
@@ -35,38 +27,46 @@ vi.mock('react-router', async () => {
     ...actual,
     useNavigate: vi.fn(() => vi.fn()),
     useParams: vi.fn(() => ({applicationId: 'test-app-id'})),
+    useLocation: vi.fn(() => ({state: null})),
   };
 });
 
+const APPLICATIONS_TRANSLATIONS: Record<string, string> = {
+  'applications:edit.page.back': 'Back to Applications',
+  'applications:edit.page.logoUpdate.label': 'Update Logo',
+  'applications:edit.page.loading': 'Loading application...',
+  'applications:edit.page.notFound.title': 'Application Not Found',
+  'applications:edit.page.notFound.description': 'The application you are looking for does not exist.',
+  'applications:edit.page.description.placeholder': 'Add a description',
+  'applications:edit.page.description.empty': 'No description provided',
+  'applications:edit.page.tabs.overview': 'Overview',
+  'applications:edit.page.tabs.general': 'General',
+  'applications:edit.page.tabs.flows': 'Flows',
+  'applications:edit.page.tabs.customization': 'Customization',
+  'applications:edit.page.tabs.token': 'Token',
+  'applications:edit.page.tabs.advanced': 'Advanced',
+  'applications:edit.page.unsavedChanges': 'You have unsaved changes',
+  'applications:edit.page.reset': 'Reset',
+  'applications:edit.page.save': 'Save Changes',
+  'applications:edit.page.saving': 'Saving...',
+  'applications:update.error': 'Failed to update application. Please try again.',
+  'applications:errors.APP-1020': 'An application with this name already exists. Choose a different name.',
+};
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
-      const translations: Record<string, string> = {
-        'applications:edit.page.back': 'Back to Applications',
-        'applications:edit.page.logoUpdate.label': 'Update Logo',
-        'applications:edit.page.loading': 'Loading application...',
-        'applications:edit.page.notFound.title': 'Application Not Found',
-        'applications:edit.page.notFound.description': 'The application you are looking for does not exist.',
-        'applications:edit.page.description.placeholder': 'Add a description',
-        'applications:edit.page.description.empty': 'No description provided',
-        'applications:edit.page.tabs.overview': 'Overview',
-        'applications:edit.page.tabs.general': 'General',
-        'applications:edit.page.tabs.flows': 'Flows',
-        'applications:edit.page.tabs.customization': 'Customization',
-        'applications:edit.page.tabs.token': 'Token',
-        'applications:edit.page.tabs.advanced': 'Advanced Settings',
-        'applications:edit.page.unsavedChanges': 'You have unsaved changes',
-        'applications:edit.page.reset': 'Reset',
-        'applications:edit.page.save': 'Save Changes',
-        'applications:edit.page.saving': 'Saving...',
-      };
-      return translations[key] || key;
+    t: (key: string, fallbackOrOptions?: string | {defaultValue?: string}) => {
+      if (APPLICATIONS_TRANSLATIONS[key] !== undefined) return APPLICATIONS_TRANSLATIONS[key];
+      if (typeof fallbackOrOptions === 'string') return fallbackOrOptions;
+      if (fallbackOrOptions && 'defaultValue' in fallbackOrOptions) return fallbackOrOptions.defaultValue ?? key;
+      return key;
     },
   }),
 }));
 
-vi.mock('../../api/useGetApplication', () => ({
-  default: vi.fn(),
+vi.mock('@thunderid/configure-applications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-applications')>()),
+  useGetApplication: vi.fn(),
 }));
 
 vi.mock('../../api/useUpdateApplication', () => ({
@@ -83,24 +83,12 @@ vi.mock('../../utils/getIntegrationGuidesForTemplate', () => ({
 }));
 
 // Mock child components
-vi.mock('../../components/edit-application/general-settings/EditGeneralSettings', () => ({
-  default: vi.fn(
-    ({
-      onCopyToClipboard,
-      copiedField,
-    }: {
-      onCopyToClipboard?: (text: string, fieldName: string) => void;
-      copiedField?: string | null;
-    }) => (
-      <div data-testid="edit-general-settings">
-        General Settings
-        {copiedField && <span data-testid="copied-field">{copiedField}</span>}
-        <button type="button" data-testid="copy-button" onClick={() => onCopyToClipboard?.('test-text', 'clientId')}>
-          Copy
-        </button>
-      </div>
-    ),
-  ),
+vi.mock('../../components/edit-application/access/EditAccessSettings', () => ({
+  default: vi.fn(() => <div data-testid="edit-access-settings">Access Settings</div>),
+}));
+
+vi.mock('../../components/edit-application/credentials/EditCredentialsSettings', () => ({
+  default: vi.fn(() => <div data-testid="edit-credentials-settings">Credentials Settings</div>),
 }));
 
 vi.mock('../../components/edit-application/flows-settings/EditFlowsSettings', () => ({
@@ -112,15 +100,53 @@ vi.mock('../../components/edit-application/customization-settings/EditCustomizat
 }));
 
 vi.mock('../../components/edit-application/token-settings/EditTokenSettings', () => ({
+  default: vi.fn(function MockEditTokenSettings() {
+    // Mimics EditTokenSettings' real react-hook-form-backed Token Validity fields
+    const [clicks, setClicks] = useState(0);
+    return (
+      <div data-testid="edit-token-settings">
+        Token Settings, Clicks: {clicks}
+        <button type="button" data-testid="edit-token-settings-bump" onClick={() => setClicks((c) => c + 1)}>
+          Bump
+        </button>
+      </div>
+    );
+  }),
+}));
+
+vi.mock('../../components/edit-application/token-settings/EditTokenSettingsTabs', () => ({
   default: vi.fn(() => <div data-testid="edit-token-settings">Token Settings</div>),
 }));
 
 vi.mock('../../components/edit-application/advanced-settings/EditAdvancedSettings', () => ({
-  default: vi.fn(() => <div data-testid="edit-advanced-settings">Advanced Settings</div>),
+  default: vi.fn(({onDeleteSuccess}: {onDeleteSuccess?: () => void}) => (
+    <div data-testid="edit-advanced-settings">
+      Advanced
+      {onDeleteSuccess && (
+        <button type="button" data-testid="trigger-delete-success" onClick={onDeleteSuccess}>
+          Delete Success
+        </button>
+      )}
+    </div>
+  )),
 }));
 
 vi.mock('../../components/edit-application/integration-guides/IntegrationGuides', () => ({
-  default: vi.fn(() => <div data-testid="integration-guides">Integration Guides</div>),
+  default: vi.fn(({onGoToFlows, onGoToCustomization}: {onGoToFlows?: () => void; onGoToCustomization?: () => void}) => (
+    <div data-testid="integration-guides">
+      Integration Guides
+      {onGoToFlows && (
+        <button type="button" data-testid="go-to-flows" onClick={onGoToFlows}>
+          Go to Flows
+        </button>
+      )}
+      {onGoToCustomization && (
+        <button type="button" data-testid="go-to-customization" onClick={onGoToCustomization}>
+          Go to Customization
+        </button>
+      )}
+    </div>
+  )),
 }));
 
 vi.mock('../../components/edit-application/mcp/McpConnectTab', () => ({
@@ -134,24 +160,17 @@ vi.mock('../../components/edit-application/mcp/McpConnectTab', () => ({
   )),
 }));
 
-vi.mock('@thunderid/components', async () => {
+vi.mock('@thunderid/components', async (importOriginal) => {
   const React = await import('react');
+  const actual = await importOriginal<typeof import('@thunderid/components')>();
   return {
+    ...actual,
+    AppleIcon: vi.fn(() => null),
+    AndroidLogo: vi.fn(() => null),
+    FlutterLogo: vi.fn(() => null),
     CopyableId: vi.fn(() => null),
     EmojiPicker: vi.fn(() => null),
     PageLoadingAnimation: vi.fn(() => <div data-testid="page-loading-animation" />),
-    ResourceLogoDialog: vi.fn(
-      ({open, onClose, onSelect}: {open: boolean; onClose: () => void; onSelect: (value: string) => void}) => (
-        <div data-testid="resource-logo-dialog" style={{display: open ? 'block' : 'none'}}>
-          <button type="button" onClick={() => onSelect('emoji:🚀')}>
-            Select Icon
-          </button>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      ),
-    ),
     UnsavedChangesBar: vi.fn(
       ({
         message,
@@ -160,6 +179,7 @@ vi.mock('@thunderid/components', async () => {
         savingLabel,
         isSaving,
         saveDisabled,
+        error,
         onReset,
         onSave,
       }: {
@@ -169,10 +189,12 @@ vi.mock('@thunderid/components', async () => {
         savingLabel: string;
         isSaving: boolean;
         saveDisabled?: boolean;
+        error?: string;
         onReset: () => void;
         onSave: () => void;
       }) => (
         <div data-testid="unsaved-changes-bar">
+          {error && <div role="alert">{error}</div>}
           <span>{message}</span>
           <button type="button" onClick={onReset}>
             {resetLabel}
@@ -233,6 +255,53 @@ const mockUseUpdateApplication = useUpdateApplication as ReturnType<typeof vi.fn
 const mockGetTemplateMetadata = getTemplateMetadata as ReturnType<typeof vi.fn>;
 const mockGetIntegrationGuidesForTemplate = getIntegrationGuideForTemplate as ReturnType<typeof vi.fn>;
 
+// Edits the inline name/description field displaying `currentValue` to `newValue` and commits with Enter.
+async function editInlineField(user: ReturnType<typeof userEvent.setup>, currentValue: string, newValue: string) {
+  const section = screen.getByText(currentValue).closest('div');
+  const editButton = section?.querySelector('button');
+  await user.click(editButton!);
+
+  const input = screen.getByRole('textbox');
+  await user.clear(input);
+  await user.type(input, `${newValue}{Enter}`);
+}
+
+async function mountSectionTab(user: ReturnType<typeof userEvent.setup>, tabName: string, testId: string) {
+  await user.click(screen.getByRole('tab', {name: tabName}));
+  await waitFor(() => {
+    expect(screen.getByTestId(testId)).toBeInTheDocument();
+  });
+}
+
+// Edits a field, clicks reset, and returns the sectionResetKey `mockedComponent` was called with
+// before and after the click. The caller is responsible for asserting on the returned keys.
+async function editFieldAndResetSection<P>(
+  user: ReturnType<typeof userEvent.setup>,
+  mockedComponent: (props: P) => unknown,
+  currentName: string,
+  newName: string,
+): Promise<{initialKey: number | undefined; keyAfterReset: number | undefined}> {
+  const readSectionResetKey = () =>
+    (vi.mocked(mockedComponent).mock.calls.at(-1)?.[0] as {sectionResetKey?: number} | undefined)?.sectionResetKey;
+
+  const initialKey = readSectionResetKey();
+
+  await editInlineField(user, currentName, newName);
+
+  await waitFor(() => {
+    expect(screen.getByRole('button', {name: /reset/i})).toBeInTheDocument();
+  });
+  await user.click(screen.getByRole('button', {name: /reset/i}));
+
+  let keyAfterReset: number | undefined;
+  await waitFor(() => {
+    keyAfterReset = readSectionResetKey();
+    expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+  });
+
+  return {initialKey, keyAfterReset};
+}
+
 describe('ApplicationEditPage', () => {
   const mockApplication: Application = {
     id: 'test-app-id',
@@ -241,6 +310,7 @@ describe('ApplicationEditPage', () => {
     template: 'react',
     logoUrl: 'https://example.com/logo.png',
     url: 'https://example.com',
+    allowedUserTypes: ['user'],
     inboundAuthConfig: [
       {
         type: 'oauth2',
@@ -285,6 +355,7 @@ describe('ApplicationEditPage', () => {
       isPending: false,
       isError: false,
       error: null,
+      reset: vi.fn(),
     } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
   });
 
@@ -396,7 +467,8 @@ describe('ApplicationEditPage', () => {
     it('should render all tabs without integration guides', () => {
       renderComponent();
 
-      expect(screen.getByRole('tab', {name: /general/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /access/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /credentials/i})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: /flows/i})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: /customization/i})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: /token/i})).toBeInTheDocument();
@@ -411,13 +483,13 @@ describe('ApplicationEditPage', () => {
       expect(screen.getByRole('tab', {name: /overview/i})).toBeInTheDocument();
     });
 
-    it('should display general settings tab by default when no integration guides', () => {
-      // Mock returns null by default (no integration guides)
+    it('should display the overview tab by default even when there are no integration guides', () => {
+      // Mock returns null by default (no integration guides) — the Overview tab still shows,
+      // since it also surfaces application identifiers and endpoints regardless of guides.
       renderComponent();
 
-      // When there are no integration guides, general tab should be first and selected
-      const generalTab = screen.getByRole('tab', {name: /general/i});
-      expect(generalTab).toHaveAttribute('aria-selected', 'true');
+      const overviewTab = screen.getByRole('tab', {name: /overview/i});
+      expect(overviewTab).toHaveAttribute('aria-selected', 'true');
     });
 
     it('should display overview tab by default when integration guides are available', async () => {
@@ -427,6 +499,30 @@ describe('ApplicationEditPage', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('integration-guides')).toBeInTheDocument();
+      });
+    });
+
+    it('should switch to access tab when clicked', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      const accessTab = screen.getByRole('tab', {name: /access/i});
+      await user.click(accessTab);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-access-settings')).toBeInTheDocument();
+      });
+    });
+
+    it('should switch to credentials tab when clicked', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      const credentialsTab = screen.getByRole('tab', {name: /credentials/i});
+      await user.click(credentialsTab);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-credentials-settings')).toBeInTheDocument();
       });
     });
 
@@ -475,6 +571,28 @@ describe('ApplicationEditPage', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('edit-advanced-settings')).toBeInTheDocument();
+      });
+    });
+
+    it('should switch to flows tab when onGoToFlows is triggered from IntegrationGuides', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      await user.click(screen.getByTestId('go-to-flows'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-flows-settings')).toBeInTheDocument();
+      });
+    });
+
+    it('should switch to customization tab when onGoToCustomization is triggered from IntegrationGuides', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      await user.click(screen.getByTestId('go-to-customization'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-customization-settings')).toBeInTheDocument();
       });
     });
 
@@ -756,6 +874,78 @@ describe('ApplicationEditPage', () => {
       });
     });
 
+    it('keeps save enabled for a user-facing client with a redirect URI but no allowed user types', async () => {
+      const user = userEvent.setup();
+      mockUseGetApplication.mockReturnValue({
+        data: {...mockApplication, allowedUserTypes: []},
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as unknown as UseQueryResult<Application>);
+      renderComponent();
+
+      const nameSection = screen.getByText('Test Application').closest('div');
+      const editButton = nameSection?.querySelector('button');
+      await user.click(editButton!);
+      const nameInput = screen.getByRole('textbox');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Application{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', {name: /save changes/i})).toBeEnabled();
+      });
+    });
+
+    it('disables save with a named issue when authorization_code has no redirect URI', async () => {
+      const user = userEvent.setup();
+      mockUseGetApplication.mockReturnValue({
+        data: {
+          ...mockApplication,
+          inboundAuthConfig: [
+            {type: 'oauth2', config: {grantTypes: ['authorization_code'], responseTypes: ['code'], redirectUris: []}},
+          ],
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as unknown as UseQueryResult<Application>);
+      renderComponent();
+
+      const nameSection = screen.getByText('Test Application').closest('div');
+      const editButton = nameSection?.querySelector('button');
+      await user.click(editButton!);
+      const nameInput = screen.getByRole('textbox');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Application{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByText(/A redirect URI is required\./)).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', {name: /save changes/i})).toBeDisabled();
+    });
+
+    it('freezes the flows tab when no user-facing grant is granted', async () => {
+      const user = userEvent.setup();
+      mockUseGetApplication.mockReturnValue({
+        data: {
+          ...mockApplication,
+          inboundAuthConfig: [{type: 'oauth2', config: {grantTypes: ['client_credentials'], responseTypes: []}}],
+        },
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as unknown as UseQueryResult<Application>);
+      renderComponent();
+
+      await user.click(screen.getByRole('tab', {name: /flows/i}));
+
+      expect(
+        screen.getByText(
+          'These settings apply only to user-facing flows. Enable a user-facing grant (e.g. authorization code) in the Advanced tab to configure them.',
+        ),
+      ).toBeInTheDocument();
+    });
+
     it('should display reset and save buttons in action bar', async () => {
       const user = userEvent.setup();
       renderComponent();
@@ -772,6 +962,63 @@ describe('ApplicationEditPage', () => {
       await waitFor(() => {
         expect(screen.getByRole('button', {name: /reset/i})).toBeInTheDocument();
         expect(screen.getByRole('button', {name: /save changes/i})).toBeInTheDocument();
+      });
+    });
+
+    it('should hide the action bar when a field is manually retyped back to its original value', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      await editInlineField(user, 'Test Application', 'Updated Application');
+
+      await waitFor(() => {
+        expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+      });
+
+      // Retype the exact original value
+      await editInlineField(user, 'Updated Application', 'Test Application');
+
+      await waitFor(() => {
+        expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+      });
+    });
+
+    it('should discard a rename that exceeds the maximum length', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      const section = screen.getByText('Test Application').closest('div');
+      await user.click(section!.querySelector('button')!);
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, {target: {value: 'a'.repeat(ApplicationConstants.NAME_MAX_LENGTH + 1)}});
+      fireEvent.keyDown(input, {key: 'Enter'});
+
+      await waitFor(() => {
+        expect(screen.getByText('Test Application')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+    });
+
+    it('should keep the action bar visible if only one of two edited fields is reverted', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      // Edit name
+      await editInlineField(user, 'Test Application', 'Updated Application');
+
+      // Edit description
+      await editInlineField(user, 'Test application description', 'Updated description');
+
+      await waitFor(() => {
+        expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+      });
+
+      // Revert only the name
+      await editInlineField(user, 'Updated Application', 'Test Application');
+
+      // Description is still changed, so the bar must stay visible
+      await waitFor(() => {
+        expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
       });
     });
 
@@ -801,6 +1048,54 @@ describe('ApplicationEditPage', () => {
       });
     });
 
+    it('should bump sectionResetKey passed to EditAccessSettings when reset is clicked', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      // EditAccessSettings only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Access', 'edit-access-settings');
+
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        EditAccessSettings,
+        'Test Application',
+        'Updated Application',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+    });
+
+    it('should bump sectionResetKey passed to EditCustomizationSettings when reset is clicked', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      // EditCustomizationSettings only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Customization', 'edit-customization-settings');
+
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        EditCustomizationSettings,
+        'Test Application',
+        'Updated Application',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+    });
+
+    it('should bump sectionResetKey passed to EditTokenSettingsTabs when reset is clicked', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      // EditTokenSettingsTabs only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Token', 'edit-token-settings');
+
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        EditTokenSettingsTabs,
+        'Test Application',
+        'Updated Application',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+    });
+
     it('should save changes when save button is clicked', async () => {
       const user = userEvent.setup();
       const mockMutateAsync = vi.fn().mockResolvedValue(mockApplication);
@@ -811,6 +1106,7 @@ describe('ApplicationEditPage', () => {
         isPending: false,
         isError: false,
         error: null,
+        reset: vi.fn(),
       } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
 
       renderComponent();
@@ -841,6 +1137,47 @@ describe('ApplicationEditPage', () => {
       });
     });
 
+    it('should bump sectionResetKey passed to EditAccessSettings when save succeeds', async () => {
+      const user = userEvent.setup();
+      mockUseUpdateApplication.mockReturnValue({
+        mutate: mockUpdateApplicationMutate,
+        mutateAsync: vi.fn().mockResolvedValue(mockApplication),
+        isPending: false,
+        isError: false,
+        error: null,
+        reset: vi.fn(),
+      } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
+
+      // The bump only fires after refetch() resolves
+      mockUseGetApplication.mockReturnValue({
+        data: mockApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+        refetch: vi.fn().mockResolvedValue({data: mockApplication}),
+      } as unknown as UseQueryResult<Application>);
+
+      renderComponent();
+
+      // EditAccessSettings only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Access', 'edit-access-settings');
+
+      const initialKey = vi.mocked(EditAccessSettings).mock.calls.at(-1)?.[0].sectionResetKey;
+
+      await editInlineField(user, 'Test Application', 'Updated Application');
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', {name: /save changes/i})).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', {name: /save changes/i}));
+
+      await waitFor(() => {
+        const keyAfterSave = vi.mocked(EditAccessSettings).mock.calls.at(-1)?.[0].sectionResetKey;
+        expect(keyAfterSave).toBe((initialKey ?? 0) + 1);
+      });
+    });
+
     it('should disable save button while saving', async () => {
       const user = userEvent.setup();
 
@@ -850,6 +1187,7 @@ describe('ApplicationEditPage', () => {
         isPending: true,
         isError: false,
         error: null,
+        reset: vi.fn(),
       } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
 
       renderComponent();
@@ -869,6 +1207,31 @@ describe('ApplicationEditPage', () => {
       });
     });
 
+    it('should navigate back when onDeleteSuccess is triggered from EditAdvancedSettings', async () => {
+      const mockNavigate = vi.fn();
+      const {useNavigate} = await import('react-router');
+      (useNavigate as ReturnType<typeof vi.fn>).mockReturnValue(mockNavigate);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      const advancedTab = screen.getByRole('tab', {name: /advanced/i});
+      await user.click(advancedTab);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-advanced-settings')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('trigger-delete-success'));
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalled();
+      });
+
+      // Restore the default mock
+      (useNavigate as ReturnType<typeof vi.fn>).mockReturnValue(vi.fn());
+    });
+
     it('should hide action bar after successful save', async () => {
       const user = userEvent.setup();
       const mockMutateAsync = vi.fn().mockResolvedValue({...mockApplication, name: 'Updated Application'});
@@ -879,6 +1242,7 @@ describe('ApplicationEditPage', () => {
         isPending: false,
         isError: false,
         error: null,
+        reset: vi.fn(),
       } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
 
       renderComponent();
@@ -914,9 +1278,9 @@ describe('ApplicationEditPage', () => {
     it('should have proper ARIA labels for tabs', () => {
       renderComponent();
 
-      const generalTab = screen.getByRole('tab', {name: /general/i});
-      expect(generalTab).toHaveAttribute('id');
-      expect(generalTab).toHaveAttribute('aria-controls');
+      const accessTab = screen.getByRole('tab', {name: /access/i});
+      expect(accessTab).toHaveAttribute('id');
+      expect(accessTab).toHaveAttribute('aria-controls');
     });
 
     it('should show editable input during inline editing', async () => {
@@ -964,21 +1328,23 @@ describe('ApplicationEditPage', () => {
   });
 
   describe('Error Handling', () => {
-    it('should display error message from error object', () => {
-      const errorMessage = 'Custom error message';
+    it('should resolve a mapped error code instead of raw server text', () => {
       mockUseGetApplication.mockReturnValue({
         data: undefined,
         isLoading: false,
         isError: true,
-        error: {message: errorMessage},
+        error: {message: 'raw server text', response: {data: {code: 'APP-1020'}}},
       } as unknown as UseQueryResult<Application>);
 
       renderComponent();
 
-      expect(screen.getByText(errorMessage)).toBeInTheDocument();
+      expect(
+        screen.getByText('An application with this name already exists. Choose a different name.'),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('raw server text')).not.toBeInTheDocument();
     });
 
-    it('should display default error message when error has no message', () => {
+    it('should display a generic fallback message when the error has no mapped code', () => {
       mockUseGetApplication.mockReturnValue({
         data: undefined,
         isLoading: false,
@@ -988,7 +1354,7 @@ describe('ApplicationEditPage', () => {
 
       renderComponent();
 
-      expect(screen.getByText('applications:edit.page.error')).toBeInTheDocument();
+      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
     });
 
     it('should handle save failure gracefully', async () => {
@@ -1001,6 +1367,7 @@ describe('ApplicationEditPage', () => {
         isPending: false,
         isError: false,
         error: null,
+        reset: vi.fn(),
       } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
 
       renderComponent();
@@ -1042,6 +1409,7 @@ describe('ApplicationEditPage', () => {
         isPending: false,
         isError: false,
         error: null,
+        reset: vi.fn(),
       } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
 
       renderComponent();
@@ -1068,6 +1436,120 @@ describe('ApplicationEditPage', () => {
 
       // Restore original mock
       (useParams as ReturnType<typeof vi.fn>).mockReturnValue({applicationId: 'test-app-id'});
+    });
+
+    it('should display an update error inline in the save bar, not a toast', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+
+      mockUseUpdateApplication.mockReturnValue({
+        mutate: mockUpdateApplicationMutate,
+        mutateAsync: vi.fn(),
+        isPending: false,
+        isError: true,
+        error: Object.assign(new Error('Request failed'), {response: {data: {code: 'APP-1020'}}}),
+        reset: mockReset,
+      } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
+
+      renderComponent();
+
+      // Make a change to trigger the floating save bar
+      const nameSection = screen.getByText('Test Application').closest('div');
+      const editButton = nameSection?.querySelector('button');
+      await user.click(editButton!);
+
+      const nameInput = screen.getByRole('textbox');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Application{Enter}');
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('An application with this name already exists. Choose a different name.'),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it('should clear the update error when Reset is clicked', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+
+      mockUseUpdateApplication.mockReturnValue({
+        mutate: mockUpdateApplicationMutate,
+        mutateAsync: vi.fn(),
+        isPending: false,
+        isError: true,
+        error: new Error('Request failed'),
+        reset: mockReset,
+      } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
+
+      renderComponent();
+
+      const nameSection = screen.getByText('Test Application').closest('div');
+      const editButton = nameSection?.querySelector('button');
+      await user.click(editButton!);
+
+      const nameInput = screen.getByRole('textbox');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Application{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', {name: /reset/i})).toBeInTheDocument();
+      });
+
+      const resetButton = screen.getByRole('button', {name: /reset/i});
+      await user.click(resetButton);
+
+      expect(mockReset).toHaveBeenCalled();
+    });
+
+    it('should clear a stale update error as soon as another field changes', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+
+      mockUseUpdateApplication.mockReturnValue({
+        mutate: mockUpdateApplicationMutate,
+        mutateAsync: vi.fn(),
+        isPending: false,
+        isError: true,
+        error: new Error('Request failed'),
+        reset: mockReset,
+      } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
+
+      renderComponent();
+
+      const nameSection = screen.getByText('Test Application').closest('div');
+      const editButton = nameSection?.querySelector('button');
+      await user.click(editButton!);
+
+      const nameInput = screen.getByRole('textbox');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Application{Enter}');
+
+      expect(mockReset).toHaveBeenCalled();
+    });
+
+    it('should clear a stale update error when the logo changes', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+
+      mockUseUpdateApplication.mockReturnValue({
+        mutate: mockUpdateApplicationMutate,
+        mutateAsync: vi.fn(),
+        isPending: false,
+        isError: true,
+        error: new Error('Request failed'),
+        reset: mockReset,
+      } as unknown as UseMutationResult<Application, Error, Partial<Application>>);
+
+      renderComponent();
+
+      // The logo goes through ResourceAvatar.onSelect, which sets editedApp directly rather than
+      // going through handleFieldChange, so it needs its own reset.
+      await user.click(screen.getByRole('img'));
+      const modal = screen.getByTestId('emoji-picker');
+      await user.click(within(modal).getByRole('button', {name: /select icon/i}));
+
+      expect(mockReset).toHaveBeenCalled();
     });
   });
 
@@ -1238,59 +1720,6 @@ describe('ApplicationEditPage', () => {
     });
   });
 
-  describe('Copy to Clipboard', () => {
-    const originalClipboard = navigator.clipboard;
-
-    afterEach(() => {
-      Object.defineProperty(navigator, 'clipboard', {
-        value: originalClipboard,
-        writable: true,
-        configurable: true,
-      });
-    });
-
-    it('should copy text to clipboard when copy button is clicked', async () => {
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, 'clipboard', {
-        value: {writeText: writeTextMock},
-        writable: true,
-        configurable: true,
-      });
-
-      renderComponent();
-
-      fireEvent.click(screen.getByTestId('copy-button'));
-
-      await waitFor(() => {
-        expect(writeTextMock).toHaveBeenCalledWith('test-text');
-      });
-
-      await waitFor(() => {
-        expect(screen.getByTestId('copied-field')).toHaveTextContent('clientId');
-      });
-    });
-
-    it('should handle clipboard write failure gracefully', async () => {
-      const writeTextMock = vi.fn().mockRejectedValue(new Error('Clipboard error'));
-      Object.defineProperty(navigator, 'clipboard', {
-        value: {writeText: writeTextMock},
-        writable: true,
-        configurable: true,
-      });
-
-      renderComponent();
-
-      fireEvent.click(screen.getByTestId('copy-button'));
-
-      await waitFor(() => {
-        expect(writeTextMock).toHaveBeenCalledWith('test-text');
-      });
-
-      // Component should still be functional after error
-      expect(screen.getByText('Test Application')).toBeInTheDocument();
-    });
-  });
-
   describe('Avatar Image Error', () => {
     it('should hide avatar image when image fails to load', () => {
       renderComponent();
@@ -1393,18 +1822,18 @@ describe('ApplicationEditPage', () => {
   });
 
   describe('Tab Navigation with Integration Guides', () => {
-    it('should switch to general tab when overview is first tab', async () => {
+    it('should switch to access tab when overview is first tab', async () => {
       const user = userEvent.setup();
       mockGetIntegrationGuidesForTemplate.mockReturnValue(['react-vite']);
 
       renderComponent();
 
-      // Click General tab (second tab when integration guides are present)
-      const generalTab = screen.getByRole('tab', {name: /general/i});
-      await user.click(generalTab);
+      // Click Access tab (second tab when integration guides are present)
+      const accessTab = screen.getByRole('tab', {name: /access/i});
+      await user.click(accessTab);
 
       await waitFor(() => {
-        expect(screen.getByTestId('edit-general-settings')).toBeInTheDocument();
+        expect(screen.getByTestId('edit-access-settings')).toBeInTheDocument();
       });
     });
 
@@ -1544,10 +1973,10 @@ describe('ApplicationEditPage', () => {
       expect(screen.getByRole('tab', {name: 'Flows'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Customization'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Token'})).toBeInTheDocument();
-      expect(screen.getByRole('tab', {name: 'Advanced Settings'})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: 'Advanced'})).toBeInTheDocument();
     });
 
-    it('renders the General tab panel by default', () => {
+    it('renders the Overview tab panel by default, and the General tab panel once selected', async () => {
       mockUseGetApplication.mockReturnValue({
         data: mockMcpApplication,
         isLoading: false,
@@ -1555,9 +1984,51 @@ describe('ApplicationEditPage', () => {
         error: null,
       } as UseQueryResult<Application>);
 
+      const user = userEvent.setup();
       renderComponent();
 
+      expect(screen.getByTestId('integration-guides')).toBeInTheDocument();
+      expect(screen.queryByTestId('mcp-connect-tab')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('tab', {name: 'General'}));
+
       expect(screen.getByTestId('mcp-connect-tab')).toBeInTheDocument();
+    });
+
+    it('should switch to flows tab when onGoToFlows is triggered from MCP overview', async () => {
+      mockUseGetApplication.mockReturnValue({
+        data: mockMcpApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as UseQueryResult<Application>);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      await user.click(screen.getByTestId('go-to-flows'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-flows-settings')).toBeInTheDocument();
+      });
+    });
+
+    it('should switch to customization tab when onGoToCustomization is triggered from MCP overview', async () => {
+      mockUseGetApplication.mockReturnValue({
+        data: mockMcpApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as UseQueryResult<Application>);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      await user.click(screen.getByTestId('go-to-customization'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('edit-customization-settings')).toBeInTheDocument();
+      });
     });
 
     it('hides the Flows and Customization tabs for a machine-to-machine client', () => {
@@ -1572,7 +2043,7 @@ describe('ApplicationEditPage', () => {
 
       expect(screen.getByRole('tab', {name: 'General'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Token'})).toBeInTheDocument();
-      expect(screen.getByRole('tab', {name: 'Advanced Settings'})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: 'Advanced'})).toBeInTheDocument();
       expect(screen.queryByRole('tab', {name: 'Flows'})).not.toBeInTheDocument();
       expect(screen.queryByRole('tab', {name: 'Customization'})).not.toBeInTheDocument();
     });
@@ -1588,7 +2059,7 @@ describe('ApplicationEditPage', () => {
       const user = userEvent.setup();
       renderComponent();
 
-      await user.click(screen.getByRole('tab', {name: 'Advanced Settings'}));
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
 
       await waitFor(() => {
         expect(screen.getByTestId('edit-advanced-settings')).toBeInTheDocument();
@@ -1596,6 +2067,83 @@ describe('ApplicationEditPage', () => {
 
       const lastCallProps = vi.mocked(EditAdvancedSettings).mock.calls.at(-1)?.[0];
       expect(lastCallProps?.allowedGrantTypes).toEqual(['authorization_code', 'refresh_token', 'client_credentials']);
+    });
+
+    it('should bump sectionResetKey passed to McpConnectTab when reset is clicked', async () => {
+      mockUseGetApplication.mockReturnValue({
+        data: mockMcpApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as UseQueryResult<Application>);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      // McpConnectTab only mounts once its General TabPanel is active
+      await mountSectionTab(user, 'General', 'mcp-connect-tab');
+
+      // Make a change via the page header, which is shared across MCP and non-MCP layouts
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        McpConnectTab,
+        'Test MCP Client',
+        'Updated MCP Client',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+    });
+
+    it('should bump sectionResetKey passed to EditCustomizationSettings when reset is clicked in an mcp-client', async () => {
+      mockUseGetApplication.mockReturnValue({
+        data: mockMcpApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as UseQueryResult<Application>);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      // EditCustomizationSettings only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Customization', 'edit-customization-settings');
+
+      // Make a change via the page header, which is shared across MCP and non-MCP layouts
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        EditCustomizationSettings,
+        'Test MCP Client',
+        'Updated MCP Client',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+    });
+
+    it('does not remount EditTokenSettings, but bumps sectionResetKey, when reset is clicked in an mcp-client', async () => {
+      mockUseGetApplication.mockReturnValue({
+        data: mockMcpApplication,
+        isLoading: false,
+        isError: false,
+        error: null,
+      } as UseQueryResult<Application>);
+
+      const user = userEvent.setup();
+      renderComponent();
+
+      // EditTokenSettings only mounts once its TabPanel is active
+      await mountSectionTab(user, 'Token', 'edit-token-settings');
+
+      await user.click(screen.getByTestId('edit-token-settings-bump'));
+      expect(screen.getByTestId('edit-token-settings')).toHaveTextContent('Clicks: 1');
+
+      // Make a change via the page header, which is shared across MCP and non-MCP layouts
+      const {initialKey, keyAfterReset} = await editFieldAndResetSection(
+        user,
+        EditTokenSettings,
+        'Test MCP Client',
+        'Updated MCP Client',
+      );
+      expect(keyAfterReset).toBe((initialKey ?? 0) + 1);
+
+      expect(screen.getByTestId('edit-token-settings')).toHaveTextContent('Clicks: 1');
     });
 
     it('locks the PKCE constraint for a user-delegated mcp-client Advanced tab', async () => {
@@ -1609,7 +2157,7 @@ describe('ApplicationEditPage', () => {
       const user = userEvent.setup();
       renderComponent();
 
-      await user.click(screen.getByRole('tab', {name: 'Advanced Settings'}));
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
 
       await waitFor(() => {
         expect(screen.getByTestId('edit-advanced-settings')).toBeInTheDocument();
@@ -1630,7 +2178,7 @@ describe('ApplicationEditPage', () => {
       const user = userEvent.setup();
       renderComponent();
 
-      await user.click(screen.getByRole('tab', {name: 'Advanced Settings'}));
+      await user.click(screen.getByRole('tab', {name: 'Advanced'}));
 
       await waitFor(() => {
         expect(screen.getByTestId('edit-advanced-settings')).toBeInTheDocument();
@@ -1644,7 +2192,7 @@ describe('ApplicationEditPage', () => {
       // mockApplication (template: 'react') is the default mock from the outer describe block.
       renderComponent();
 
-      expect(screen.getByRole('tab', {name: /general/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /access/i})).toBeInTheDocument();
       expect(screen.queryByTestId('mcp-connect-tab')).not.toBeInTheDocument();
     });
 
@@ -1658,6 +2206,9 @@ describe('ApplicationEditPage', () => {
 
       const user = userEvent.setup();
       renderComponent();
+
+      // McpConnectTab only mounts once its General TabPanel is active
+      await mountSectionTab(user, 'General', 'mcp-connect-tab');
 
       await user.click(screen.getByTestId('mcp-connect-tab-report-invalid'));
 
@@ -1674,6 +2225,58 @@ describe('ApplicationEditPage', () => {
       });
 
       expect(screen.getByRole('button', {name: 'Save Changes'})).toBeDisabled();
+    });
+  });
+
+  describe('Client Secret Popup (just created)', () => {
+    afterEach(async () => {
+      const {useLocation} = await import('react-router');
+      (useLocation as ReturnType<typeof vi.fn>).mockReturnValue({state: null});
+    });
+
+    it('should not render the secret dialog when there is no justCreatedSecret navigation state', () => {
+      renderComponent();
+
+      expect(screen.queryByTestId('application-show-client-secret')).not.toBeInTheDocument();
+    });
+
+    it('should render the secret dialog when justCreatedSecret is present in location state', async () => {
+      const {useLocation} = await import('react-router');
+      (useLocation as ReturnType<typeof vi.fn>).mockReturnValue({
+        state: {
+          justCreatedSecret: {
+            appName: 'My New App',
+            clientId: 'new-client-id',
+            clientSecret: 'brand-new-secret',
+          },
+        },
+      });
+
+      renderComponent();
+
+      expect(screen.getByTestId('application-show-client-secret')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('brand-new-secret')).toBeInTheDocument();
+    });
+
+    it('should close the secret dialog when Continue is clicked', async () => {
+      const {useLocation} = await import('react-router');
+      (useLocation as ReturnType<typeof vi.fn>).mockReturnValue({
+        state: {
+          justCreatedSecret: {
+            appName: 'My New App',
+            clientSecret: 'brand-new-secret',
+          },
+        },
+      });
+
+      renderComponent();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByTestId('application-client-secret-continue'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('application-show-client-secret')).not.toBeInTheDocument();
+      });
     });
   });
 });

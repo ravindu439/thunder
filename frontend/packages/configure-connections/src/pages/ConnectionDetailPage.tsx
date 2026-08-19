@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard, UnsavedChangesBar} from '@thunderid/components';
+import {QueryErrorNotice, SettingsCard, UnsavedChangesBar} from '@thunderid/components';
 import {useConfig} from '@thunderid/contexts';
-import {Alert, Box, Button, Chip, PageContent, Skeleton, Stack, Tab, Tabs, Typography} from '@wso2/oxygen-ui';
-import {ChevronLeft, Trash2} from '@wso2/oxygen-ui-icons-react';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Box, Button, ListingTable, PageContent, Skeleton, Stack, Tab, Tabs, Typography} from '@wso2/oxygen-ui';
+import {AlertCircle, ChevronLeft, Trash2} from '@wso2/oxygen-ui-icons-react';
 import {type JSX, type ReactNode, type SyntheticEvent, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate, useParams} from 'react-router';
@@ -33,6 +19,7 @@ import ConnectionForm from '../components/ConnectionForm';
 import ReadOnlyCopyField from '../components/ReadOnlyCopyField';
 import {CONNECTION_FORM_FIELDS} from '../config/connectionFormFields';
 import {VENDOR_META_BY_TYPE} from '../config/connectionVendorMeta';
+import useConnectionRoutes from '../hooks/useConnectionRoutes';
 import type {AttributeConfiguration, ConnectionType} from '../models/connection';
 import {
   type ConnectionFormValues,
@@ -40,6 +27,7 @@ import {
   responseToFormValues,
   validateConnectionForm,
 } from '../utils/connectionFormMapping';
+import isConflictError from '../utils/isConflictError';
 
 interface TabPanelProps {
   children: ReactNode;
@@ -79,6 +67,7 @@ function canonicalAttr(config: AttributeConfiguration | undefined): string {
 export default function ConnectionDetailPage(): JSX.Element | null {
   const {t} = useTranslation('connections');
   const navigate = useNavigate();
+  const routes = useConnectionRoutes();
   const {getGateCallbackUrl} = useConfig();
   const {type, id} = useParams<{type: string; id?: string}>();
 
@@ -99,15 +88,18 @@ export default function ConnectionDetailPage(): JSX.Element | null {
   const [attrValid, setAttrValid] = useState(true);
   const [attrsKey, setAttrsKey] = useState(0);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const updateMutation = useUpdateConnection(connectionType, resolvedId ?? '');
   const deleteMutation = useDeleteConnection(connectionType);
 
   useEffect(() => {
     if (!meta) {
-      void navigate('/connections');
+      void navigate(routes.connections.list());
     }
-  }, [meta, navigate]);
+  }, [meta, navigate, routes]);
 
   const fields = useMemo(() => (meta ? CONNECTION_FORM_FIELDS[connectionType] : []), [meta, connectionType]);
   const redirectUri = getGateCallbackUrl();
@@ -134,6 +126,8 @@ export default function ConnectionDetailPage(): JSX.Element | null {
     setEditedAttr(null);
     setAttrValid(true);
     setAttrsKey((k) => k + 1);
+    setNameError(null);
+    setGeneralError(null);
   };
 
   const formDirty: boolean = JSON.stringify(values) !== JSON.stringify(baseline) || secretReplacing;
@@ -141,10 +135,23 @@ export default function ConnectionDetailPage(): JSX.Element | null {
   const dirty: boolean = formDirty || attrDirty;
   const valid: boolean = Object.keys(validateConnectionForm(values, fields, 'edit')).length === 0 && attrValid;
 
+  // A save failure is stale once the user edits any field. Only reset the mutation once it has
+  // actually failed: resetting while it's still pending would flip isPending back to false and
+  // re-enable save before the in-flight request settles.
+  const clearSaveError = (): void => {
+    setNameError(null);
+    setGeneralError(null);
+    if (updateMutation.isError) {
+      updateMutation.reset();
+    }
+  };
+
   const handleSave = (): void => {
     if (!valid || !resolvedId) {
       return;
     }
+    setNameError(null);
+    setGeneralError(null);
     const payload = {
       ...formValuesToRequest(values, fields, {mode: 'edit', secretReplaced: secretReplacing}),
       ...(supportsAttributes ? {attributeConfiguration: editedAttr ?? baselineAttr} : {}),
@@ -153,8 +160,12 @@ export default function ConnectionDetailPage(): JSX.Element | null {
       .mutateAsync(payload)
       .then(() => connectionQuery.refetch())
       .then(() => resetEdits())
-      .catch(() => {
-        // Errors (including the 409 duplicate-name) are surfaced by the mutation hook.
+      .catch((error: unknown) => {
+        if (isConflictError(error)) {
+          setNameError(t('error.duplicateName', 'A connection with this name already exists.'));
+        } else {
+          setGeneralError(getErrorMessage(error as Error, t, 'update.error', 'Failed to update connection.'));
+        }
       });
   };
 
@@ -165,7 +176,10 @@ export default function ConnectionDetailPage(): JSX.Element | null {
     deleteMutation.mutate(resolvedId, {
       onSuccess: () => {
         setDeleteOpen(false);
-        void navigate('/connections');
+        void navigate(routes.connections.list());
+      },
+      onError: (error) => {
+        setDeleteError(getErrorMessage(error, t, 'delete.error', 'Failed to delete connection.'));
       },
     });
   };
@@ -175,7 +189,7 @@ export default function ConnectionDetailPage(): JSX.Element | null {
       <Button
         variant="text"
         startIcon={<ChevronLeft size={16} />}
-        onClick={() => void navigate('/connections')}
+        onClick={() => void navigate(routes.connections.list())}
         sx={{mb: 2, alignSelf: 'flex-start'}}
       >
         {t('detail.backToConnections')}
@@ -183,8 +197,28 @@ export default function ConnectionDetailPage(): JSX.Element | null {
 
       {isResolving ? (
         <Skeleton variant="rounded" height={480} />
-      ) : notFound || connectionQuery.isError ? (
-        <Alert severity="error">{t('error.loadFailed')}</Alert>
+      ) : connectionQuery.error ? (
+        <QueryErrorNotice
+          error={connectionQuery.error}
+          t={t}
+          variant="block"
+          title={t('detail.loadError.title', 'Failed to load connection')}
+          onRetry={() => void connectionQuery.refetch()}
+        />
+      ) : notFound ? (
+        <ListingTable.EmptyState
+          illustration={<AlertCircle size={40} />}
+          title={t('detail.notFound.title', 'Connection not found')}
+          description={t(
+            'detail.notFound.description',
+            'This connection may have been deleted or the link is incorrect.',
+          )}
+          action={
+            <Button variant="outlined" onClick={() => void navigate(routes.connections.list())}>
+              {t('detail.backToConnections')}
+            </Button>
+          }
+        />
       ) : (
         <>
           <Stack direction="row" spacing={2} alignItems="flex-start" sx={{mb: 3}}>
@@ -203,17 +237,23 @@ export default function ConnectionDetailPage(): JSX.Element | null {
               {meta.logo}
             </Box>
             <Stack direction="column" spacing={0.5}>
-              <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography variant="h5" fontWeight={700}>
-                  {data?.name ?? meta.displayName}
-                </Typography>
-                <Chip size="small" color="success" label={t('card.configured')} />
-              </Stack>
-              <Typography variant="body2" color="text.secondary">
-                {t('detail.subtitle', {name: data?.name ?? meta.displayName})}
+              <Typography variant="h5" fontWeight={700}>
+                {data?.name ?? meta.displayName}
               </Typography>
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Box sx={{width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main'}} />
+                <Typography variant="body2" color="text.secondary">
+                  {t('card.configured')}
+                </Typography>
+              </Stack>
             </Stack>
           </Stack>
+
+          {generalError && (
+            <Alert severity="error" onClose={clearSaveError} sx={{mb: 3}}>
+              {generalError}
+            </Alert>
+          )}
 
           <Tabs
             value={activeTab}
@@ -228,6 +268,11 @@ export default function ConnectionDetailPage(): JSX.Element | null {
                 data-testid="connection-tab-attributes"
               />
             )}
+            <Tab
+              label={t('detail.tabs.advanced', 'Advanced')}
+              sx={{textTransform: 'none'}}
+              data-testid="connection-tab-advanced"
+            />
           </Tabs>
 
           <TabPanel value={activeTab} index={0}>
@@ -249,28 +294,14 @@ export default function ConnectionDetailPage(): JSX.Element | null {
                   secretReplacing={secretReplacing}
                   hasStoredSecret
                   vendorDisplayName={meta.displayName}
+                  nameError={nameError}
                   showNameField={isCustom}
-                  onFieldChange={(name, value) => setEditedValues((prev) => ({...prev, [name]: value}))}
+                  onFieldChange={(name, value) => {
+                    clearSaveError();
+                    setEditedValues((prev) => ({...prev, [name]: value}));
+                  }}
                   onSecretReplacingChange={setSecretReplacing}
                 />
-              </SettingsCard>
-
-              <SettingsCard title={t('detail.dangerZone.title')} description={t('detail.dangerZone.description')}>
-                <Typography variant="h6" gutterBottom color="error">
-                  {t('detail.dangerZone.delete.title')}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
-                  {t('detail.dangerZone.delete.description')}
-                </Typography>
-                <Button
-                  variant="contained"
-                  color="error"
-                  startIcon={<Trash2 size={16} />}
-                  onClick={() => setDeleteOpen(true)}
-                  data-testid="connection-delete-button"
-                >
-                  {t('form.actions.delete')}
-                </Button>
               </SettingsCard>
             </Stack>
           </TabPanel>
@@ -288,12 +319,37 @@ export default function ConnectionDetailPage(): JSX.Element | null {
             </TabPanel>
           )}
 
+          <TabPanel value={activeTab} index={supportsAttributes ? 2 : 1}>
+            <Stack direction="column" spacing={4}>
+              <SettingsCard title={t('detail.dangerZone.title')} description={t('detail.dangerZone.description')}>
+                <Typography variant="h6" gutterBottom color="error">
+                  {t('detail.dangerZone.delete.title')}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
+                  {t('detail.dangerZone.delete.description')}
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="error"
+                  startIcon={<Trash2 size={16} />}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeleteOpen(true);
+                  }}
+                  data-testid="connection-delete-button"
+                >
+                  {t('form.actions.delete')}
+                </Button>
+              </SettingsCard>
+            </Stack>
+          </TabPanel>
+
           {dirty && (
             <UnsavedChangesBar
-              message={t('detail.saveBar.unsaved')}
-              resetLabel={t('detail.saveBar.discard')}
-              saveLabel={t('detail.saveBar.save')}
-              savingLabel={t('detail.saveBar.saving')}
+              message={t('detail.saveBar.unsaved', 'You have unsaved changes.')}
+              resetLabel={t('detail.saveBar.reset', 'Reset')}
+              saveLabel={t('detail.saveBar.save', 'Save changes')}
+              savingLabel={t('detail.saveBar.saving', 'Saving changes...')}
               isSaving={updateMutation.isPending}
               saveDisabled={!valid}
               onReset={resetEdits}
@@ -307,8 +363,12 @@ export default function ConnectionDetailPage(): JSX.Element | null {
             connectionId={resolvedId ?? ''}
             connectionName={data?.name ?? ''}
             isPending={deleteMutation.isPending}
+            error={deleteError}
             onConfirm={handleDelete}
-            onClose={() => setDeleteOpen(false)}
+            onClose={() => {
+              setDeleteOpen(false);
+              setDeleteError(null);
+            }}
           />
         </>
       )}

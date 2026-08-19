@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -215,16 +200,35 @@ func makeAgentEntityParser(
 		}
 
 		agent := &model.Agent{
-			ID:                 req.ID,
-			OUID:               req.OUID,
-			OUHandle:           req.OUHandle,
-			Type:               req.Type,
-			Name:               req.Name,
-			Description:        req.Description,
-			Owner:              req.Owner,
-			Attributes:         attributesJSON,
-			InboundAuthProfile: req.InboundAuthProfile,
-			InboundAuthConfig:  req.InboundAuthConfig,
+			ID:          req.ID,
+			OUID:        req.OUID,
+			OUHandle:    req.OUHandle,
+			Type:        req.Type,
+			Name:        req.Name,
+			Description: req.Description,
+			LogoURL:     req.LogoURL,
+			Owner:       req.Owner,
+			Attributes:  attributesJSON,
+			InboundAuthProfile: providers.InboundAuthProfile{
+				AuthFlowID:                req.AuthFlowID,
+				AuthFlowHandle:            req.AuthFlowHandle,
+				RegistrationFlowID:        req.RegistrationFlowID,
+				RegistrationFlowHandle:    req.RegistrationFlowHandle,
+				IsRegistrationFlowEnabled: req.IsRegistrationFlowEnabled,
+				RecoveryFlowID:            req.RecoveryFlowID,
+				RecoveryFlowHandle:        req.RecoveryFlowHandle,
+				IsRecoveryFlowEnabled:     req.IsRecoveryFlowEnabled,
+				SignOutFlowID:             req.SignOutFlowID,
+				SignOutFlowHandle:         req.SignOutFlowHandle,
+				ThemeID:                   req.ThemeID,
+				LayoutID:                  req.LayoutID,
+				Assertion:                 req.Assertion,
+				LoginConsent:              req.LoginConsent,
+				AllowedUserTypes:          req.AllowedUserTypes,
+				PasskeyAllowedOrigins:     req.PasskeyAllowedOrigins,
+				Attestation:               req.Attestation,
+			},
+			InboundAuthConfig: req.InboundAuthConfig,
 		}
 		clientID, clientSecret, _, svcErr := agentSvc.ValidateAgent(
 			security.WithRuntimeContext(context.Background()), agent, req.ID)
@@ -269,15 +273,34 @@ func makeAgentInboundParser(agentSvc AgentServiceInterface) func([]byte) (*inbou
 		}
 
 		agent := &model.Agent{
-			ID:                 req.ID,
-			OUID:               req.OUID,
-			OUHandle:           req.OUHandle,
-			Type:               req.Type,
-			Name:               req.Name,
-			Description:        req.Description,
-			Owner:              req.Owner,
-			InboundAuthProfile: req.InboundAuthProfile,
-			InboundAuthConfig:  req.InboundAuthConfig,
+			ID:          req.ID,
+			OUID:        req.OUID,
+			OUHandle:    req.OUHandle,
+			Type:        req.Type,
+			Name:        req.Name,
+			Description: req.Description,
+			LogoURL:     req.LogoURL,
+			Owner:       req.Owner,
+			InboundAuthProfile: providers.InboundAuthProfile{
+				AuthFlowID:                req.AuthFlowID,
+				AuthFlowHandle:            req.AuthFlowHandle,
+				RegistrationFlowID:        req.RegistrationFlowID,
+				RegistrationFlowHandle:    req.RegistrationFlowHandle,
+				IsRegistrationFlowEnabled: req.IsRegistrationFlowEnabled,
+				RecoveryFlowID:            req.RecoveryFlowID,
+				RecoveryFlowHandle:        req.RecoveryFlowHandle,
+				IsRecoveryFlowEnabled:     req.IsRecoveryFlowEnabled,
+				SignOutFlowID:             req.SignOutFlowID,
+				SignOutFlowHandle:         req.SignOutFlowHandle,
+				ThemeID:                   req.ThemeID,
+				LayoutID:                  req.LayoutID,
+				Assertion:                 req.Assertion,
+				LoginConsent:              req.LoginConsent,
+				AllowedUserTypes:          req.AllowedUserTypes,
+				PasskeyAllowedOrigins:     req.PasskeyAllowedOrigins,
+				Attestation:               req.Attestation,
+			},
+			InboundAuthConfig: req.InboundAuthConfig,
 		}
 		_, _, resolvedClient, svcErr := agentSvc.ValidateAgent(
 			security.WithRuntimeContext(context.Background()), agent, req.ID)
@@ -287,6 +310,7 @@ func makeAgentInboundParser(agentSvc AgentServiceInterface) func([]byte) (*inbou
 
 		resolvedClient.ID = req.ID
 		resolvedClient.IsReadOnly = true
+		setLogoProperty(&resolvedClient, req.LogoURL)
 
 		oauthProfile := buildOAuthProfile(req.InboundAuthConfig)
 		if oauthProfile != nil {

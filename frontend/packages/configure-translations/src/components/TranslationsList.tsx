@@ -1,53 +1,40 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {ResourceAvatar} from '@thunderid/components';
+import {QueryErrorNotice, ResourceAvatar} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {getDisplayNameForCode, toFlagEmoji, useGetLanguages} from '@thunderid/i18n';
 import {useLogger} from '@thunderid/logger/react';
-import {Chip, DataGrid, IconButton, ListingTable, Tooltip, useTheme} from '@wso2/oxygen-ui';
+import {Chip, DataGrid, IconButton, ListingTable, Tooltip} from '@wso2/oxygen-ui';
 import {Pencil, Trash2} from '@wso2/oxygen-ui-icons-react';
 import {useCallback, useMemo, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
+import TranslationConstants from '../constants/translation-constants';
 import TranslationDeleteDialog from '@/components/TranslationDeleteDialog';
+import useTranslationRoutes from '@/hooks/useTranslationRoutes';
 
 export default function TranslationsList(): JSX.Element {
-  const theme = useTheme();
   const {t} = useTranslation('translations');
   const navigate = useNavigate();
   const logger = useLogger('TranslationsList');
   const dataGridLocaleText = useDataGridLocaleText();
+  const routes = useTranslationRoutes();
 
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
 
-  const {data, isLoading} = useGetLanguages();
+  const {data, isLoading, error, refetch} = useGetLanguages();
 
   const handleEditClick = useCallback(
     (language: string): void => {
       (async (): Promise<void> => {
-        await navigate(`/translations/${language}`);
+        await navigate(routes.detail(language));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to translation editor', {error: _error, language});
       });
     },
-    [logger, navigate],
+    [logger, navigate, routes],
   );
 
   const handleDeleteClick = useCallback((language: string): void => {
@@ -72,7 +59,16 @@ export default function TranslationsList(): JSX.Element {
         renderCell: (params: DataGrid.GridRenderCellParams<{id: string; code: string}>): JSX.Element => (
           <ListingTable.CellIcon
             sx={{width: '100%'}}
-            icon={<ResourceAvatar value={toFlagEmoji(params.row.code)} size={30} fallback="emoji:🌍" />}
+            icon={
+              <ResourceAvatar
+                transparent
+                variant="rounded"
+                value={toFlagEmoji(params.row.code)}
+                size={30}
+                fallback={TranslationConstants.DEFAULT_AVATAR}
+                sx={{fontSize: '1.8rem'}}
+              />
+            }
             primary={getDisplayNameForCode(params.row.code)}
             secondary={
               <Chip
@@ -125,8 +121,19 @@ export default function TranslationsList(): JSX.Element {
         ),
       },
     ],
-    [handleDeleteClick, handleEditClick, t, theme],
+    [handleDeleteClick, handleEditClick, t],
   );
+
+  if (error) {
+    return (
+      <QueryErrorNotice
+        error={error}
+        t={t}
+        title={t('listing.error', 'Failed to load languages')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
 
   return (
     <>
@@ -147,6 +154,8 @@ export default function TranslationsList(): JSX.Element {
             pageSizeOptions={[5, 10, 25]}
             rowHeight={56}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             autoHeight
             sx={{

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package oidc implements an authentication service for authenticating via an OIDC-based identity provider.
 package oidc
@@ -243,9 +228,10 @@ func (s *oidcAuthnService) Authenticate(ctx context.Context, idpID string,
 		return nil, &authncm.ErrorSubClaimNotFound
 	}
 
-	// Fetch user info if additional scopes are configured so callers get the full attribute set.
+	// Fetch user info if a UserInfo endpoint and additional scopes are configured, so callers get the
+	// full attribute set. The identity itself comes from the ID token, so a failed fetch is not fatal.
 	oauthConfig, svcErr := s.GetOAuthClientConfig(ctx, idpID)
-	if svcErr == nil && len(oauthConfig.Scopes) > 1 {
+	if svcErr == nil && oauthConfig.OAuthEndpoints.UserInfoEndpoint != "" && len(oauthConfig.Scopes) > 1 {
 		userInfo, infoErr := s.FetchUserInfo(ctx, idpID, tokenResp.AccessToken)
 		if infoErr == nil {
 			if userInfoSub, ok := userInfo["sub"].(string); !ok || userInfoSub == sub {

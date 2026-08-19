@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package providers provides models for the providers module.
 //
@@ -27,7 +12,10 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"time"
+
+	gocrypto "crypto"
 
 	"gopkg.in/yaml.v3"
 
@@ -51,35 +39,49 @@ type DesignResponse struct {
 
 // OrganizationUnit represents an organization unit.
 type OrganizationUnit struct {
-	ID              string    `json:"id"                        yaml:"id"`
-	Handle          string    `json:"handle"                    yaml:"handle"`
-	Name            string    `json:"name"                      yaml:"name"`
-	Description     string    `json:"description,omitempty"     yaml:"description,omitempty"`
-	Parent          *string   `json:"parent"                    yaml:"parent"`
-	ThemeID         string    `json:"themeId,omitempty"         yaml:"themeId,omitempty"`
-	LayoutID        string    `json:"layoutId,omitempty"        yaml:"layoutId,omitempty"`
-	LogoURL         string    `json:"logoUrl,omitempty"         yaml:"logoUrl,omitempty"`
-	TosURI          string    `json:"tosUri,omitempty"          yaml:"tosUri,omitempty"`
-	PolicyURI       string    `json:"policyUri,omitempty"       yaml:"policyUri,omitempty"`
-	CookiePolicyURI string    `json:"cookiePolicyUri,omitempty" yaml:"cookiePolicyUri,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"                 yaml:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"                 yaml:"updatedAt"`
+	ID                        string    `json:"id"                           yaml:"id"`
+	Handle                    string    `json:"handle"                       yaml:"handle"`
+	Name                      string    `json:"name"                         yaml:"name"`
+	Description               string    `json:"description,omitempty"        yaml:"description,omitempty"`
+	Parent                    *string   `json:"parent"                       yaml:"parent"`
+	ThemeID                   string    `json:"themeId,omitempty"            yaml:"themeId,omitempty"`
+	LayoutID                  string    `json:"layoutId,omitempty"           yaml:"layoutId,omitempty"`
+	AuthFlowID                string    `json:"authFlowId,omitempty"         yaml:"authFlowId,omitempty"`
+	RegistrationFlowID        string    `json:"registrationFlowId,omitempty" yaml:"registrationFlowId,omitempty"`
+	IsRegistrationFlowEnabled bool      `json:"isRegistrationFlowEnabled"    yaml:"isRegistrationFlowEnabled"`
+	RecoveryFlowID            string    `json:"recoveryFlowId,omitempty"     yaml:"recoveryFlowId,omitempty"`
+	IsRecoveryFlowEnabled     bool      `json:"isRecoveryFlowEnabled"        yaml:"isRecoveryFlowEnabled"`
+	SignOutFlowID             string    `json:"signOutFlowId,omitempty"           yaml:"signOutFlowId,omitempty"`
+	UserOnboardingFlowID      string    `json:"userOnboardingFlowId,omitempty"    yaml:"userOnboardingFlowId,omitempty"`
+	LogoURL                   string    `json:"logoUrl,omitempty"                 yaml:"logoUrl,omitempty"`
+	TosURI                    string    `json:"tosUri,omitempty"             yaml:"tosUri,omitempty"`
+	PolicyURI                 string    `json:"policyUri,omitempty"          yaml:"policyUri,omitempty"`
+	CookiePolicyURI           string    `json:"cookiePolicyUri,omitempty"    yaml:"cookiePolicyUri,omitempty"`
+	CreatedAt                 time.Time `json:"createdAt"                    yaml:"createdAt"`
+	UpdatedAt                 time.Time `json:"updatedAt"                    yaml:"updatedAt"`
 }
 
 // OrganizationUnitRequestWithID represents the request body for creating an organization unit
 // in import/declarative paths where preserving IDs is required.
 type OrganizationUnitRequestWithID struct {
-	ID              string  `json:"id"                        yaml:"id"                        native:"required"`
-	Handle          string  `json:"handle"                    yaml:"handle"                    native:"required,min=3,max=50"`
-	Name            string  `json:"name"                      yaml:"name"                      native:"required,min=2,max=100"`
-	Description     string  `json:"description,omitempty"     yaml:"description,omitempty"`
-	Parent          *string `json:"parent"                    yaml:"parent"`
-	ThemeID         string  `json:"themeId,omitempty"         yaml:"themeId,omitempty"`
-	LayoutID        string  `json:"layoutId,omitempty"        yaml:"layoutId,omitempty"`
-	LogoURL         string  `json:"logoUrl,omitempty"         yaml:"logoUrl,omitempty"         native:"omitempty,url,max=2048"`
-	TosURI          string  `json:"tosUri,omitempty"          yaml:"tosUri,omitempty"          native:"omitempty,url,max=2048"`
-	PolicyURI       string  `json:"policyUri,omitempty"       yaml:"policyUri,omitempty"       native:"omitempty,url,max=2048"`
-	CookiePolicyURI string  `json:"cookiePolicyUri,omitempty" yaml:"cookiePolicyUri,omitempty" native:"url,max=2048"`
+	ID                        string  `json:"id"                           yaml:"id"                           native:"required"`
+	Handle                    string  `json:"handle"                       yaml:"handle"                       native:"required,min=1,max=100"`
+	Name                      string  `json:"name"                         yaml:"name"                         native:"required,min=1,max=100"`
+	Description               string  `json:"description,omitempty"        yaml:"description,omitempty"`
+	Parent                    *string `json:"parent"                       yaml:"parent"`
+	ThemeID                   string  `json:"themeId,omitempty"            yaml:"themeId,omitempty"`
+	LayoutID                  string  `json:"layoutId,omitempty"           yaml:"layoutId,omitempty"`
+	AuthFlowID                string  `json:"authFlowId,omitempty"         yaml:"authFlowId,omitempty"`
+	RegistrationFlowID        string  `json:"registrationFlowId,omitempty" yaml:"registrationFlowId,omitempty"`
+	IsRegistrationFlowEnabled bool    `json:"isRegistrationFlowEnabled"    yaml:"isRegistrationFlowEnabled"`
+	RecoveryFlowID            string  `json:"recoveryFlowId,omitempty"     yaml:"recoveryFlowId,omitempty"`
+	IsRecoveryFlowEnabled     bool    `json:"isRecoveryFlowEnabled"        yaml:"isRecoveryFlowEnabled"`
+	SignOutFlowID             string  `json:"signOutFlowId,omitempty"         yaml:"signOutFlowId,omitempty"`
+	UserOnboardingFlowID      string  `json:"userOnboardingFlowId,omitempty"  yaml:"userOnboardingFlowId,omitempty"`
+	LogoURL                   string  `json:"logoUrl,omitempty"               yaml:"logoUrl,omitempty"               native:"omitempty,url,max=2048"`
+	TosURI                    string  `json:"tosUri,omitempty"             yaml:"tosUri,omitempty"             native:"omitempty,url,max=2048"`
+	PolicyURI                 string  `json:"policyUri,omitempty"          yaml:"policyUri,omitempty"          native:"omitempty,url,max=2048"`
+	CookiePolicyURI           string  `json:"cookiePolicyUri,omitempty"    yaml:"cookiePolicyUri,omitempty"    native:"url,max=2048"`
 }
 
 // OrganizationUnitListResponse represents the response for listing organization units with pagination.
@@ -358,8 +360,7 @@ type ConditionDefinition struct {
 
 // AuthnMetadata contains metadata for authentication.
 type AuthnMetadata struct {
-	AppMetadata     map[string]interface{} `json:"appMetadata,omitempty"`
-	RuntimeMetadata map[string]string      `json:"runtimeMetadata,omitempty"`
+	RuntimeMetadata map[string][]string `json:"runtimeMetadata,omitempty"`
 }
 
 // AuthenticatedClaims holds claims produced by an authentication mechanism.
@@ -451,103 +452,87 @@ type EntityReference struct {
 
 // GetAttributesMetadata holds metadata used when retrieving entity attributes.
 type GetAttributesMetadata struct {
-	AppMetadata     map[string]interface{} `json:"appMetadata,omitempty"`
-	Locale          string                 `json:"locale"`
-	RuntimeMetadata map[string]string      `json:"runtimeMetadata,omitempty"`
+	Locale          string              `json:"locale"`
+	RuntimeMetadata map[string][]string `json:"runtimeMetadata,omitempty"`
 }
 
-// AuthUser accumulates per-provider authentication state produced during flow execution.
-// All fields are unexported; use the manager methods to interact with this type.
-type AuthUser struct {
-	entityReferenceToken any
-	entityReference      *EntityReference
-	attributeToken       any
-	attributes           *AttributesResponse
-}
-
-// IsAuthenticated reports whether this AuthUser has been populated by a successful
-// authentication.
-func (a AuthUser) IsAuthenticated() bool {
-	return (a.entityReference != nil || a.entityReferenceToken != nil) &&
-		(a.attributes != nil || a.attributeToken != nil)
-}
-
-// EntityReferenceToken returns the opaque entity-reference token, if any.
-func (a AuthUser) EntityReferenceToken() any {
-	return a.entityReferenceToken
-}
-
-// EntityReference returns the resolved entity reference, if any.
-func (a AuthUser) EntityReference() *EntityReference {
-	return a.entityReference
-}
-
-// AttributeToken returns the opaque attribute token, if any.
-func (a AuthUser) AttributeToken() any {
-	return a.attributeToken
-}
-
-// Attributes returns the resolved attributes, if any.
-func (a AuthUser) Attributes() *AttributesResponse {
-	return a.attributes
-}
-
-// SetEntityReferenceToken stores an entity-reference token and clears any resolved reference.
-func (a *AuthUser) SetEntityReferenceToken(token any) {
-	a.entityReferenceToken = token
-	a.entityReference = nil
-}
-
-// SetEntityReference stores a resolved entity reference and clears any token.
-func (a *AuthUser) SetEntityReference(ref *EntityReference) {
-	a.entityReference = ref
-	a.entityReferenceToken = nil
-}
-
-// SetAttributeToken stores an attribute token and clears any resolved attributes.
-func (a *AuthUser) SetAttributeToken(token any) {
-	a.attributeToken = token
-	a.attributes = nil
-}
-
-// SetAttributes stores resolved attributes and clears any attribute token.
-func (a *AuthUser) SetAttributes(attrs *AttributesResponse) {
-	a.attributes = attrs
-	a.attributeToken = nil
-}
-
-// authUserJSON is the internal proxy used for JSON serialization of AuthUser.
-type authUserJSON struct {
+// AuthState is the per-provider authentication state held inside an AuthUser.
+// EntityReferenceToken and EntityReference are mutually exclusive (one is nil
+// while the other carries the value); same for AttributeToken and Attributes.
+type AuthState struct {
 	EntityReferenceToken any                 `json:"entityReferenceToken"`
 	EntityReference      *EntityReference    `json:"entityReference,omitempty"`
 	AttributeToken       any                 `json:"attributeToken"`
 	Attributes           *AttributesResponse `json:"attributes,omitempty"`
 }
 
-// MarshalJSON implements json.Marshaler.
-func (a *AuthUser) MarshalJSON() ([]byte, error) {
-	proxy := authUserJSON{
-		EntityReferenceToken: a.entityReferenceToken,
-		EntityReference:      a.entityReference,
-		AttributeToken:       a.attributeToken,
-		Attributes:           a.attributes,
-	}
-
-	return json.Marshal(proxy)
+// AuthUser accumulates per-provider authentication state produced during flow execution.
+// State is keyed by provider name; the meaning of each key is policy owned by the
+// authn provider manager.
+type AuthUser struct {
+	state map[string]AuthState
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
+// IsAuthenticated reports whether every per-provider state held by this AuthUser
+// has both an entity-reference side and an attribute side populated. Returns false
+// when no state has been recorded.
+func (a AuthUser) IsAuthenticated() bool {
+	if len(a.state) == 0 {
+		return false
+	}
+	for _, s := range a.state {
+		if (s.EntityReference == nil && s.EntityReferenceToken == nil) ||
+			(s.Attributes == nil && s.AttributeToken == nil) {
+			return false
+		}
+	}
+	return true
+}
+
+// ProviderNames returns the sorted list of provider names that have recorded state.
+func (a AuthUser) ProviderNames() []string {
+	if len(a.state) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(a.state))
+	for name := range a.state {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// StateFor returns the authentication state recorded for the named provider.
+// The second return value reports whether the named provider has any state.
+func (a AuthUser) StateFor(name string) (AuthState, bool) {
+	s, ok := a.state[name]
+	return s, ok
+}
+
+// SetStateFor records (or replaces) the authentication state for the named provider.
+func (a *AuthUser) SetStateFor(name string, s AuthState) {
+	if a.state == nil {
+		a.state = make(map[string]AuthState)
+	}
+	a.state[name] = s
+}
+
+// MarshalJSON implements json.Marshaler. AuthUser is serialized as a per-provider
+// envelope: a map of provider name to AuthState. A zero AuthUser marshals to `{}`.
+func (a *AuthUser) MarshalJSON() ([]byte, error) {
+	if a.state == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(a.state)
+}
+
+// UnmarshalJSON implements json.Unmarshaler. Expects the per-provider envelope shape.
 func (a *AuthUser) UnmarshalJSON(b []byte) error {
-	var proxy authUserJSON
-	if err := json.Unmarshal(b, &proxy); err != nil {
+	var state map[string]AuthState
+	if err := json.Unmarshal(b, &state); err != nil {
 		return err
 	}
-
-	a.entityReferenceToken = proxy.EntityReferenceToken
-	a.entityReference = proxy.EntityReference
-	a.attributeToken = proxy.AttributeToken
-	a.attributes = proxy.Attributes
-
+	a.state = state
 	return nil
 }
 
@@ -596,8 +581,9 @@ type IDJAGConfig struct {
 // (UserConfig) or the OAuth client itself, issued only via the client_credentials grant
 // (ClientConfig).
 type AccessTokenConfig struct {
-	UserConfig   *AccessTokenSubConfig `json:"userConfig,omitempty"   yaml:"userConfig,omitempty"   jsonschema:"Access token configuration applied when the token subject is an end user."`
-	ClientConfig *AccessTokenSubConfig `json:"clientConfig,omitempty" yaml:"clientConfig,omitempty" jsonschema:"Access token configuration applied when the token subject is the OAuth client itself, issued only via the client_credentials grant."`
+	UserConfig      *AccessTokenSubConfig `json:"userConfig,omitempty"   yaml:"userConfig,omitempty"   jsonschema:"Access token configuration applied when the token subject is an end user."`
+	ClientConfig    *AccessTokenSubConfig `json:"clientConfig,omitempty" yaml:"clientConfig,omitempty" jsonschema:"Access token configuration applied when the token subject is the OAuth client itself, issued only via the client_credentials grant."`
+	DefaultAudience string                `json:"defaultAudience,omitempty" yaml:"defaultAudience,omitempty" jsonschema:"Audience for access tokens not bound to a resource server (OIDC-only or scopeless requests). Falls back to the client_id when empty."`
 }
 
 // AccessTokenSubConfig holds the validity period and attribute selection for one access
@@ -649,6 +635,7 @@ type Certificate struct {
 type AttestationConfig struct {
 	Android *AndroidAttestationConfig `json:"android,omitempty" yaml:"android,omitempty" jsonschema:"Google Play Integrity attestation configuration for Android clients."`
 	Apple   *AppleAttestationConfig   `json:"apple,omitempty"   yaml:"apple,omitempty"   jsonschema:"Apple App Attest attestation configuration for iOS clients."`
+	DevMode bool                      `json:"devMode,omitempty" yaml:"devMode,omitempty" jsonschema:"When true, skips the platform-attestation check for a mobile application during direct flow initiation. Disabled by default; enable only for testing or trying out sample/development mobile clients."`
 }
 
 // AndroidAttestationConfig holds the Google Play Integrity settings for an Android application.
@@ -670,7 +657,7 @@ func (c *AttestationConfig) WithoutCredentials() *AttestationConfig {
 	if c == nil {
 		return nil
 	}
-	sanitized := &AttestationConfig{}
+	sanitized := &AttestationConfig{DevMode: c.DevMode}
 	if c.Android != nil {
 		android := *c.Android
 		android.ServiceAccountCredentials = ""
@@ -713,12 +700,13 @@ type InboundClient struct {
 	RecoveryFlowID            string
 	IsRecoveryFlowEnabled     bool
 	SignOutFlowID             string
-	IsSignOutFlowEnabled      bool
 	ThemeID                   string
 	LayoutID                  string
 	Assertion                 *AssertionConfig
 	LoginConsent              *LoginConsentConfig
 	AllowedUserTypes          []string
+	SubjectAttribute          map[string]string
+	PasskeyAllowedOrigins     []string
 	// Attestation holds the optional platform attestation config that lets a mobile client prove
 	// its binary identity to initiate a flow directly, independent of any protocol profile.
 	Attestation *AttestationConfig
@@ -875,7 +863,15 @@ type PromptElement struct {
 }
 
 // ConsentDecisions holds the user's consent decisions.
+//
+// Approval is hierarchical: ConsentDecisions, PurposeDecision and ElementDecision each carry their
+// own Approved flag, and a denial at any level denies everything below it. Approval does not flow
+// the other way, so an approved parent still honors a denied child.
 type ConsentDecisions struct {
+	// Approved indicates whether the user approved the consent as a whole
+	Approved bool `json:"approved"`
+	// Reason optionally records why the decision was made, e.g. the prompt timed out
+	Reason ConsentDecisionReason `json:"reason,omitempty"`
 	// Purposes contains the per-purpose element approval decisions
 	Purposes []PurposeDecision `json:"purposes"`
 }
@@ -945,15 +941,17 @@ type ExecutorMeta struct {
 
 // ExecutorResponse represents the response from an executor
 type ExecutorResponse struct {
-	Status         ExecutorStatus         `json:"status"`
-	Inputs         []Input                `json:"inputs,omitempty"`
-	AdditionalData map[string]string      `json:"additionalData,omitempty"`
-	RedirectURL    string                 `json:"redirectUrl,omitempty"`
-	RuntimeData    map[string]string      `json:"runtimeData,omitempty"`
-	ForwardedData  map[string]interface{} `json:"forwardedData,omitempty"`
-	Assertion      string                 `json:"assertion,omitempty"`
-	Error          *common.ServiceError   `json:"error,omitempty"`
-	AuthUser       AuthUser               `json:"-"`
+	Status         ExecutorStatus    `json:"status"`
+	Inputs         []Input           `json:"inputs,omitempty"`
+	AdditionalData map[string]string `json:"additionalData,omitempty"`
+	RedirectURL    string            `json:"redirectUrl,omitempty"`
+	RuntimeData    map[string]string `json:"runtimeData,omitempty"`
+	// SharedRuntimeData carries trusted executor output across CALL flow boundaries.
+	SharedRuntimeData map[string]string      `json:"-"`
+	ForwardedData     map[string]interface{} `json:"forwardedData,omitempty"`
+	Assertion         string                 `json:"assertion,omitempty"`
+	Error             *common.ServiceError   `json:"error,omitempty"`
+	AuthUser          AuthUser               `json:"-"`
 	// EngineData carries executor output the flow engine consumes internally (for example, a
 	// transport signal such as a minted session handle). Unlike AdditionalData, it is never
 	// serialized to the client.
@@ -1005,6 +1003,7 @@ type Application struct {
 	OUID        string `yaml:"ouId,omitempty" json:"ouId,omitempty" jsonschema:"Organization unit ID. The OU this application belongs to."`
 	Name        string `yaml:"name,omitempty" json:"name,omitempty" jsonschema:"Application name."`
 	Description string `yaml:"description,omitempty" json:"description,omitempty" jsonschema:"Optional description of the application's purpose."`
+	Type        string `yaml:"type,omitempty" json:"type,omitempty" jsonschema:"Application type (browser, fullstack, mobile, m2m, mcp, custom)."`
 	Template    string `yaml:"template,omitempty" json:"template,omitempty" jsonschema:"Template used to create the application."`
 
 	URL       string   `yaml:"url,omitempty" json:"url,omitempty" jsonschema:"Application home URL."`
@@ -1030,13 +1029,14 @@ type InboundAuthProfile struct {
 	IsRecoveryFlowEnabled     bool                `json:"isRecoveryFlowEnabled"            yaml:"isRecoveryFlowEnabled"            jsonschema:"Enable self-service recovery. Set to true to allow users to recover their accounts (e.g., password reset). Requires recoveryFlowId or recoveryFlowHandle to be set."`
 	SignOutFlowID             string              `json:"signOutFlowId,omitempty"           yaml:"signOutFlowId,omitempty"           jsonschema:"Sign-out flow ID. Optional. Specifies the flow that terminates the SSO session established by the authentication flow."`
 	SignOutFlowHandle         string              `json:"signOutFlowHandle,omitempty"       yaml:"signOutFlowHandle,omitempty"       jsonschema:"Sign-out flow handle. Optional. Alternative to signOutFlowId — resolved to an ID at import time."`
-	IsSignOutFlowEnabled      bool                `json:"isSignOutFlowEnabled"              yaml:"isSignOutFlowEnabled"              jsonschema:"Enable sign-out. Set to true to allow terminating the SSO session for this application. Requires signOutFlowId or signOutFlowHandle to be set."`
 	ThemeID                   string              `json:"themeId,omitempty"                yaml:"themeId,omitempty"                jsonschema:"Theme configuration ID. Optional. Customizes the visual styling of login pages."`
 	LayoutID                  string              `json:"layoutId,omitempty"               yaml:"layoutId,omitempty"               jsonschema:"Layout configuration ID. Optional. Customizes the screen structure and component positioning of login pages."`
 	Assertion                 *AssertionConfig    `json:"assertion,omitempty"              yaml:"assertion,omitempty"              jsonschema:"Assertion configuration. Optional. Customize assertion validity periods and included user attributes."`
 	LoginConsent              *LoginConsentConfig `json:"loginConsent,omitempty"           yaml:"loginConsent,omitempty"           jsonschema:"Login consent configuration settings."`
-	AllowedUserTypes          []string            `json:"allowedUserTypes,omitempty"       yaml:"allowedUserTypes,omitempty"       jsonschema:"Allowed user types. Optional. Restricts which user types can authenticate to and register against this resource."`
-	Attestation               *AttestationConfig  `json:"attestation,omitempty"            yaml:"attestation,omitempty"            jsonschema:"Platform attestation configuration. Optional. Enables a mobile client to initiate flows directly by proving its binary identity (e.g. Google Play Integrity), regardless of protocol. The service account credentials are write-only and never returned in responses."`
+	AllowedUserTypes          []string            `json:"allowedUserTypes,omitempty"           yaml:"allowedUserTypes,omitempty"           jsonschema:"Allowed user types. Optional. Restricts which user types can register or sign up through this resource."`
+	SubjectAttribute          map[string]string   `json:"subjectAttribute,omitempty"           yaml:"subjectAttribute,omitempty"           jsonschema:"Per-user-type mapping of the schema attribute to use as the token subject (sub) claim, keyed by user type name. The attribute must be unique, required, and string-typed in that user type's schema. When no entry applies, the user's ID is used as the subject."`
+	PasskeyAllowedOrigins     []string            `json:"passkeyAllowedOrigins,omitempty"      yaml:"passkeyAllowedOrigins,omitempty"      jsonschema:"Allowed origins for WebAuthn/passkey operations for this application. Optional. When set, overrides the server-level passkey allowed origins for flow-based passkey operations."`
+	Attestation               *AttestationConfig  `json:"attestation,omitempty"                yaml:"attestation,omitempty"                jsonschema:"Platform attestation configuration. Optional. Enables a mobile client to initiate flows directly by proving its binary identity (e.g. Google Play Integrity), regardless of protocol. The service account credentials are write-only and never returned in responses."`
 }
 
 // OAuthConfigWithSecret is the wire input shape and the create/update echo response shape.
@@ -1068,12 +1068,19 @@ type InboundAuthConfigWithSecret struct {
 	OAuthConfig *OAuthConfigWithSecret `json:"config,omitempty" yaml:"config,omitempty" jsonschema:"OAuth/OIDC configuration. Required when type is 'oauth2'. Defines OAuth grant types, redirect URIs, client authentication, and PKCE settings."`
 }
 
+// InitiatorRequest holds the original HTTP request data that triggered the flow.
+type InitiatorRequest struct {
+	Headers     map[string][]string `json:"headers,omitempty"     yaml:"headers,omitempty"`
+	QueryParams map[string][]string `json:"queryParams,omitempty" yaml:"queryParams,omitempty"`
+}
+
 // NodeContext holds the context for a specific node in the flow execution.
 //
 // TODO: fields on NodeContext are currently exposed directly. Convert to unexported
 // fields accessed via getters and setters so that mutation can be encapsulated.
 type NodeContext struct {
-	Context context.Context
+	Context          context.Context
+	initiatorRequest *InitiatorRequest
 
 	ExecutionID   string
 	FlowType      FlowType
@@ -1087,7 +1094,9 @@ type NodeContext struct {
 	NodeInputs     []Input
 	UserInputs     map[string]string
 	RuntimeData    map[string]string
-	ForwardedData  map[string]interface{}
+	// SharedRuntimeData contains trusted data shared by every frame in the execution.
+	SharedRuntimeData map[string]string
+	ForwardedData     map[string]interface{}
 	// consumedInputs accumulates identifiers of inputs the node has used up
 	consumedInputs   []string
 	Application      Application
@@ -1122,6 +1131,16 @@ func (nc *NodeContext) AppendConsumedInputs(keys []string) {
 // during this call.
 func (nc *NodeContext) GetConsumedInputs() []string {
 	return nc.consumedInputs
+}
+
+// GetInitiatorRequest returns the original HTTP request that triggered the flow.
+func (nc *NodeContext) GetInitiatorRequest() *InitiatorRequest {
+	return nc.initiatorRequest
+}
+
+// SetInitiatorRequest sets the original HTTP request that triggered the flow.
+func (nc *NodeContext) SetInitiatorRequest(req *InitiatorRequest) {
+	nc.initiatorRequest = req
 }
 
 // NodeExecutionRecord represents a record of a node execution in the flow.
@@ -1300,4 +1319,49 @@ func (e *Event) Validate() error {
 type CaptchaVerificationResult struct {
 	// Success reports whether the provider accepted the token as valid.
 	Success bool
+}
+
+// CustomAuthnProvider pairs a provider instance with the credential keys it handles.
+type CustomAuthnProvider struct {
+	Instance AuthnProviderInterface
+	Creds    []string
+}
+
+// KeyRef identifies a cryptographic key by its ID.
+// KeyID takes high precedence over PublicKey when both are present.
+// PublicKey is included for convenience when the key is already loaded; it may be nil if not available.
+type KeyRef struct {
+	KeyID        string
+	PublicKey    gocrypto.PublicKey
+	PublicKeyJWK map[string]interface{}
+}
+
+// PublicKeyFilter specifies criteria for filtering public keys in GetPublicKeys.
+type PublicKeyFilter struct {
+	KeyID     string
+	Algorithm string
+}
+
+// CryptoDetails carries algorithm-specific outputs from an Encrypt operation.
+// EPK is the generated ephemeral public key for ECDH-ES variants, to be embedded in the JWE header.
+// CEK is the content encryption key generated or derived during key establishment.
+// Nil CryptoDetails is returned for algorithms that produce no extra output (e.g. AES-GCM).
+// For RSA-OAEP, RSA-OAEP-256 and ECDH-ES variants, both EPK (where applicable) and CEK are populated.
+// CEK is nil for AES-GCM; EPK is nil for RSA-OAEP and RSA-OAEP-256 (no ephemeral key is generated).
+// IV and Tag are set only for AES-GCM Key Wrap (A128GCMKW etc.) and must be embedded in the JWE protected header.
+type CryptoDetails struct {
+	EPK gocrypto.PublicKey // ECDH-ES variants only; nil for RSA-OAEP, RSA-OAEP-256 and AES-GCM
+	CEK []byte             // Generated or derived CEK; nil for AES-GCM
+	IV  []byte             // AES-GCM Key Wrap only: IV used to wrap the CEK
+	Tag []byte             // AES-GCM Key Wrap only: authentication tag from wrapping the CEK
+}
+
+// PublicKeyInfo describes a public key returned by GetPublicKeys.
+type PublicKeyInfo struct {
+	KeyID               string
+	Algorithm           string
+	PublicKey           gocrypto.PublicKey
+	Thumbprint          string
+	CertificateDER      []byte
+	CertificateChainDER [][]byte // leaf first, then intermediates; nil if not certificate-backed
 }

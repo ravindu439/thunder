@@ -1,26 +1,15 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package config holds Thunder ID engine configuration types shared across packages.
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TrustedIssuerConfig holds configuration for trusted external issuer authentication.
@@ -71,9 +60,17 @@ type SecurityConfig struct {
 // today; future values may include an endpoint or event stream. SyncIntervalSeconds bounds how stale
 // the cache may be; a non-positive value falls back to the built-in default.
 type TokenRevocationConfig struct {
-	Enabled             bool   `yaml:"enabled"               json:"enabled"`
+	// Enabled uses a pointer so an explicit false in deployment.yaml overrides the
+	// default.json default of true; a nil pointer means "not set" and keeps the default.
+	Enabled             *bool  `yaml:"enabled"               json:"enabled"`
 	Source              string `yaml:"source"                json:"source"`
 	SyncIntervalSeconds int    `yaml:"sync_interval_seconds" json:"sync_interval_seconds"`
+}
+
+// IsEnabled reports whether Resource Server token-revocation enforcement is enabled,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c TokenRevocationConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // tokenRevocationSourceDB is the operation-database sync source, the only supported
@@ -150,6 +147,16 @@ type EncryptionConfig struct {
 	Key string `yaml:"key" json:"key"`
 }
 
+// AttributeCacheConfig holds the attribute cache configuration details.
+type AttributeCacheConfig struct {
+	Encryption AttributeCacheEncryptionConfig `yaml:"encryption" json:"encryption"`
+}
+
+// AttributeCacheEncryptionConfig holds the attribute cache encryption configuration details.
+type AttributeCacheEncryptionConfig struct {
+	Enabled bool `yaml:"enabled" json:"enabled"`
+}
+
 // JWTConfig holds the JWT configuration details.
 type JWTConfig struct {
 	Issuer         string `yaml:"issuer"           json:"issuer"`
@@ -167,9 +174,17 @@ type AuthClassConfig struct {
 
 // RefreshTokenConfig holds the refresh token configuration details.
 type RefreshTokenConfig struct {
-	RenewOnGrant          bool  `yaml:"renew_on_grant"           json:"renew_on_grant"`
-	RevokePreviousOnRenew bool  `yaml:"revoke_previous_on_renew" json:"revoke_previous_on_renew"`
+	RenewOnGrant bool `yaml:"renew_on_grant"           json:"renew_on_grant"`
+	// RevokePreviousOnRenew uses a pointer so an explicit false in deployment.yaml overrides
+	// the default.json default of true; a nil pointer means "not set" and keeps the default.
+	RevokePreviousOnRenew *bool `yaml:"revoke_previous_on_renew" json:"revoke_previous_on_renew"`
 	ValidityPeriod        int64 `yaml:"validity_period"          json:"validity_period"`
+}
+
+// RevokePreviousOnRenewEnabled reports whether the previous refresh token is revoked on renewal,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c RefreshTokenConfig) RevokePreviousOnRenewEnabled() bool {
+	return c.RevokePreviousOnRenew != nil && *c.RevokePreviousOnRenew
 }
 
 // AuthorizationCodeConfig holds the authorization code configuration details.
@@ -177,9 +192,23 @@ type AuthorizationCodeConfig struct {
 	ValidityPeriod int64 `yaml:"validity_period" json:"validity_period"`
 }
 
+// AuthorizationRequestConfig holds the authorization request context configuration details.
+type AuthorizationRequestConfig struct {
+	// ValidityPeriod is how long (in seconds) the authorization request context survives while the
+	// user completes the login flow at the gate.
+	ValidityPeriod int64 `yaml:"validity_period" json:"validity_period"`
+}
+
 // DCRConfig holds the Dynamic Client Registration configuration.
 type DCRConfig struct {
-	Insecure bool `yaml:"insecure" json:"insecure"`
+	Enabled  *bool `yaml:"enabled" json:"enabled"`
+	Insecure bool  `yaml:"insecure" json:"insecure"`
+}
+
+// IsEnabled returns whether DCR is enabled, defaulting to false if unset
+// (an explicit default lives in default.json).
+func (c DCRConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
 }
 
 // PARConfig holds the Pushed Authorization Request (RFC 9126) configuration.
@@ -204,33 +233,128 @@ type CIBAConfig struct {
 
 // OAuthConfig holds the OAuth configuration details.
 type OAuthConfig struct {
-	RefreshToken      RefreshTokenConfig      `yaml:"refresh_token"               json:"refresh_token"`
-	AuthorizationCode AuthorizationCodeConfig `yaml:"authorization_code"          json:"authorization_code"`
-	DCR               DCRConfig               `yaml:"dcr"                         json:"dcr"`
-	PAR               PARConfig               `yaml:"par"                         json:"par"`
-	DPoP              DPoPConfig              `yaml:"dpop"                        json:"dpop"`
-	AuthClass         AuthClassConfig         `yaml:"auth_class"                  json:"auth_class"`
-	CIBA              CIBAConfig              `yaml:"ciba"                        json:"ciba"`
+	RefreshToken         RefreshTokenConfig         `yaml:"refresh_token"               json:"refresh_token"`
+	AuthorizationCode    AuthorizationCodeConfig    `yaml:"authorization_code"          json:"authorization_code"`
+	AuthorizationRequest AuthorizationRequestConfig `yaml:"authorization_request"       json:"authorization_request"`
+	DCR                  DCRConfig                  `yaml:"dcr"                         json:"dcr"`
+	PAR                  PARConfig                  `yaml:"par"                         json:"par"`
+	DPoP                 DPoPConfig                 `yaml:"dpop"                        json:"dpop"`
+	AuthClass            AuthClassConfig            `yaml:"auth_class"                  json:"auth_class"`
+	CIBA                 CIBAConfig                 `yaml:"ciba"                        json:"ciba"`
+	Revocation           RevocationConfig           `yaml:"revocation"                  json:"revocation"`
+	TokenExchange        TokenExchangeConfig        `yaml:"token_exchange"              json:"token_exchange"`
 	// AllowWildcardRedirectURI enables wildcard pattern matching for redirect URIs.
 	// When false (default), only exact redirect URI matching is performed.
 	AllowWildcardRedirectURI bool `yaml:"allow_wildcard_redirect_uri" json:"allow_wildcard_redirect_uri"`
+	// AllowedGrantTypes enables registering of only the configured grant types
+	AllowedGrantTypes []string `yaml:"allowed_grant_types" json:"allowed_grant_types"`
+	// AllowedResponseTypes enables registering of only the configured response types
+	AllowedResponseTypes []string `yaml:"allowed_response_types" json:"allowed_response_types"`
+	// AllowedAuthMethods lists allowed client token endpoint auth methods
+	AllowedAuthMethods []string `yaml:"allowed_auth_methods" json:"allowed_auth_methods"`
+	// SendServerErrorsToClient controls whether a flow failure that maps to the OAuth
+	// server_error code is reported to the client. Denials (access_denied) are always
+	// reported and are not affected. Nil means unset; the default lives in default.json.
+	SendServerErrorsToClient *bool `yaml:"send_server_errors_to_client" json:"send_server_errors_to_client"`
+
+	TokenRevocation OAuthTokenRevocationConfig `yaml:"token_revocation" json:"token_revocation"`
+	Logout          LogoutConfig               `yaml:"logout" json:"logout"`
+}
+
+// SendServerErrorsToClientEnabled reports whether server errors reach the client, defaulting to
+// false when unset so that a missing key does not disclose an internal failure to the client.
+func (c OAuthConfig) SendServerErrorsToClientEnabled() bool {
+	return c.SendServerErrorsToClient != nil && *c.SendServerErrorsToClient
+}
+
+// OAuthTokenRevocationConfig holds the configuration details for the token revocation feature
+type OAuthTokenRevocationConfig struct {
+	// Enabled controls whether the OAuth token revocation endpoint is active. It uses a pointer
+	// so an explicit false in deployment.yaml overrides the default.json default of true; a nil
+	// pointer means "not set" and keeps the default.
+	Enabled *bool `yaml:"enabled" json:"enabled"`
+}
+
+// IsEnabled reports whether the OAuth token revocation endpoint is active,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c OAuthTokenRevocationConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
+}
+
+// LogoutConfig holds the configuration details for the logout endpoint
+type LogoutConfig struct {
+	// Enabled controls whether the OAuth logout endpoint is active. It uses a pointer so an
+	// explicit false in deployment.yaml overrides the default.json default of true; a nil
+	// pointer means "not set" and keeps the default.
+	Enabled *bool `yaml:"enabled" json:"enabled"`
+}
+
+// IsEnabled reports whether the OAuth logout endpoint is active,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c LogoutConfig) IsEnabled() bool {
+	return c.Enabled != nil && *c.Enabled
+}
+
+// RevocationConfig holds grant-scoped (token family) revocation settings.
+type RevocationConfig struct {
+	TokenFamily TokenFamilyRevocationConfig `yaml:"token_family" json:"token_family"`
+}
+
+// TokenFamilyRevocationConfig toggles the triggers that revoke a whole token family (one authorization
+// grant). Each defaults to on (set in default.json), matching the fail-closed security posture.
+// Each toggle uses a pointer so an explicit false in deployment.yaml overrides the default.json
+// default of true; a nil pointer means "not set" and keeps the default.
+type TokenFamilyRevocationConfig struct {
+	// OnRefreshReplay revokes the family when a rotated (already-revoked) refresh token is replayed.
+	// It has no effect unless refresh-token rotation (renew_on_grant) is enabled, since a token is only
+	// revoked, and thus only replayable, once it has been rotated.
+	OnRefreshReplay *bool `yaml:"on_refresh_replay"   json:"on_refresh_replay"`
+	// OnExplicitRevoke revokes the family when a token carrying a tfid is revoked via RFC 7009, so a
+	// login's access tokens drop with its refresh token.
+	OnExplicitRevoke *bool `yaml:"on_explicit_revoke" json:"on_explicit_revoke"`
+	// OnCodeReplay revokes the family when an authorization code is redeemed twice (replay).
+	OnCodeReplay *bool `yaml:"on_code_replay"     json:"on_code_replay"`
+}
+
+// OnRefreshReplayEnabled reports whether the family is revoked on refresh-token replay,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c TokenFamilyRevocationConfig) OnRefreshReplayEnabled() bool {
+	return c.OnRefreshReplay != nil && *c.OnRefreshReplay
+}
+
+// OnExplicitRevokeEnabled reports whether the family is revoked on explicit RFC 7009 revocation,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c TokenFamilyRevocationConfig) OnExplicitRevokeEnabled() bool {
+	return c.OnExplicitRevoke != nil && *c.OnExplicitRevoke
+}
+
+// OnCodeReplayEnabled reports whether the family is revoked on authorization-code replay,
+// defaulting to false when unset (an explicit default lives in default.json).
+func (c TokenFamilyRevocationConfig) OnCodeReplayEnabled() bool {
+	return c.OnCodeReplay != nil && *c.OnCodeReplay
+}
+
+// TokenExchangeConfig holds RFC 8693 token-exchange settings.
+type TokenExchangeConfig struct {
+	// TokenFamily selects how an exchanged token relates to the subject token's token family:
+	// "none" (default) issues an independent token with no tfid; "inherit" copies the subject
+	// token's tfid so the exchanged token is revoked with that token family.
+	TokenFamily string `yaml:"token_family" json:"token_family"`
 }
 
 // FlowConfig holds the configuration details for the flow service.
 type FlowConfig struct {
-	DefaultAuthFlowHandle    string `yaml:"default_auth_flow_handle"    json:"default_auth_flow_handle"`
-	UserOnboardingFlowHandle string `yaml:"user_onboarding_flow_handle" json:"user_onboarding_flow_handle"`
-	MaxVersionHistory        int    `yaml:"max_version_history"         json:"max_version_history"`
-	AutoInferRegistration    bool   `yaml:"auto_infer_registration"     json:"auto_infer_registration"`
-	Store                    string `yaml:"store"                       json:"store"`
+	MaxVersionHistory     int    `yaml:"max_version_history" json:"max_version_history"`
+	AutoInferRegistration bool   `yaml:"auto_infer_registration" json:"auto_infer_registration"`
+	Store                 string `yaml:"store"               json:"store"`
 	// Executors lists built-in executor names to register (e.g. CredentialsAuthExecutor).
 	// When empty, all built-in executors are registered. When set, only listed executors
 	// are available; omit only executors you intentionally disable on this node.
-	Executors []string `yaml:"executors"                   json:"executors"`
+	Executors []string `yaml:"executors"    json:"executors"`
 	// Interceptors lists built-in interceptor names to register (e.g. CaptchaInterceptor).
 	// When empty, all built-in interceptors are registered. When set, only listed interceptors
 	// are available; omit only interceptors you intentionally disable on this node.
-	Interceptors []string `yaml:"interceptors"                json:"interceptors"`
+	Interceptors []string `yaml:"interceptors" json:"interceptors"`
 }
 
 // RequiredClaim defines a claim name and expected value that must be present in the token.
@@ -293,4 +417,156 @@ type ObservabilityOTelConfig struct {
 	Categories     []string `yaml:"categories"      json:"categories"`
 	// Insecure disables TLS for OTLP (not recommended for production)
 	Insecure bool `yaml:"insecure"        json:"insecure"`
+}
+
+// LogConfig configures the engine's internal logger.
+type LogConfig struct {
+	// Level is the minimum log level: "debug", "info", "warn", or "error".
+	// Empty keeps the engine's built-in default.
+	Level string `yaml:"level" json:"level"`
+	// Format selects the record format: "json" or "text" (default).
+	Format string `yaml:"format" json:"format"`
+}
+
+// OriginConfig holds the allowed cross-origin origins for the engine's CORS-enabled endpoints
+// (well-known discovery, JWKS, token, userinfo, and the rest of the OAuth surface). An empty
+// AllowedOrigins leaves CORS disabled: no cross-origin request is allowed to read a response.
+//
+// The field uses the camelCase "allowedOrigins" tag (rather than this file's usual snake_case) to
+// match the wire format the engine re-encodes it to internally.
+type OriginConfig struct {
+	AllowedOrigins []OriginEntry `yaml:"allowedOrigins" json:"allowedOrigins"`
+}
+
+// UnmarshalJSON decodes cfg, leaving AllowedOrigins nil when the field is omitted but rejecting
+// an explicit "allowedOrigins": null, which would otherwise be indistinguishable from omission
+// and silently disable CORS instead of failing validation.
+func (c *OriginConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		AllowedOrigins json.RawMessage `json:"allowedOrigins"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.AllowedOrigins == nil {
+		c.AllowedOrigins = nil
+		return nil
+	}
+	if string(raw.AllowedOrigins) == "null" {
+		return fmt.Errorf("thunderidengine: allowedOrigins must be a list, not null")
+	}
+	var entries []OriginEntry
+	if err := json.Unmarshal(raw.AllowedOrigins, &entries); err != nil {
+		return err
+	}
+	c.AllowedOrigins = entries
+	return nil
+}
+
+// UnmarshalYAML decodes cfg, leaving AllowedOrigins nil when the field is omitted but rejecting
+// an explicit "allowedOrigins: null" for the same reason as UnmarshalJSON.
+func (c *OriginConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("thunderidengine: origin configuration must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value != "allowedOrigins" {
+			continue
+		}
+		value := node.Content[i+1]
+		if value.Tag == "!!null" {
+			return fmt.Errorf("thunderidengine: allowedOrigins must be a list, not null")
+		}
+		var entries []OriginEntry
+		if err := value.Decode(&entries); err != nil {
+			return err
+		}
+		c.AllowedOrigins = entries
+		return nil
+	}
+	c.AllowedOrigins = nil
+	return nil
+}
+
+// OriginEntry is one allowed-origin entry: exactly one of Origin (a literal origin, e.g.
+// "https://app.example.com") or Regex (a fully anchored pattern, e.g. "^https://.*\\.example\\.com$")
+// must be set. Decoding from YAML or JSON enforces this; a bare string decodes to Origin, and an
+// object of the shape { regex: "..." } decodes to Regex.
+type OriginEntry struct {
+	Origin string
+	Regex  string
+}
+
+// toEntry renders the origin as its wire form: a bare string for a literal, or a { "regex": ... }
+// object for a pattern.
+func (o OriginEntry) toEntry() (any, error) {
+	switch {
+	case o.Origin != "" && o.Regex != "":
+		return nil, fmt.Errorf("thunderidengine: OriginEntry must set exactly one of Origin or Regex, got both")
+	case o.Regex != "":
+		return map[string]string{"regex": o.Regex}, nil
+	case o.Origin != "":
+		return o.Origin, nil
+	default:
+		return nil, fmt.Errorf("thunderidengine: OriginEntry must set exactly one of Origin or Regex, got neither")
+	}
+}
+
+// MarshalJSON encodes the origin to its wire form.
+func (o OriginEntry) MarshalJSON() ([]byte, error) {
+	entry, err := o.toEntry()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(entry)
+}
+
+// MarshalYAML encodes the origin to its wire form.
+func (o OriginEntry) MarshalYAML() (any, error) {
+	return o.toEntry()
+}
+
+// UnmarshalJSON decodes a JSON string into Origin, or an object of the shape { "regex": "..." }
+// into Regex.
+func (o *OriginEntry) UnmarshalJSON(data []byte) error {
+	var literal string
+	if err := json.Unmarshal(data, &literal); err == nil {
+		*o = OriginEntry{Origin: literal}
+		return nil
+	}
+	var obj struct {
+		Regex string `json:"regex"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return fmt.Errorf("thunderidengine: origin entry must be a string or { regex: ... } object: %w", err)
+	}
+	if obj.Regex == "" {
+		return fmt.Errorf("thunderidengine: origin entry: regex object missing 'regex' field")
+	}
+	*o = OriginEntry{Regex: obj.Regex}
+	return nil
+}
+
+// UnmarshalYAML decodes a YAML scalar into Origin, or a mapping of the shape { regex: "..." } into
+// Regex.
+func (o *OriginEntry) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		*o = OriginEntry{Origin: node.Value}
+		return nil
+	case yaml.MappingNode:
+		var obj struct {
+			Regex string `yaml:"regex"`
+		}
+		if err := node.Decode(&obj); err != nil {
+			return fmt.Errorf("thunderidengine: origin entry: %w", err)
+		}
+		if obj.Regex == "" {
+			return fmt.Errorf("thunderidengine: origin entry: regex object missing 'regex' field")
+		}
+		*o = OriginEntry{Regex: obj.Regex}
+		return nil
+	default:
+		return fmt.Errorf("thunderidengine: origin entry must be a string or { regex: ... } object")
+	}
 }

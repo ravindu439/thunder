@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {screen, fireEvent, waitFor, renderWithProviders, renderHook} from '@thunderid/test-utils';
+import {screen, fireEvent, waitFor, renderWithProviders, renderHook, within} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
 import {describe, it, expect, vi, beforeEach, beforeAll} from 'vitest';
 import CreateOrganizationUnitPage from '../CreateOrganizationUnitPage';
@@ -65,12 +50,16 @@ vi.mock('@/contexts/useOrganizationUnit', () => ({
 }));
 
 // Mock name suggestions utility
-vi.mock('@thunderid/utils', () => ({
-  generateRandomHumanReadableIdentifiers: () => ['Suggested Name One', 'Suggested Name Two', 'Suggested Name Three'],
-}));
+vi.mock('@thunderid/utils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@thunderid/utils')>();
+  return {
+    ...actual,
+    generateRandomHumanReadableIdentifiers: () => ['Suggested Name One', 'Suggested Name Two', 'Suggested Name Three'],
+  };
+});
 
 describe('CreateOrganizationUnitPage', () => {
-  let t: (key: string) => string;
+  let t: (key: string, options?: Record<string, unknown>) => string;
 
   beforeAll(() => {
     ({t} = renderHook(() => useTranslation()).result.current);
@@ -102,18 +91,10 @@ describe('CreateOrganizationUnitPage', () => {
     expect(screen.getByLabelText(/Handle/i)).toBeInTheDocument();
   });
 
-  it('should render description input field', () => {
-    renderWithProviders(<CreateOrganizationUnitPage />);
-
-    expect(screen.getByLabelText(/Description/i)).toBeInTheDocument();
-  });
-
-  it('should render name suggestions', () => {
+  it('should render a name suggestion', () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
     expect(screen.getByRole('button', {name: 'Suggested Name One'})).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Suggested Name Two'})).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Suggested Name Three'})).toBeInTheDocument();
   });
 
   it('should auto-generate handle from name', () => {
@@ -179,6 +160,59 @@ describe('CreateOrganizationUnitPage', () => {
     });
   });
 
+  it('should accept a single character name and its generated handle', async () => {
+    renderWithProviders(<CreateOrganizationUnitPage />);
+
+    const nameInput = screen.getByLabelText(/Name/i);
+    fireEvent.change(nameInput, {target: {value: 'W'}});
+
+    expect(screen.getByLabelText(/Handle/i)).toHaveValue('w');
+
+    await waitFor(() => {
+      expect(screen.getByText(t('common:actions.create', {defaultValue: 'Create'}))).not.toBeDisabled();
+    });
+  });
+
+  it('should reject a handle longer than the maximum length', async () => {
+    renderWithProviders(<CreateOrganizationUnitPage />);
+
+    fireEvent.change(screen.getByLabelText(/Name/i), {target: {value: 'Workforce'}});
+    fireEvent.change(screen.getByLabelText(/Handle/i), {target: {value: 'a'.repeat(101)}});
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          t('organizationUnits:edit.general.handle.validations.maxLength', {
+            max: 100,
+            defaultValue: 'Handle cannot exceed 100 characters',
+          }),
+        ),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(t('common:actions.create', {defaultValue: 'Create'}))).toBeDisabled();
+  });
+
+  it('should reject a name longer than the maximum length', async () => {
+    renderWithProviders(<CreateOrganizationUnitPage />);
+
+    const nameInput = screen.getByLabelText(/Name/i);
+    fireEvent.change(nameInput, {target: {value: 'a'.repeat(101)}});
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          t('organizationUnits:edit.general.name.validations.maxLength', {
+            max: 100,
+            defaultValue: 'Name cannot exceed 100 characters',
+          }),
+        ),
+      ).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(t('common:actions.create', {defaultValue: 'Create'}))).toBeDisabled();
+  });
+
   it('should call mutate on form submit', async () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
@@ -209,7 +243,7 @@ describe('CreateOrganizationUnitPage', () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
     // Find the close button (X icon button)
-    const closeButton = screen.getByRole('button', {name: ''});
+    const closeButton = screen.getByRole('button', {name: 'Close'});
     fireEvent.click(closeButton);
 
     await waitFor(() => {
@@ -261,8 +295,9 @@ describe('CreateOrganizationUnitPage', () => {
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText('Failed to create organization unit. Please try again.')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
   });
 
   it('should close error alert when close button is clicked', async () => {
@@ -285,77 +320,48 @@ describe('CreateOrganizationUnitPage', () => {
     fireEvent.click(createButton);
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText('Failed to create organization unit. Please try again.')).toBeInTheDocument();
     });
 
     // Close the alert
-    const alertCloseButton = screen.getByRole('button', {name: /close/i});
+    const alertCloseButton = within(screen.getByRole('alert')).getByRole('button', {name: /close/i});
     fireEvent.click(alertCloseButton);
 
     await waitFor(() => {
-      expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+      expect(screen.queryByText('Failed to create organization unit. Please try again.')).not.toBeInTheDocument();
     });
   });
 
-  it('should include description in request when provided', async () => {
-    renderWithProviders(<CreateOrganizationUnitPage />);
-
-    const nameInput = screen.getByLabelText(/Name/i);
-    const descriptionInput = screen.getByLabelText(/Description/i);
-
-    fireEvent.change(nameInput, {target: {value: 'Test Organization'}});
-    fireEvent.change(descriptionInput, {target: {value: 'A test description'}});
-
-    // Wait for form validation to complete
-    await waitFor(() => {
-      const createButton = screen.getByText(t('common:actions.create'));
-      expect(createButton).not.toBeDisabled();
+  it('should clear the create error when a field changes', async () => {
+    mockMutate.mockImplementation((_data, options: {onError: (err: Error) => void}) => {
+      options.onError(new Error('Network error'));
     });
 
-    const createButton = screen.getByText(t('common:actions.create'));
-    fireEvent.click(createButton);
-
-    await waitFor(() => {
-      expect(mockMutate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          description: 'A test description',
-        }),
-        expect.any(Object),
-      );
-    });
-  });
-
-  it('should set description to null when empty', async () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
     const nameInput = screen.getByLabelText(/Name/i);
     fireEvent.change(nameInput, {target: {value: 'Test Organization'}});
 
-    // Wait for form validation to complete
     await waitFor(() => {
       const createButton = screen.getByText(t('common:actions.create'));
       expect(createButton).not.toBeDisabled();
     });
 
-    const createButton = screen.getByText(t('common:actions.create'));
-    fireEvent.click(createButton);
+    fireEvent.click(screen.getByText(t('common:actions.create')));
 
     await waitFor(() => {
-      expect(mockMutate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          description: null,
-        }),
-        expect.any(Object),
-      );
+      expect(screen.getByText('Failed to create organization unit. Please try again.')).toBeInTheDocument();
     });
+
+    fireEvent.change(nameInput, {target: {value: 'Test Organization Updated'}});
+
+    expect(screen.queryByText('Failed to create organization unit. Please try again.')).not.toBeInTheDocument();
   });
 
   it('should show "Root Organization Unit" in parent field when no parent is provided', () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
-    const parentInput = screen.getByLabelText(new RegExp(t('organizationUnits:edit.general.parent.label'), 'i'));
-    expect(parentInput).toHaveValue(t('organizationUnits:edit.general.ou.noParent.label'));
-    expect(parentInput).toHaveAttribute('readOnly');
+    expect(screen.getByText(t('organizationUnits:edit.general.ou.noParent.label'))).toBeInTheDocument();
   });
 
   it('should set parent to null when no parent is in navigation state', async () => {
@@ -388,9 +394,7 @@ describe('CreateOrganizationUnitPage', () => {
 
     renderWithProviders(<CreateOrganizationUnitPage />);
 
-    const parentInput = screen.getByLabelText(new RegExp(t('organizationUnits:edit.general.parent.label'), 'i'));
-    expect(parentInput).toHaveValue('Engineering (engineering)');
-    expect(parentInput).toHaveAttribute('readOnly');
+    expect(screen.getByText('Engineering (engineering)')).toBeInTheDocument();
   });
 
   it('should display parent name without handle when handle is not provided', () => {
@@ -398,8 +402,7 @@ describe('CreateOrganizationUnitPage', () => {
 
     renderWithProviders(<CreateOrganizationUnitPage />);
 
-    const parentInput = screen.getByLabelText(new RegExp(t('organizationUnits:edit.general.parent.label'), 'i'));
-    expect(parentInput).toHaveValue('Engineering');
+    expect(screen.getByText('Engineering')).toBeInTheDocument();
   });
 
   it('should submit with parent ID from navigation state', async () => {
@@ -434,7 +437,7 @@ describe('CreateOrganizationUnitPage', () => {
     const handleInput = screen.getByLabelText(/Handle/i);
     fireEvent.change(handleInput, {target: {value: 'my-custom-handle'}});
 
-    fireEvent.click(screen.getByRole('button', {name: 'Suggested Name Two'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Suggested Name One'}));
 
     // Handle should not change after suggestion click since it was manually edited
     expect(handleInput).toHaveValue('my-custom-handle');
@@ -469,7 +472,7 @@ describe('CreateOrganizationUnitPage', () => {
 
     renderWithProviders(<CreateOrganizationUnitPage />);
 
-    const closeButton = screen.getByRole('button', {name: ''});
+    const closeButton = screen.getByRole('button', {name: 'Close'});
     fireEvent.click(closeButton);
 
     // Should not throw - error is logged
@@ -509,11 +512,9 @@ describe('CreateOrganizationUnitPage', () => {
 
     const nameInput = screen.getByLabelText(/Name/i);
     const handleInput = screen.getByLabelText(/Handle/i);
-    const descriptionInput = screen.getByLabelText(/Description/i);
 
     fireEvent.change(nameInput, {target: {value: '  Test Organization  '}});
     fireEvent.change(handleInput, {target: {value: '  test-org  '}});
-    fireEvent.change(descriptionInput, {target: {value: '  A description  '}});
 
     // Wait for form validation to complete
     await waitFor(() => {
@@ -529,7 +530,6 @@ describe('CreateOrganizationUnitPage', () => {
         expect.objectContaining({
           name: 'Test Organization',
           handle: 'test-org',
-          description: 'A description',
         }),
         expect.any(Object),
       );
@@ -542,9 +542,9 @@ describe('CreateOrganizationUnitPage', () => {
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
   });
 
-  it('should render suggestions label', () => {
+  it('should render the suggestion prefix label', () => {
     renderWithProviders(<CreateOrganizationUnitPage />);
 
-    expect(screen.getByText(t('organizationUnits:create.suggestions.label'))).toBeInTheDocument();
+    expect(screen.getByText('Need inspiration? How about')).toBeInTheDocument();
   });
 });

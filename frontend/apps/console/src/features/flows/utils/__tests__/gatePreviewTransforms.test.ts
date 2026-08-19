@@ -1,30 +1,16 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import type {Application} from '@thunderid/configure-applications';
 import {describe, expect, it} from 'vitest';
 import {
   resolveApplicationMeta,
   resolveTemplatesDeep,
   withDerivedEventTypes,
   withDynamicFieldStandIns,
+  withRichTextActionRefs,
   type PreviewComponent,
 } from '../gatePreviewTransforms';
-import type {Application} from '@/features/applications/models/application';
 
 const application = {
   id: 'app-1',
@@ -158,5 +144,40 @@ describe('withDynamicFieldStandIns', () => {
     const text = {id: 'text_001', type: 'TEXT', label: 'Sign In'} as unknown as PreviewComponent;
 
     expect(withDynamicFieldStandIns([text], 'caption')[0]).toEqual(text);
+  });
+});
+
+describe('withRichTextActionRefs', () => {
+  it('should attach the edge id as action.ref on a wired rich-text component', () => {
+    const richText = {id: 'rich_001', type: 'RICH_TEXT', label: '<p><a href="#">Reset</a></p>'} as PreviewComponent;
+    const [result] = withRichTextActionRefs([richText], new Map([['rich_001', 'action_recovery']]));
+
+    expect((result as PreviewComponent & {action?: {ref?: string}}).action?.ref).toBe('action_recovery');
+  });
+
+  it('should re-attach action.ref on rich text nested inside a block', () => {
+    const block = {
+      id: 'block_001',
+      type: 'BLOCK',
+      components: [{id: 'rich_001', type: 'RICH_TEXT', label: '<p><a href="#">Reset</a></p>'}],
+    } as unknown as PreviewComponent;
+    const [result] = withRichTextActionRefs([block], new Map([['rich_001', 'action_recovery']]));
+    const [nested] = result.components as (PreviewComponent & {action?: {ref?: string}})[];
+
+    expect(nested.action?.ref).toBe('action_recovery');
+  });
+
+  it('should not touch rich text without a matching option', () => {
+    const richText = {id: 'rich_002', type: 'RICH_TEXT', label: 'plain'} as PreviewComponent;
+    const [result] = withRichTextActionRefs([richText], new Map([['rich_001', 'action_recovery']]));
+
+    expect((result as PreviewComponent & {action?: unknown}).action).toBeUndefined();
+  });
+
+  it('should leave non-rich-text components untouched', () => {
+    const action = {id: 'action_001', type: 'ACTION', label: 'Sign In'} as unknown as PreviewComponent;
+    const [result] = withRichTextActionRefs([action], new Map([['action_001', 'action_001']]));
+
+    expect((result as PreviewComponent & {action?: unknown}).action).toBeUndefined();
   });
 });

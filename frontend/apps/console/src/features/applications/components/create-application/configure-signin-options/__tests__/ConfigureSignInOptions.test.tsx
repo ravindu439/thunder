@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -23,6 +8,16 @@ import {describe, it, expect, beforeEach, vi} from 'vitest';
 import ConfigureSignInOptions, {type ConfigureSignInOptionsProps} from '../ConfigureSignInOptions';
 import type {BasicFlowDefinition} from '@/features/flows/models/responses';
 import findMatchingFlowForIntegrations from '@/features/flows/utils/findMatchingFlowForIntegrations';
+
+// Real @thunderid/configure-connections (imported for AuthenticatorTypes/IdentityProviderTypes below)
+// transitively resolves @thunderid/configure-organization-units' dist build, which fails to resolve
+// its framer-motion import under vitest's transform. Stubbed here to avoid that (same workaround
+// ApplicationCreatePage.test.tsx already applies); this component never renders anything from it.
+vi.mock('@thunderid/configure-organization-units', () => ({
+  useHasMultipleOUs: () => ({hasMultipleOUs: false, isLoading: false, ouList: []}),
+  useGetOrganizationUnit: () => ({data: undefined}),
+  OrganizationUnitPickerScreen: () => null,
+}));
 
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
@@ -71,14 +66,29 @@ vi.mock('@/features/flows/api/useGetFlows', () => ({
 // Mock useApplicationCreateContext - need to mock the correct path used by the component
 const mockSetSelectedAuthFlow = vi.fn();
 const mockSetIntegrations = vi.fn();
-const mockSelectedAuthFlow: BasicFlowDefinition | null = null;
+const mockSetIsEmailOtpMfaEnabled = vi.fn();
+const mockSetIsSmsOtpMfaEnabled = vi.fn();
+let mockSelectedAuthFlow: BasicFlowDefinition | null = null;
 vi.mock('@/features/applications/hooks/useApplicationCreateContext', () => ({
   default: () => ({
     selectedAuthFlow: mockSelectedAuthFlow,
     setSelectedAuthFlow: mockSetSelectedAuthFlow,
     setIntegrations: mockSetIntegrations,
+    setIsEmailOtpMfaEnabled: mockSetIsEmailOtpMfaEnabled,
+    setIsSmsOtpMfaEnabled: mockSetIsSmsOtpMfaEnabled,
   }),
 }));
+
+// ConfigureMfaSettings renders its own AuthMethodGroup via useApplicationCreateContext/useSMSProviders
+// directly; stubbed here since these tests only exercise ConfigureSignInOptions' own logic
+// (loading/error/flow-selection/onReadyChange), not the MFA section's internals (covered by
+// ConfigureMfaSettings.test.tsx).
+vi.mock(
+  '@/features/applications/components/create-application/configure-security-settings/ConfigureMfaSettings',
+  () => ({
+    default: () => <div data-testid="mfa-settings-view" />,
+  }),
+);
 
 // Mock findMatchingFlowForIntegrations
 vi.mock('@/features/flows/utils/findMatchingFlowForIntegrations', () => ({
@@ -99,9 +109,9 @@ vi.mock('../FlowsListView', () => ({
   ),
 }));
 
-vi.mock('../IndividualMethodsToggleView', () => ({
-  default: ({onIntegrationToggle}: {onIntegrationToggle: (id: string) => void}) => (
-    <div data-testid="individual-methods-view">
+vi.mock('../PromptForCredentialsGroup', () => ({
+  default: ({onIntegrationToggle, disabled}: {onIntegrationToggle: (id: string) => void; disabled?: boolean}) => (
+    <div data-testid="prompt-for-credentials-view" data-disabled={disabled ?? false}>
       <button
         type="button"
         data-testid="toggle-basic-auth"
@@ -109,6 +119,19 @@ vi.mock('../IndividualMethodsToggleView', () => ({
       >
         Toggle Basic Auth
       </button>
+    </div>
+  ),
+}));
+
+vi.mock('../PasswordlessLoginGroup', () => ({
+  default: ({disabled}: {disabled?: boolean}) => (
+    <div data-testid="passwordless-login-view" data-disabled={disabled ?? false} />
+  ),
+}));
+
+vi.mock('../SocialLoginGroup', () => ({
+  default: ({onIntegrationToggle, disabled}: {onIntegrationToggle: (id: string) => void; disabled?: boolean}) => (
+    <div data-testid="social-login-view" data-disabled={disabled ?? false}>
       <button type="button" data-testid="toggle-google" onClick={() => onIntegrationToggle('google-idp')}>
         Toggle Google
       </button>
@@ -152,6 +175,7 @@ describe('ConfigureSignInOptions', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelectedAuthFlow = null;
     mockUseIdentityProviders.mockReturnValue({
       data: mockIdentityProviders,
       isLoading: false,
@@ -175,10 +199,10 @@ describe('ConfigureSignInOptions', () => {
       expect(screen.getByText('Choose how users will sign in')).toBeInTheDocument();
     });
 
-    it('should render IndividualMethodsToggleView', () => {
+    it('should render the sign-in method groups', () => {
       renderComponent();
 
-      expect(screen.getByTestId('individual-methods-view')).toBeInTheDocument();
+      expect(screen.getByTestId('prompt-for-credentials-view')).toBeInTheDocument();
     });
 
     it('should render FlowsListView', () => {
@@ -345,6 +369,38 @@ describe('ConfigureSignInOptions', () => {
     });
   });
 
+  describe('pre-configured flow disables individual toggles', () => {
+    it('does not disable the toggle groups when no flow is selected', () => {
+      renderComponent();
+
+      expect(screen.getByTestId('prompt-for-credentials-view')).toHaveAttribute('data-disabled', 'false');
+      expect(screen.getByTestId('passwordless-login-view')).toHaveAttribute('data-disabled', 'false');
+      expect(screen.getByTestId('social-login-view')).toHaveAttribute('data-disabled', 'false');
+    });
+
+    it('disables every toggle group when a pre-configured flow is manually selected', () => {
+      mockSelectedAuthFlow = mockFlows[0];
+      renderComponent({
+        integrations: {[AuthenticatorTypes.CREDENTIALS_AUTH]: false},
+      });
+
+      expect(screen.getByTestId('prompt-for-credentials-view')).toHaveAttribute('data-disabled', 'true');
+      expect(screen.getByTestId('passwordless-login-view')).toHaveAttribute('data-disabled', 'true');
+      expect(screen.getByTestId('social-login-view')).toHaveAttribute('data-disabled', 'true');
+    });
+
+    it('does not disable the toggle groups when a flow was only auto-matched from active toggles', () => {
+      mockSelectedAuthFlow = mockFlows[0];
+      renderComponent({
+        integrations: {[AuthenticatorTypes.CREDENTIALS_AUTH]: true},
+      });
+
+      expect(screen.getByTestId('prompt-for-credentials-view')).toHaveAttribute('data-disabled', 'false');
+      expect(screen.getByTestId('passwordless-login-view')).toHaveAttribute('data-disabled', 'false');
+      expect(screen.getByTestId('social-login-view')).toHaveAttribute('data-disabled', 'false');
+    });
+  });
+
   describe('empty data handling', () => {
     it('should handle empty identity providers list', () => {
       mockUseIdentityProviders.mockReturnValue({
@@ -355,7 +411,7 @@ describe('ConfigureSignInOptions', () => {
 
       renderComponent();
 
-      expect(screen.getByTestId('individual-methods-view')).toBeInTheDocument();
+      expect(screen.getByTestId('prompt-for-credentials-view')).toBeInTheDocument();
     });
 
     it('should handle empty flows list', () => {
@@ -379,7 +435,7 @@ describe('ConfigureSignInOptions', () => {
 
       renderComponent();
 
-      expect(screen.getByTestId('individual-methods-view')).toBeInTheDocument();
+      expect(screen.getByTestId('prompt-for-credentials-view')).toBeInTheDocument();
     });
 
     it('should handle null flows from useGetFlows', () => {

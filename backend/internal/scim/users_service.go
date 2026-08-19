@@ -375,7 +375,9 @@ func (s *scimUsersService) getCredentialKeys(
 	credKeys := make(map[string]struct{})
 	// Use elevated runtime context if necessary, but we are just reading schema info.
 	credentialInfos, err := s.userTypeService.GetAttributes(security.WithRuntimeContext(ctx),
-		entitytype.TypeCategoryUser, resolvedUserTypeName, true, false, false)
+		entitytype.TypeCategoryUser, resolvedUserTypeName,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false})
+
 	if err != nil {
 		logger.Error(ctx, "SCIM: failed to resolve credential attribute keys",
 			log.String("userType", resolvedUserTypeName), log.Any("error", err))

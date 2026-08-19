@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -586,6 +571,50 @@ func (suite *SMSExecutorTestSuite) TestExecute_SendMode_TemplateRenderFailure_Re
 	suite.Contains(err.Error(), "failed to render SMS template")
 	suite.mockSMSSenderSvc.AssertNotCalled(suite.T(), "Send",
 		mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+}
+
+func (suite *SMSExecutorTestSuite) TestExecute_SendMode_TemplateDataIncludesRuntimeData() {
+	ctx := &providers.NodeContext{
+		ExecutionID:  "test-flow-id",
+		ExecutorMode: ExecutorModeSend,
+		Application:  providers.Application{Name: "MyApp"},
+		UserInputs: map[string]string{
+			common.AttributeMobileNumber: "+94714627887",
+		},
+		RuntimeData: map[string]string{
+			common.RuntimeKeyBindingMessage: "Approve sign-in",
+		},
+		ForwardedData: map[string]interface{}{
+			common.ForwardedDataKeyTemplateData: map[string]interface{}{
+				"inviteLink": "https://localhost:5190/gate/invite?executionId=test",
+			},
+		},
+		NodeProperties: map[string]interface{}{
+			propertyKeyNotificationSenderID: "sender-uuid-001",
+			propertyKeySMSTemplate:          string(template.ScenarioCIBANotification),
+		},
+	}
+
+	suite.mockBaseExecutor.On("GetRequiredInputs", mock.Anything).Return([]providers.Input{
+		{Identifier: common.AttributeMobileNumber, Type: providers.InputTypePhone, Required: true},
+	}).Maybe()
+	suite.mockTemplateService.On("Render", mock.Anything, template.ScenarioCIBANotification,
+		template.TemplateTypeSMS,
+		template.TemplateData{
+			common.RuntimeKeyBindingMessage: "Approve sign-in",
+			"appName":                       "MyApp",
+			"inviteLink":                    "https://localhost:5190/gate/invite?executionId=test",
+		},
+	).Return(&template.RenderedTemplate{Body: testRenderedSMSBody}, nil)
+	suite.mockSMSSenderSvc.On("Send",
+		mock.Anything, mock.Anything, "sender-uuid-001",
+		notifcm.NotificationData{Recipient: "+94714627887", Body: testRenderedSMSBody},
+	).Return(nil)
+
+	resp, err := suite.executor.Execute(ctx)
+
+	suite.NoError(err)
+	suite.Equal(providers.ExecComplete, resp.Status)
 }
 
 func TestSMSExecutorSuite(t *testing.T) {

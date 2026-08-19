@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package inboundclient
 
@@ -29,7 +14,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/database/provider"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
@@ -37,11 +21,13 @@ import (
 // inboundClientJSONBlob is the internal structure for marshaling/unmarshaling the
 // PROPERTIES column.
 type inboundClientJSONBlob struct {
-	Assertion        *inboundmodel.AssertionConfig    `json:"assertion,omitempty"`
-	LoginConsent     *inboundmodel.LoginConsentConfig `json:"loginConsent,omitempty"`
-	AllowedUserTypes []string                         `json:"allowedUserTypes,omitempty"`
-	Attestation      *providers.AttestationConfig     `json:"attestation,omitempty"`
-	Properties       map[string]interface{}           `json:"properties,omitempty"`
+	Assertion             *inboundmodel.AssertionConfig    `json:"assertion,omitempty"`
+	LoginConsent          *inboundmodel.LoginConsentConfig `json:"loginConsent,omitempty"`
+	AllowedUserTypes      []string                         `json:"allowedUserTypes,omitempty"`
+	SubjectAttribute      map[string]string                `json:"subjectAttribute,omitempty"`
+	PasskeyAllowedOrigins []string                         `json:"passkeyAllowedOrigins,omitempty"`
+	Attestation           *providers.AttestationConfig     `json:"attestation,omitempty"`
+	Properties            map[string]interface{}           `json:"properties,omitempty"`
 }
 
 // inboundClientStoreInterface defines persistence operations for inbound clients.
@@ -78,7 +64,7 @@ type store struct {
 var getDBProvider = provider.GetDBProvider
 
 // newStore returns a database-backed inbound client store along with its transactioner.
-func newStore() (inboundClientStoreInterface, transaction.Transactioner, error) {
+func newStore() (inboundClientStoreInterface, providers.Transactioner, error) {
 	dbProvider := getDBProvider()
 	client, err := dbProvider.GetConfigDBClient()
 	if err != nil {
@@ -107,25 +93,25 @@ func marshalInboundClient(c inboundmodel.InboundClient) (
 	propertiesBytes interface{},
 	isRegistrationEnabledStr string,
 	isRecoveryEnabledStr string,
-	isSignOutEnabledStr string,
 	recoveryFlowID, signOutFlowID, registrationFlowID, themeID, layoutID interface{},
 	err error,
 ) {
 	blob := inboundClientJSONBlob{
-		Assertion:        c.Assertion,
-		LoginConsent:     c.LoginConsent,
-		AllowedUserTypes: c.AllowedUserTypes,
-		Attestation:      c.Attestation,
-		Properties:       c.Properties,
+		Assertion:             c.Assertion,
+		LoginConsent:          c.LoginConsent,
+		AllowedUserTypes:      c.AllowedUserTypes,
+		SubjectAttribute:      c.SubjectAttribute,
+		PasskeyAllowedOrigins: c.PasskeyAllowedOrigins,
+		Attestation:           c.Attestation,
+		Properties:            c.Properties,
 	}
 	propertiesBytes, err = marshalNullableJSON(blob)
 	if err != nil {
-		return nil, "", "", "", nil, nil, nil, nil, nil, fmt.Errorf("failed to marshal properties: %w", err)
+		return nil, "", "", nil, nil, nil, nil, nil, fmt.Errorf("failed to marshal properties: %w", err)
 	}
 
 	isRegistrationEnabledStr = utils.BoolToNumString(c.IsRegistrationFlowEnabled)
 	isRecoveryEnabledStr = utils.BoolToNumString(c.IsRecoveryFlowEnabled)
-	isSignOutEnabledStr = utils.BoolToNumString(c.IsSignOutFlowEnabled)
 
 	if c.RecoveryFlowID != "" {
 		recoveryFlowID = c.RecoveryFlowID
@@ -143,7 +129,7 @@ func marshalInboundClient(c inboundmodel.InboundClient) (
 		layoutID = c.LayoutID
 	}
 
-	return propertiesBytes, isRegistrationEnabledStr, isRecoveryEnabledStr, isSignOutEnabledStr,
+	return propertiesBytes, isRegistrationEnabledStr, isRecoveryEnabledStr,
 		recoveryFlowID, signOutFlowID, registrationFlowID, themeID, layoutID, nil
 }
 
@@ -154,7 +140,7 @@ func (st *store) CreateInboundClient(ctx context.Context, client inboundmodel.In
 		return fmt.Errorf("failed to get database client: %w", err)
 	}
 
-	propsBytes, isRegEnabledStr, isRecoveryEnabledStr, isSignOutEnabledStr, recoveryFlowID,
+	propsBytes, isRegEnabledStr, isRecoveryEnabledStr, recoveryFlowID,
 		signOutFlowID, registrationFlowID, themeID, layoutID, marshalErr := marshalInboundClient(client)
 	if marshalErr != nil {
 		return marshalErr
@@ -162,7 +148,7 @@ func (st *store) CreateInboundClient(ctx context.Context, client inboundmodel.In
 
 	_, err = dbClient.ExecuteContext(ctx, queryCreateInboundClient,
 		client.ID, client.AuthFlowID, registrationFlowID, isRegEnabledStr,
-		recoveryFlowID, isRecoveryEnabledStr, signOutFlowID, isSignOutEnabledStr,
+		recoveryFlowID, isRecoveryEnabledStr, signOutFlowID,
 		themeID, layoutID, propsBytes, st.deploymentID)
 	if err != nil {
 		return fmt.Errorf("failed to insert inbound client: %w", err)
@@ -354,7 +340,7 @@ func (st *store) UpdateInboundClient(ctx context.Context, client inboundmodel.In
 		return fmt.Errorf("failed to get database client: %w", err)
 	}
 
-	propsBytes, isRegEnabledStr, isRecoveryEnabledStr, isSignOutEnabledStr, recoveryFlowID,
+	propsBytes, isRegEnabledStr, isRecoveryEnabledStr, recoveryFlowID,
 		signOutFlowID, registrationFlowID, themeID, layoutID, marshalErr := marshalInboundClient(client)
 	if marshalErr != nil {
 		return marshalErr
@@ -362,7 +348,7 @@ func (st *store) UpdateInboundClient(ctx context.Context, client inboundmodel.In
 
 	rowsAffected, err := dbClient.ExecuteContext(ctx, queryUpdateInboundClientByEntityID,
 		client.ID, client.AuthFlowID, registrationFlowID, isRegEnabledStr,
-		recoveryFlowID, isRecoveryEnabledStr, signOutFlowID, isSignOutEnabledStr,
+		recoveryFlowID, isRecoveryEnabledStr, signOutFlowID,
 		themeID, layoutID, propsBytes, st.deploymentID)
 	if err != nil {
 		return fmt.Errorf("failed to update inbound client: %w", err)
@@ -485,11 +471,6 @@ func buildInboundClientFromRow(ctx context.Context, row map[string]interface{}) 
 		isRecoveryFlowEnabled = utils.NumStringToBool(val)
 	}
 
-	isSignOutFlowEnabled := false
-	if val := parseStringOrBytesColumn(row, "is_signout_flow_enabled"); val != "" {
-		isSignOutFlowEnabled = utils.NumStringToBool(val)
-	}
-
 	client := &inboundmodel.InboundClient{
 		ID:                        entityID,
 		AuthFlowID:                authFlowID,
@@ -498,7 +479,6 @@ func buildInboundClientFromRow(ctx context.Context, row map[string]interface{}) 
 		RecoveryFlowID:            recoveryFlowID,
 		IsRecoveryFlowEnabled:     isRecoveryFlowEnabled,
 		SignOutFlowID:             signOutFlowID,
-		IsSignOutFlowEnabled:      isSignOutFlowEnabled,
 		ThemeID:                   themeID,
 		LayoutID:                  layoutID,
 	}
@@ -511,6 +491,8 @@ func buildInboundClientFromRow(ctx context.Context, row map[string]interface{}) 
 			client.Assertion = blob.Assertion
 			client.LoginConsent = blob.LoginConsent
 			client.AllowedUserTypes = blob.AllowedUserTypes
+			client.SubjectAttribute = blob.SubjectAttribute
+			client.PasskeyAllowedOrigins = blob.PasskeyAllowedOrigins
 			client.Attestation = blob.Attestation
 			client.Properties = blob.Properties
 		}

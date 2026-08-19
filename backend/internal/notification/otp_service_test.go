@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package notification
 
@@ -38,6 +23,8 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/tests/mocks/jose/jwtmock"
 )
+
+func boolPtr(b bool) *bool { return &b }
 
 // buildTestJWT builds a minimal JWT whose payload encodes the given otpSessionData.
 // The header and signature are synthetic; VerifyJWT is mocked so no real crypto is needed.
@@ -74,7 +61,7 @@ func (suite *OTPServiceTestSuite) SetupSuite() {
 		Notification: config.NotificationConfig{
 			OTP: config.OTPConfig{
 				Length:                6,
-				UseNumericOnly:        true,
+				UseNumericOnly:        boolPtr(true),
 				ValidityPeriodSeconds: 120,
 			},
 		},
@@ -88,7 +75,7 @@ func (suite *OTPServiceTestSuite) SetupSuite() {
 func (suite *OTPServiceTestSuite) SetupTest() {
 	config.GetServerRuntime().Config.Notification.OTP = config.OTPConfig{
 		Length:                6,
-		UseNumericOnly:        true,
+		UseNumericOnly:        boolPtr(true),
 		ValidityPeriodSeconds: 120,
 	}
 	suite.mockJWTService = jwtmock.NewJWTServiceInterfaceMock(suite.T())
@@ -102,13 +89,13 @@ func (suite *OTPServiceTestSuite) SetupTest() {
 // --- GenerateOTP tests ---
 
 func (suite *OTPServiceTestSuite) TestGenerateOTP_EmptyRecipient() {
-	_, _, _, err := suite.service.GenerateOTP(context.Background(), "", "mobile_number")
+	_, _, _, err := suite.service.GenerateOTP(context.Background(), "", "mobile_number", nil)
 	suite.NotNil(err)
 	suite.Equal(ErrorInvalidRecipient.Code, err.Code)
 }
 
 func (suite *OTPServiceTestSuite) TestGenerateOTP_WhitespaceRecipient() {
-	_, _, _, err := suite.service.GenerateOTP(context.Background(), "   ", "mobile_number")
+	_, _, _, err := suite.service.GenerateOTP(context.Background(), "   ", "mobile_number", nil)
 	suite.NotNil(err)
 	suite.Equal(ErrorInvalidRecipient.Code, err.Code)
 }
@@ -120,7 +107,7 @@ func (suite *OTPServiceTestSuite) TestGenerateOTP_Success() {
 	).Return("session-token-123", int64(0), (*tidcommon.ServiceError)(nil)).Once()
 
 	sessionToken, otpValue, expirySeconds, err := suite.service.GenerateOTP(
-		context.Background(), "+15559876543", "mobile_number")
+		context.Background(), "+15559876543", "mobile_number", nil)
 
 	suite.Nil(err)
 	suite.Equal("session-token-123", sessionToken)
@@ -143,12 +130,74 @@ func (suite *OTPServiceTestSuite) TestGenerateOTP_JWTError() {
 	).Return("", int64(0), jwtErr).Once()
 
 	sessionToken, otpValue, _, err := suite.service.GenerateOTP(
-		context.Background(), "+15559876543", "mobile_number")
+		context.Background(), "+15559876543", "mobile_number", nil)
 
 	suite.Empty(sessionToken)
 	suite.Empty(otpValue)
 	suite.NotNil(err)
 	suite.Equal(tidcommon.InternalServerError.Code, err.Code)
+}
+
+// --- OTPConfig override tests ---
+
+func (suite *OTPServiceTestSuite) TestGenerateOTP_WithLengthOverride() {
+	length := 8
+	cfg := &common.OTPConfig{Length: &length}
+
+	suite.mockJWTService.On("GenerateJWT",
+		mock.Anything, otpSessionAudience, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything,
+	).Return("session-token-123", int64(0), (*tidcommon.ServiceError)(nil)).Once()
+
+	sessionToken, otpValue, expirySeconds, err := suite.service.GenerateOTP(
+		context.Background(), "+15559876543", "mobile_number", cfg)
+
+	suite.Nil(err)
+	suite.Equal("session-token-123", sessionToken)
+	suite.Len(otpValue, 8)
+	suite.Greater(expirySeconds, int64(0))
+	for _, ch := range otpValue {
+		suite.Contains("9245378016", string(ch))
+	}
+}
+
+func (suite *OTPServiceTestSuite) TestGenerateOTP_WithAlphanumericOverride() {
+	numericOnly := false
+	cfg := &common.OTPConfig{UseNumericOnly: &numericOnly}
+
+	suite.mockJWTService.On("GenerateJWT",
+		mock.Anything, otpSessionAudience, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything,
+	).Return("session-token-123", int64(0), (*tidcommon.ServiceError)(nil)).Once()
+
+	sessionToken, otpValue, expirySeconds, err := suite.service.GenerateOTP(
+		context.Background(), "+15559876543", "mobile_number", cfg)
+
+	suite.Nil(err)
+	suite.Equal("session-token-123", sessionToken)
+	suite.Greater(expirySeconds, int64(0))
+	alphanumericCharset := "KIGXHOYSPRWCEFMVUQLZDNABJT9245378016"
+	for _, ch := range otpValue {
+		suite.Contains(alphanumericCharset, string(ch))
+	}
+}
+
+func (suite *OTPServiceTestSuite) TestGenerateOTP_WithValidityOverride() {
+	validity := 300
+	cfg := &common.OTPConfig{ValidityPeriodSeconds: &validity}
+
+	suite.mockJWTService.On("GenerateJWT",
+		mock.Anything, otpSessionAudience, mock.Anything, mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything,
+	).Return("session-token-123", int64(0), (*tidcommon.ServiceError)(nil)).Once()
+
+	sessionToken, otpValue, expirySeconds, err := suite.service.GenerateOTP(
+		context.Background(), "+15559876543", "mobile_number", cfg)
+
+	suite.Nil(err)
+	suite.Equal("session-token-123", sessionToken)
+	suite.GreaterOrEqual(expirySeconds, int64(300))
+	suite.Len(otpValue, 6)
 }
 
 // --- VerifyOTP tests ---
@@ -280,4 +329,63 @@ func (suite *OTPServiceTestSuite) TestVerifyOTP_MalformedJWTPayload() {
 func (suite *OTPServiceTestSuite) TestNewOTPService_Constructor() {
 	svc := newOTPService(suite.mockJWTService)
 	suite.NotNil(svc)
+}
+
+// --- resolveOTPConfig tests ---
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_NilOverride() {
+	cfg := suite.service.resolveOTPConfig(nil)
+
+	suite.Equal(6, cfg.Length)
+	suite.True(cfg.UsesNumericOnly())
+	suite.Equal(120, cfg.ValidityPeriodSeconds)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_ValidLength() {
+	length := 8
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{Length: &length})
+
+	suite.Equal(8, cfg.Length)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_InvalidLengthBelowMin() {
+	length := 3
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{Length: &length})
+
+	suite.Equal(6, cfg.Length)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_InvalidLengthAboveMax() {
+	length := 11
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{Length: &length})
+
+	suite.Equal(6, cfg.Length)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_ValidValidity() {
+	validity := 300
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{ValidityPeriodSeconds: &validity})
+
+	suite.Equal(300, cfg.ValidityPeriodSeconds)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_InvalidValidityBelowMin() {
+	validity := 29
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{ValidityPeriodSeconds: &validity})
+
+	suite.Equal(120, cfg.ValidityPeriodSeconds)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_InvalidValidityAboveMax() {
+	validity := 601
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{ValidityPeriodSeconds: &validity})
+
+	suite.Equal(120, cfg.ValidityPeriodSeconds)
+}
+
+func (suite *OTPServiceTestSuite) TestResolveOTPConfig_UseNumericOnly() {
+	numericOnly := false
+	cfg := suite.service.resolveOTPConfig(&common.OTPConfig{UseNumericOnly: &numericOnly})
+
+	suite.False(cfg.UsesNumericOnly())
 }

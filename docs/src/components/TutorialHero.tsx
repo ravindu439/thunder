@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {Grid, Typography, List, ListItem, ListItemIcon, ListItemText, Box} from '@wso2/oxygen-ui';
+import {Grid, Typography, List, ListItem, ListItemIcon, ListItemText, Box, styled} from '@wso2/oxygen-ui';
 import {Box as Cube} from '@wso2/oxygen-ui-icons-react';
 import {ReactNode, Children, isValidElement} from 'react';
 
@@ -34,13 +19,26 @@ interface SectionData {
   content: ReactNode[];
 }
 
-const ICON_SIZE = 22;
-const ICON_CONTAINER_SIZE = 38;
+const ICON_SIZE = 18;
+const ICON_CONTAINER_SIZE = 34;
+
+const SectionCard = styled('div')({
+  background: 'var(--oxygen-palette-background-paper)',
+  border: '1px solid var(--ifm-color-emphasis-200)',
+  borderRadius: '0.875rem',
+  height: '100%',
+  padding: '1.5rem',
+  '[data-theme="dark"] &': {
+    borderColor: 'rgba(255, 255, 255, 0.09)',
+  },
+});
 
 const iconContainerSx = {
   alignItems: 'center',
-  borderRadius: 'var(--oxygen-shape-borderRadius)',
+  bgcolor: 'rgb(var(--oxygen-palette-primary-mainChannel) / 0.10)',
+  borderRadius: '0.5rem',
   display: 'flex',
+  flexShrink: 0,
   height: ICON_CONTAINER_SIZE,
   justifyContent: 'center',
   width: ICON_CONTAINER_SIZE,
@@ -58,8 +56,8 @@ const iconInnerSx = {
 // TutorialHeroItem component - used in MDX to pass custom icons
 export function TutorialHeroItem({icon = undefined, children}: TutorialHeroItemProps) {
   return (
-    <ListItem sx={{}}>
-      <ListItemIcon sx={{minWidth: ICON_CONTAINER_SIZE + 8}}>
+    <ListItem sx={{px: 0, py: 0.75}}>
+      <ListItemIcon sx={{minWidth: 'auto', mr: 1.75}}>
         <Box sx={iconContainerSx}>
           <Box sx={iconInnerSx}>
             {icon ?? <Cube />}
@@ -108,21 +106,12 @@ function renderContentWithIcons(content: ReactNode[]): ReactNode {
               if (isValidElement(listItem)) {
                 const text = extractTextFromChildren(listItem.props.children as ReactNode);
                 return (
-                  <ListItem key={listItem.key ?? text} sx={{px: 0, py: 0.5}}>
-                    <ListItemIcon sx={{minWidth: 40}}>
-                      <Box
-                        sx={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 32,
-                          height: 32,
-                          borderRadius: 1,
-                          bgcolor: 'primary.lighter',
-                          color: 'primary.main',
-                        }}
-                      >
-                        <Cube />
+                  <ListItem key={listItem.key ?? text} sx={{px: 0, py: 0.75}}>
+                    <ListItemIcon sx={{minWidth: 'auto', mr: 1.75}}>
+                      <Box sx={iconContainerSx}>
+                        <Box sx={iconInnerSx}>
+                          <Cube />
+                        </Box>
                       </Box>
                     </ListItemIcon>
                     <ListItemText primary={text} />
@@ -186,21 +175,22 @@ export default function TutorialHero({children}: TutorialHeroProps) {
     <Grid container spacing={3} sx={{mb: 4}}>
       {sections.map((section) => (
         <Grid size={{xs: 12, md: 6}} key={section.title}>
-          <Box sx={{height: '100%'}}>
+          <SectionCard>
             <Typography
-              variant="h6"
-              gutterBottom
               sx={{
                 mb: 2,
-                pl: 2,
-                borderLeft: '4px solid',
-                borderColor: 'primary.main',
+                fontFamily: 'var(--ifm-font-family-monospace)',
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.1em',
+                color: 'text.secondary',
               }}
             >
               {section.title}
             </Typography>
             {renderContentWithIcons(section.content)}
-          </Box>
+          </SectionCard>
         </Grid>
       ))}
     </Grid>

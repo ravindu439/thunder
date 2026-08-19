@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
 import {useGetUserType, useGetUserTypes} from '@thunderid/configure-user-types';
@@ -34,7 +19,7 @@ import {
   TextField,
   Typography,
 } from '@wso2/oxygen-ui';
-import {Link2, Plus, Share2, Trash2, User} from '@wso2/oxygen-ui-icons-react';
+import {Plus, Trash2, UserRound} from '@wso2/oxygen-ui-icons-react';
 import {type JSX, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import type {AttributeConfiguration} from '../models/connection';
@@ -239,7 +224,8 @@ function MappingGroupEditor({
         })}
         <Box>
           <Button
-            variant="outlined"
+            variant="text"
+            color="primary"
             size="small"
             startIcon={<Plus size={16} />}
             onClick={onAddRow}
@@ -351,6 +337,14 @@ export default function AttributeMappingSection({
   const valid: boolean =
     !groupUserTypeMissing && !groupRowIncomplete && !defaultMissing && !externalMissing && !valueEntryIncomplete;
 
+  // Keep the latest onChange without making the report-up effect depend on its identity: a caller
+  // passing an inline handler (e.g. ConnectionDetailPage) would otherwise re-trigger the effect on
+  // every parent render, and since the effect derives a fresh config object each time, that loops forever.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+
   useEffect(() => {
     const hasContent: boolean =
       anyGroupHasContent || effectiveResolveDynamic || linking.some((entry) => entry.value.trim() !== '');
@@ -370,7 +364,7 @@ export default function AttributeMappingSection({
       })),
       linking: linking.map((entry) => entry.value),
     });
-    onChange(config, valid);
+    onChangeRef.current(config, valid);
   }, [
     defaultUserType,
     effectiveResolveDynamic,
@@ -382,7 +376,6 @@ export default function AttributeMappingSection({
     anyGroupHasContent,
     userTypeList,
     wasUnconfigured,
-    onChange,
   ]);
 
   const defaultOptions: string[] = useMemo(
@@ -478,7 +471,7 @@ export default function AttributeMappingSection({
         <SettingsCard
           title={t('attributeMapping.resolution.title')}
           description={t('attributeMapping.resolution.description')}
-          titleIcon={iconBox(<User size={16} />)}
+          titleIcon={iconBox(<UserRound size={16} />)}
         >
           <Stack direction="column" spacing={3.5}>
             {canResolveDynamic && (
@@ -582,7 +575,8 @@ export default function AttributeMappingSection({
                       {showAddValue && (
                         <Box>
                           <Button
-                            variant="outlined"
+                            variant="text"
+                            color="primary"
                             size="small"
                             startIcon={<Plus size={16} />}
                             onClick={addValue}
@@ -633,7 +627,6 @@ export default function AttributeMappingSection({
       <SettingsCard
         title={t('attributeMapping.mappings.title')}
         description={t('attributeMapping.mappings.description')}
-        titleIcon={iconBox(<Share2 size={16} />)}
       >
         <Stack direction="column" spacing={2}>
           {groups.map((group) => (
@@ -658,7 +651,8 @@ export default function AttributeMappingSection({
           {showAddUserType && (
             <Box>
               <Button
-                variant="outlined"
+                variant="text"
+                color="primary"
                 size="small"
                 startIcon={<Plus size={16} />}
                 onClick={addGroup}
@@ -672,11 +666,7 @@ export default function AttributeMappingSection({
       </SettingsCard>
 
       {/* Section 3 — account linking */}
-      <SettingsCard
-        title={t('attributeMapping.linking.title')}
-        description={t('attributeMapping.linking.description')}
-        titleIcon={iconBox(<Link2 size={16} />)}
-      >
+      <SettingsCard title={t('attributeMapping.linking.title')} description={t('attributeMapping.linking.description')}>
         <Stack direction="column" spacing={1.5}>
           <Typography variant="body2" color="text.secondary" fontWeight={600}>
             {linking.length > 1 ? t('attributeMapping.linking.labelCombo') : t('attributeMapping.linking.label')}
@@ -718,7 +708,8 @@ export default function AttributeMappingSection({
           })}
           <Box>
             <Button
-              variant="outlined"
+              variant="text"
+              color="primary"
               size="small"
               startIcon={<Plus size={16} />}
               onClick={addLink}

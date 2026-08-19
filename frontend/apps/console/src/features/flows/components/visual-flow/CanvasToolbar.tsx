@@ -1,23 +1,8 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, IconButton, Tooltip} from '@wso2/oxygen-ui';
-import {LayoutGrid, Maximize, Minus, Plus} from '@wso2/oxygen-ui-icons-react';
+import {Expand, LayoutGrid, Maximize, Minus, Plus, Redo2, Shrink, Undo2} from '@wso2/oxygen-ui-icons-react';
 import {useReactFlow} from '@xyflow/react';
 import {type ReactElement} from 'react';
 import {useTranslation} from 'react-i18next';
@@ -28,17 +13,33 @@ import getEdgeStyleIcon from '../../utils/getEdgeStyleIcon';
 
 export interface CanvasToolbarProps {
   onAutoLayout: () => void;
+  /** Undo the last canvas edit. Omit to hide the undo/redo controls. */
+  onUndo?: () => void;
+  /** Redo the last undone canvas edit. */
+  onRedo?: () => void;
+  /** Whether an undo step is available. */
+  canUndo?: boolean;
+  /** Whether a redo step is available. */
+  canRedo?: boolean;
 }
 
 function ToolbarDivider(): ReactElement {
   return <Box sx={{width: '1px', height: 16, bgcolor: 'divider', mx: 0.5, flexShrink: 0}} />;
 }
 
-export default function CanvasToolbar({onAutoLayout}: CanvasToolbarProps): ReactElement {
+export default function CanvasToolbar({
+  onAutoLayout,
+  onUndo = undefined,
+  onRedo = undefined,
+  canUndo = false,
+  canRedo = false,
+}: CanvasToolbarProps): ReactElement {
   const {t} = useTranslation();
   const {fitView, zoomIn, zoomOut} = useReactFlow();
-  const {edgeStyle} = useFlowConfig();
+  const {edgeStyle, isVerboseMode, setIsVerboseMode} = useFlowConfig();
   const {anchorEl, handleClick: handleEdgeStyleClick, handleClose: handleEdgeStyleClose} = useEdgeStyleSelector();
+
+  const showHistoryControls = Boolean(onUndo ?? onRedo);
 
   return (
     <>
@@ -58,6 +59,40 @@ export default function CanvasToolbar({onAutoLayout}: CanvasToolbarProps): React
           borderColor: 'divider',
         }}
       >
+        {showHistoryControls && (
+          <>
+            <Tooltip title={t('flows:core.headerPanel.undoTooltip', 'Undo (Ctrl+Z / Cmd+Z)')}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={onUndo}
+                  disabled={!canUndo || !onUndo}
+                  sx={{borderRadius: 1, color: 'text.secondary'}}
+                  aria-label={t('flows:core.headerPanel.undo', 'Undo')}
+                >
+                  <Undo2 size={16} />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <Tooltip title={t('flows:core.headerPanel.redoTooltip', 'Redo (Ctrl+Shift+Z / Cmd+Shift+Z)')}>
+              <span>
+                <IconButton
+                  size="small"
+                  onClick={onRedo}
+                  disabled={!canRedo || !onRedo}
+                  sx={{borderRadius: 1, color: 'text.secondary'}}
+                  aria-label={t('flows:core.headerPanel.redo', 'Redo')}
+                >
+                  <Redo2 size={16} />
+                </IconButton>
+              </span>
+            </Tooltip>
+
+            <ToolbarDivider />
+          </>
+        )}
+
         <Tooltip title={t('flows:core.headerPanel.autoLayout')}>
           <IconButton
             size="small"
@@ -81,6 +116,29 @@ export default function CanvasToolbar({onAutoLayout}: CanvasToolbarProps): React
             aria-expanded={Boolean(anchorEl)}
           >
             {getEdgeStyleIcon(edgeStyle)}
+          </IconButton>
+        </Tooltip>
+
+        <ToolbarDivider />
+
+        <Tooltip
+          title={
+            isVerboseMode
+              ? t('flows:core.headerPanel.compactViewTooltip', 'Switch to compact view')
+              : t('flows:core.headerPanel.detailedViewTooltip', 'Switch to detailed view')
+          }
+        >
+          <IconButton
+            size="small"
+            onClick={() => setIsVerboseMode((prev) => !prev)}
+            sx={{borderRadius: 1, color: 'text.secondary'}}
+            // The name stays fixed because `aria-pressed` already carries the
+            // state; an action name that flips with it would announce
+            // "switch to detailed view, pressed" while compact view is on.
+            aria-label={t('flows:core.headerPanel.compactView', 'Compact view')}
+            aria-pressed={!isVerboseMode}
+          >
+            {isVerboseMode ? <Shrink size={16} /> : <Expand size={16} />}
           </IconButton>
         </Tooltip>
 

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -112,6 +97,14 @@ type MockOIDCServer struct {
 	clientSecret  string
 	issuer        string
 	authorizeFunc func(userID string) (string, error)
+
+	// Response overrides let a test drive the failure paths a well-behaved provider never exercises:
+	// a bad or missing ID token, a token or userinfo endpoint that errors or returns nonsense, and a
+	// JWKS document that cannot be used. Each is nil by default, leaving normal behaviour untouched.
+	idTokenOverride  func(user *OIDCUserInfo, nonce string) (string, error)
+	tokenOverride    func() (int, string)
+	userInfoOverride func() (int, string)
+	jwksOverride     func() (int, string)
 
 	// Configurable endpoints
 	discoveryPath string
@@ -216,11 +209,101 @@ func (m *MockOIDCServer) SetAuthorizeFunc(fn func(userID string) (string, error)
 	m.authorizeFunc = fn
 }
 
+// SetIDTokenOverride replaces the ID token the token endpoint issues. The nonce the server issued is
+// passed in, because it is validated independently of the signature: a token omitting it is rejected
+// for that reason alone, which would make a scenario about anything else pass for the wrong cause.
+// SetIDTokenOverride replaces the ID token the token endpoint issues. Returning an error makes the
+// endpoint fail; returning a string serves it verbatim, so a test can mint an expired, unsigned or
+// structurally broken token with SignJWT and have the server hand it over.
+func (m *MockOIDCServer) SetIDTokenOverride(fn func(user *OIDCUserInfo, nonce string) (string, error)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.idTokenOverride = fn
+}
+
+// SetTokenResponseOverride replaces the whole token response with the given status and body.
+func (m *MockOIDCServer) SetTokenResponseOverride(fn func() (int, string)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.tokenOverride = fn
+}
+
+// SetUserInfoResponseOverride replaces the whole userinfo response with the given status and body.
+func (m *MockOIDCServer) SetUserInfoResponseOverride(fn func() (int, string)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.userInfoOverride = fn
+}
+
+// SetJWKSOverride replaces the JWKS document, so a test can serve a malformed key set, one missing the
+// signing key, or a rotated one.
+func (m *MockOIDCServer) SetJWKSOverride(fn func() (int, string)) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.jwksOverride = fn
+}
+
+// ClearOverrides restores normal behaviour on every endpoint. A suite shares one mock across its tests,
+// so this runs between them rather than leaving one scenario's injected failure to break the next.
+func (m *MockOIDCServer) ClearOverrides() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.idTokenOverride = nil
+	m.tokenOverride = nil
+	m.userInfoOverride = nil
+	m.jwksOverride = nil
+}
+
+// writeOIDCOverride serves an override response and reports whether it handled the request.
+func writeOIDCOverride(w http.ResponseWriter, fn func() (int, string)) bool {
+	if fn == nil {
+		return false
+	}
+	status, body := fn()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+	return true
+}
+
 // AddUser adds a user to the mock server
 func (m *MockOIDCServer) AddUser(user *OIDCUserInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.users[user.Sub] = user
+}
+
+// SignJWT signs an arbitrary JWT with the server's RSA private key. Header
+// defaults: alg=RS256, kid=oidc-key-1 (matching the JWKS endpoint).
+func (m *MockOIDCServer) SignJWT(header, claims map[string]interface{}) (string, error) {
+	if _, ok := header["alg"]; !ok {
+		header["alg"] = "RS256"
+	}
+	if _, ok := header["kid"]; !ok {
+		header["kid"] = "oidc-key-1"
+	}
+
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		return "", err
+	}
+	headerEncoded := base64.RawURLEncoding.EncodeToString(headerJSON)
+
+	payloadJSON, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	payloadEncoded := base64.RawURLEncoding.EncodeToString(payloadJSON)
+
+	signingInput := headerEncoded + "." + payloadEncoded
+
+	hashed := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, m.privateKey, crypto.SHA256, hashed[:])
+	if err != nil {
+		return "", err
+	}
+
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
 // handleDiscovery handles OIDC discovery endpoint
@@ -353,6 +436,13 @@ func (m *MockOIDCServer) handleAuthorize(w http.ResponseWriter, r *http.Request)
 
 // handleToken handles token endpoint
 func (m *MockOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
+	m.mutex.RLock()
+	override := m.tokenOverride
+	m.mutex.RUnlock()
+	if writeOIDCOverride(w, override) {
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -422,7 +512,17 @@ func (m *MockOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	refreshToken := "refresh_" + generateOIDCRandomString(40)
 
 	// Generate ID token
-	idToken, err := m.generateIDToken(user, authCodeData.Nonce, accessToken)
+	m.mutex.RLock()
+	idTokenOverride := m.idTokenOverride
+	m.mutex.RUnlock()
+
+	var idToken string
+	var err error
+	if idTokenOverride != nil {
+		idToken, err = idTokenOverride(user, authCodeData.Nonce)
+	} else {
+		idToken, err = m.generateIDToken(user, authCodeData.Nonce, accessToken)
+	}
 	if err != nil {
 		http.Error(w, "Failed to generate ID token", http.StatusInternalServerError)
 		return
@@ -457,6 +557,13 @@ func (m *MockOIDCServer) handleToken(w http.ResponseWriter, r *http.Request) {
 
 // handleUserInfo handles userinfo endpoint
 func (m *MockOIDCServer) handleUserInfo(w http.ResponseWriter, r *http.Request) {
+	m.mutex.RLock()
+	override := m.userInfoOverride
+	m.mutex.RUnlock()
+	if writeOIDCOverride(w, override) {
+		return
+	}
+
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -542,6 +649,13 @@ func (m *MockOIDCServer) handleUserInfo(w http.ResponseWriter, r *http.Request) 
 
 // handleJWKS handles JWKS endpoint
 func (m *MockOIDCServer) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	m.mutex.RLock()
+	override := m.jwksOverride
+	m.mutex.RUnlock()
+	if writeOIDCOverride(w, override) {
+		return
+	}
+
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

@@ -600,47 +600,47 @@ func (_c *sessionStoreMock_ListBySessionID_Call) RunAndReturn(run func(ctx conte
 	return _c
 }
 
-// ListCheckpointIDs provides a mock function for the type sessionStoreMock
-func (_mock *sessionStoreMock) ListCheckpointIDs(ctx context.Context, sessionID string) ([]string, error) {
-	ret := _mock.Called(ctx, sessionID)
+// ListBySubject provides a mock function for the type sessionStoreMock
+func (_mock *sessionStoreMock) ListBySubject(ctx context.Context, subjectID string) ([]Session, error) {
+	ret := _mock.Called(ctx, subjectID)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListCheckpointIDs")
+		panic("no return value specified for ListBySubject")
 	}
 
-	var r0 []string
+	var r0 []Session
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]string, error)); ok {
-		return returnFunc(ctx, sessionID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]Session, error)); ok {
+		return returnFunc(ctx, subjectID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []string); ok {
-		r0 = returnFunc(ctx, sessionID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []Session); ok {
+		r0 = returnFunc(ctx, subjectID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]string)
+			r0 = ret.Get(0).([]Session)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, sessionID)
+		r1 = returnFunc(ctx, subjectID)
 	} else {
 		r1 = ret.Error(1)
 	}
 	return r0, r1
 }
 
-// sessionStoreMock_ListCheckpointIDs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCheckpointIDs'
-type sessionStoreMock_ListCheckpointIDs_Call struct {
+// sessionStoreMock_ListBySubject_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListBySubject'
+type sessionStoreMock_ListBySubject_Call struct {
 	*mock.Call
 }
 
-// ListCheckpointIDs is a helper method to define mock.On call
+// ListBySubject is a helper method to define mock.On call
 //   - ctx context.Context
-//   - sessionID string
-func (_e *sessionStoreMock_Expecter) ListCheckpointIDs(ctx interface{}, sessionID interface{}) *sessionStoreMock_ListCheckpointIDs_Call {
-	return &sessionStoreMock_ListCheckpointIDs_Call{Call: _e.mock.On("ListCheckpointIDs", ctx, sessionID)}
+//   - subjectID string
+func (_e *sessionStoreMock_Expecter) ListBySubject(ctx interface{}, subjectID interface{}) *sessionStoreMock_ListBySubject_Call {
+	return &sessionStoreMock_ListBySubject_Call{Call: _e.mock.On("ListBySubject", ctx, subjectID)}
 }
 
-func (_c *sessionStoreMock_ListCheckpointIDs_Call) Run(run func(ctx context.Context, sessionID string)) *sessionStoreMock_ListCheckpointIDs_Call {
+func (_c *sessionStoreMock_ListBySubject_Call) Run(run func(ctx context.Context, subjectID string)) *sessionStoreMock_ListBySubject_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -658,12 +658,12 @@ func (_c *sessionStoreMock_ListCheckpointIDs_Call) Run(run func(ctx context.Cont
 	return _c
 }
 
-func (_c *sessionStoreMock_ListCheckpointIDs_Call) Return(strings []string, err error) *sessionStoreMock_ListCheckpointIDs_Call {
-	_c.Call.Return(strings, err)
+func (_c *sessionStoreMock_ListBySubject_Call) Return(sessions []Session, err error) *sessionStoreMock_ListBySubject_Call {
+	_c.Call.Return(sessions, err)
 	return _c
 }
 
-func (_c *sessionStoreMock_ListCheckpointIDs_Call) RunAndReturn(run func(ctx context.Context, sessionID string) ([]string, error)) *sessionStoreMock_ListCheckpointIDs_Call {
+func (_c *sessionStoreMock_ListBySubject_Call) RunAndReturn(run func(ctx context.Context, subjectID string) ([]Session, error)) *sessionStoreMock_ListBySubject_Call {
 	_c.Call.Return(run)
 	return _c
 }

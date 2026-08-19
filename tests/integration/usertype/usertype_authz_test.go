@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package usertype
 
@@ -27,16 +12,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 // UserTypeAuthzTestSuite validates the user type authorization model end-to-end.
 //
-// The bootstrap script seeds the following hierarchical permission structure
-// under the "system" resource server:
+// The product ships only the root "system" scope by default. This suite creates a custom
+// resource server that declares the following hierarchical permission structure, simulating an
+// operator configuring fine-grained scopes:
 //
-//	system RS  (name: "System")
+//	Authz Test RS (usertype)
 //	└── Resource  "system"           → permission "system"
 //	    └── Resource  "usertype"   → permission "system:usertype"
 //	        └── Action "view"        → permission "system:usertype:view"
@@ -73,6 +59,7 @@ type UserTypeAuthzTestSuite struct {
 	// Test-specific role and user
 	schemaAdminRoleID string
 	schemaAdminUserID string
+	scopedRSID        string
 
 	// Schema created by the scoped user during write tests
 	ou12SchemaID string
@@ -167,8 +154,8 @@ func (ts *UserTypeAuthzTestSuite) SetupSuite() {
 
 	// ---- 3. Create the test user in OU12 (uses OU1's schema via inheritance) ----
 	userID, err := testutils.CreateUser(testutils.User{
-		Type:             ou1Schema.Name,
-		OUID:             ts.ou12ID,
+		Type: ou1Schema.Name,
+		OUID: ts.ou12ID,
 		Attributes: json.RawMessage(fmt.Sprintf(
 			`{"username": %q, "password": %q}`,
 			schemaAdminUsername, schemaAdminPassword,
@@ -177,13 +164,18 @@ func (ts *UserTypeAuthzTestSuite) SetupSuite() {
 	ts.Require().NoError(err, "create schema-admin user in OU12")
 	ts.schemaAdminUserID = userID
 
-	// ---- 4. Look up the system resource server seeded by bootstrap ----
-	systemRSID, err := testutils.GetResourceServerByName("System")
-	ts.Require().NoError(err, "look up system resource server")
+	// ---- 4. Create a custom resource server declaring the fine-grained system scopes ----
+	// The product ships only the root "system" scope; this reproduces "system:usertype" so the
+	// suite can verify resource-level enforcement when configured.
+	const scopedRSIdentifier = "https://authz-test.example.com/usertype"
+	systemRSID, err := testutils.CreateSystemScopedResourceServer(
+		ts.ou12ID, "Authz Test RS (usertype)", scopedRSIdentifier, "usertype")
+	ts.Require().NoError(err, "create scoped resource server")
+	ts.scopedRSID = systemRSID
 
 	// ---- 5. Create a role with system:usertype permission ----
 	role := testutils.Role{
-		Name:               schemaAdminRoleName,
+		Name: schemaAdminRoleName,
 		OUID: ts.ou12ID,
 		Permissions: []testutils.ResourcePermissions{
 			{
@@ -207,6 +199,8 @@ func (ts *UserTypeAuthzTestSuite) SetupSuite() {
 		schemaAdminUsername,
 		schemaAdminPassword,
 		true,
+		"",
+		scopedRSIdentifier,
 	)
 	ts.Require().NoError(err, "obtain schema-admin scoped token")
 	ts.Require().NotEmpty(tokenResp.AccessToken, "schema-admin token must be non-empty")
@@ -224,6 +218,11 @@ func (ts *UserTypeAuthzTestSuite) TearDownSuite() {
 	if ts.schemaAdminRoleID != "" {
 		if err := testutils.DeleteRole(ts.schemaAdminRoleID); err != nil {
 			ts.T().Logf("teardown: delete role: %v", err)
+		}
+	}
+	if ts.scopedRSID != "" {
+		if err := testutils.DeleteResourceServerWithChildren(ts.scopedRSID); err != nil {
+			ts.T().Errorf("teardown: delete scoped resource server: %v", err)
 		}
 	}
 	// Delete the test user.
@@ -344,9 +343,9 @@ func (ts *UserTypeAuthzTestSuite) TestGetSiblingOUSchema() {
 // OU1's schema even though they can read it.
 func (ts *UserTypeAuthzTestSuite) TestUpdateAncestorOUSchema() {
 	payload, err := json.Marshal(UpdateUserTypeRequest{
-		Name:               "schema-authz-ou1-schema",
-		OUID: ts.ou1ID,
-		Schema:             json.RawMessage(`{"username": {"type": "string", "unique": true}}`),
+		Name:   "schema-authz-ou1-schema",
+		OUID:   ts.ou1ID,
+		Schema: json.RawMessage(`{"username": {"type": "string", "unique": true}}`),
 	})
 	ts.Require().NoError(err)
 
@@ -371,9 +370,9 @@ func (ts *UserTypeAuthzTestSuite) TestDeleteAncestorOUSchema() {
 // schema in OU2 (outside their hierarchy).
 func (ts *UserTypeAuthzTestSuite) TestCreateSchemaInSiblingOU() {
 	payload, err := json.Marshal(CreateUserTypeRequest{
-		Name:               "schema-authz-ou2-blocked",
-		OUID: ts.ou2ID,
-		Schema:             json.RawMessage(`{"username": {"type": "string", "unique": true}}`),
+		Name:   "schema-authz-ou2-blocked",
+		OUID:   ts.ou2ID,
+		Schema: json.RawMessage(`{"username": {"type": "string", "unique": true}}`),
 	})
 	ts.Require().NoError(err)
 
@@ -394,7 +393,7 @@ func (ts *UserTypeAuthzTestSuite) TestCreateSchemaInSiblingOU() {
 func (ts *UserTypeAuthzTestSuite) TestOwnOUSchemaLifecycle() {
 	// ---- Create ----
 	createPayload, err := json.Marshal(CreateUserTypeRequest{
-		Name:               "schema-authz-ou12-schema",
+		Name: "schema-authz-ou12-schema",
 		OUID: ts.ou12ID,
 		Schema: json.RawMessage(`{
 			"username": {"type": "string", "unique": true},
@@ -428,7 +427,7 @@ func (ts *UserTypeAuthzTestSuite) TestOwnOUSchemaLifecycle() {
 
 	// ---- Update ----
 	updatePayload, err := json.Marshal(UpdateUserTypeRequest{
-		Name:               "schema-authz-ou12-schema-updated",
+		Name: "schema-authz-ou12-schema-updated",
 		OUID: ts.ou12ID,
 		Schema: json.RawMessage(`{
 			"username":  {"type": "string", "unique": true},

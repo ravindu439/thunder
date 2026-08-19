@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -87,6 +72,10 @@ func InitializeTestContext(port string, zipPattern string, databaseType string) 
 // Returning an absolute path ensures it resolves correctly regardless of the working
 // directory of the consumer (e.g. a test subprocess running from a sub-package directory).
 func GetExtractedProductHome() string {
+	// A test subprocess has the path in its environment but no initialized context until something
+	// asks for it, so resolve lazily rather than panicking on the un-set package variable.
+	ensureInitialized()
+
 	if extractedProductHome == "" {
 		panic("Extracted product home is not set")
 	}
@@ -424,9 +413,12 @@ func CopyDeclarativeResources(zipFilePattern string) error {
 		"agents",
 		"applications",
 		"connections",
+		"credential_configurations",
 		"flows",
+		"groups",
 		"layouts",
 		"organization_units",
+		"presentation_definitions",
 		"resource_servers",
 		"roles",
 		"server_configs",

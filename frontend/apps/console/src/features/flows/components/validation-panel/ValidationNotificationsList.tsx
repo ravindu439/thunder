@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, ButtonBase, Stack, Typography} from '@wso2/oxygen-ui';
 import {ArrowRight, CircleCheckIcon, CircleXIcon, InfoIcon, TriangleAlertIcon} from '@wso2/oxygen-ui-icons-react';
@@ -90,7 +75,27 @@ function ValidationNotificationsList({
             <Box sx={{color: `${type}.main`, display: 'inline-flex', flexShrink: 0, mt: '2px'}}>
               {severityIcon(type)}
             </Box>
-            <Typography variant="body2" sx={{flex: 1, textAlign: 'left'}}>
+            <Typography
+              variant="body2"
+              sx={{
+                flex: 1,
+                textAlign: 'left',
+                lineHeight: 1.5,
+                // Messages name the offending resource in a <code> tag. Left
+                // unstyled it reads as raw monospace mid-sentence; as a chip it
+                // scans as an identifier, and breaking on long ids keeps it
+                // inside the panel.
+                '& code': {
+                  fontFamily: 'monospace',
+                  fontSize: '0.8125em',
+                  px: 0.5,
+                  py: '1px',
+                  borderRadius: 0.5,
+                  bgcolor: 'action.hover',
+                  wordBreak: 'break-all',
+                },
+              }}
+            >
               {notification.getMessage()}
             </Typography>
             {isNavigable && (
@@ -101,7 +106,9 @@ function ValidationNotificationsList({
                   flexShrink: 0,
                   alignSelf: 'center',
                   color: `${type}.main`,
-                  opacity: 0,
+                  // Kept faintly visible rather than hover-only, so the row
+                  // advertises that it navigates to the resource.
+                  opacity: 0.45,
                   transition: 'opacity 0.15s ease',
                 }}
               >
@@ -111,16 +118,20 @@ function ValidationNotificationsList({
           </>
         );
 
+        // Severity is otherwise carried only by a small icon, which makes a
+        // mixed list hard to scan. A tint and a matching border give each row
+        // its severity at a glance without shouting.
         const rowSx = {
           display: 'flex',
           alignItems: 'flex-start',
-          gap: 1,
+          gap: 1.25,
           width: '100%',
           px: 1.5,
           py: 1.25,
           borderRadius: 1.5,
           border: '1px solid',
-          borderColor: 'divider',
+          borderColor: `color-mix(in srgb, var(--oxygen-palette-${type}-main) 28%, transparent)`,
+          bgcolor: `color-mix(in srgb, var(--oxygen-palette-${type}-main) 7%, transparent)`,
         } as const;
 
         if (!isNavigable) {
@@ -141,7 +152,7 @@ function ValidationNotificationsList({
               ...rowSx,
               '&:hover': {
                 borderColor: `${type}.main`,
-                bgcolor: 'action.hover',
+                bgcolor: `color-mix(in srgb, var(--oxygen-palette-${type}-main) 14%, transparent)`,
                 '& .notification-open-icon': {opacity: 1},
               },
             }}

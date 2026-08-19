@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -24,20 +9,55 @@ import ConfigureName, {type ConfigureNameProps} from '../ConfigureName';
 // Mock the utility library
 vi.mock('@thunderid/utils');
 
+// Mock the shared logo picker so tests only assert on the wiring, not LogoPicker's own behavior.
+// NameSuggestion is left as the real implementation since these tests exercise its wiring too.
+vi.mock('@thunderid/components', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@thunderid/components')>();
+  return {
+    ...actual,
+    ResourceAvatar: ({
+      value,
+      onSelect,
+      editAriaLabel,
+    }: {
+      value: string;
+      onSelect: (value: string) => void;
+      editAriaLabel: string;
+    }) => (
+      <button
+        type="button"
+        data-testid="resource-avatar"
+        aria-label={editAriaLabel}
+        onClick={() => onSelect('emoji:🚀')}
+      >
+        {value}
+      </button>
+    ),
+  };
+});
+
+vi.mock('@thunderid/react', () => ({
+  buildAvatarSpec: vi.fn(() => 'avatar:shape=rounded,variant=anonymous_entity,content=briefcase,colors=0'),
+  pickAnonymousEntityName: vi.fn(() => 'briefcase'),
+}));
+
 const {generateRandomHumanReadableIdentifiers} = await import('@thunderid/utils');
 
 describe('ConfigureName', () => {
   const mockOnAppNameChange = vi.fn();
-  const mockSuggestions = ['My Web App', 'Customer Portal', 'Mobile App', 'Internal Dashboard'];
+  const mockOnLogoSelect = vi.fn();
+  const mockSuggestion = 'Wise Clocks Run';
 
   const defaultProps: ConfigureNameProps = {
     appName: '',
     onAppNameChange: mockOnAppNameChange,
+    appLogo: 'emoji:🐼',
+    onLogoSelect: mockOnLogoSelect,
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(generateRandomHumanReadableIdentifiers).mockReturnValue(mockSuggestions);
+    vi.mocked(generateRandomHumanReadableIdentifiers).mockReturnValue([mockSuggestion]);
   });
 
   const renderComponent = (props: Partial<ConfigureNameProps> = {}) =>
@@ -49,10 +69,16 @@ describe('ConfigureName', () => {
     expect(screen.getByRole('heading', {level: 1})).toBeInTheDocument();
   });
 
+  it('should not render the title when showTitle is false', () => {
+    renderComponent({showTitle: false});
+
+    expect(screen.queryByRole('heading', {level: 1})).not.toBeInTheDocument();
+  });
+
   it('should render the text field with correct label', () => {
     renderComponent();
 
-    expect(screen.getByText('Application Name')).toBeInTheDocument();
+    expect(screen.getByText('Name & Logo')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
@@ -74,71 +100,11 @@ describe('ConfigureName', () => {
     expect(mockOnAppNameChange).toHaveBeenLastCalledWith('e'); // Last character typed
   });
 
-  it('should render name suggestions', () => {
-    renderComponent();
-
-    mockSuggestions.forEach((suggestion) => {
-      expect(screen.getByText(suggestion)).toBeInTheDocument();
-    });
-  });
-
-  it('should display suggestions label with icon', () => {
-    renderComponent();
-
-    expect(screen.getByText('In a hurry? Pick a random name:')).toBeInTheDocument();
-  });
-
-  it('should call onAppNameChange when clicking a suggestion chip', async () => {
-    const user = userEvent.setup();
-    renderComponent();
-
-    const suggestionChip = screen.getByText('My Web App');
-    await user.click(suggestionChip);
-
-    expect(mockOnAppNameChange).toHaveBeenCalledWith('My Web App');
-  });
-
-  it('should render all suggestion chips as clickable', () => {
-    renderComponent();
-
-    mockSuggestions.forEach((suggestion) => {
-      const chip = screen.getByText(suggestion);
-      expect(chip.closest('div[role="button"]')).toBeInTheDocument();
-    });
-  });
-
-  it('should generate suggestions only once on mount', () => {
-    const {rerender} = renderComponent();
-
-    expect(generateRandomHumanReadableIdentifiers).toHaveBeenCalledTimes(1);
-
-    rerender(<ConfigureName {...defaultProps} appName="Updated Name" />);
-
-    // Should still be called only once due to useMemo
-    expect(generateRandomHumanReadableIdentifiers).toHaveBeenCalledTimes(1);
-  });
-
-  it('should handle empty app name', () => {
-    renderComponent({appName: ''});
-
-    const input = screen.getByRole('textbox');
-    expect(input).toHaveValue('');
-  });
-
-  it('should display placeholder text', () => {
-    renderComponent();
-
-    const input = screen.getByRole('textbox');
-    expect(input).toHaveAttribute('placeholder');
-  });
-
   it('should render required field indicator', () => {
     renderComponent();
 
-    // FormControl with required prop should render asterisk or required indicator
-    const label = screen.getByText('Application Name');
+    const label = screen.getByText('Name & Logo');
     expect(label).toBeInTheDocument();
-    // Check for the asterisk in the label's parent (which should be a <label> element)
     const labelElement = label.closest('label');
     expect(labelElement).toHaveClass('Mui-required');
   });
@@ -151,7 +117,6 @@ describe('ConfigureName', () => {
     const specialName = 'App @#$ 123!';
     await user.type(input, specialName);
 
-    // Each character is typed individually, so check that special characters triggered the callback
     expect(mockOnAppNameChange).toHaveBeenCalledWith('@');
     expect(mockOnAppNameChange).toHaveBeenCalledWith('#');
     expect(mockOnAppNameChange).toHaveBeenCalledWith('$');
@@ -164,7 +129,14 @@ describe('ConfigureName', () => {
     let input = screen.getByRole('textbox');
     expect(input).toHaveValue('Initial Name');
 
-    rerender(<ConfigureName appName="Updated Name" onAppNameChange={mockOnAppNameChange} />);
+    rerender(
+      <ConfigureName
+        appName="Updated Name"
+        onAppNameChange={mockOnAppNameChange}
+        appLogo="emoji:🐼"
+        onLogoSelect={mockOnLogoSelect}
+      />,
+    );
 
     input = screen.getByRole('textbox');
     expect(input).toHaveValue('Updated Name');
@@ -180,29 +152,6 @@ describe('ConfigureName', () => {
     expect(mockOnAppNameChange).toHaveBeenCalledWith('');
   });
 
-  it('should handle rapid suggestion clicks', async () => {
-    const user = userEvent.setup();
-    renderComponent();
-
-    const firstSuggestion = screen.getByText('My Web App');
-    const secondSuggestion = screen.getByText('Customer Portal');
-
-    await user.click(firstSuggestion);
-    await user.click(secondSuggestion);
-
-    expect(mockOnAppNameChange).toHaveBeenCalledWith('My Web App');
-    expect(mockOnAppNameChange).toHaveBeenCalledWith('Customer Portal');
-    expect(mockOnAppNameChange).toHaveBeenCalledTimes(2);
-  });
-
-  it('should display lightbulb icon for suggestions', () => {
-    renderComponent();
-
-    // Check that the Lightbulb component is rendered (it's from lucide-react)
-    const suggestionsSection = screen.getByText('In a hurry? Pick a random name:').closest('div');
-    expect(suggestionsSection).toBeInTheDocument();
-  });
-
   it('should handle long app names', async () => {
     const user = userEvent.setup();
     const longName = 'A'.repeat(100);
@@ -211,9 +160,86 @@ describe('ConfigureName', () => {
     const input = screen.getByRole('textbox');
     await user.type(input, longName);
 
-    // Each character is typed individually
     expect(mockOnAppNameChange).toHaveBeenCalledTimes(100);
     expect(mockOnAppNameChange).toHaveBeenCalledWith('A');
+  });
+
+  describe('logo picker', () => {
+    it('should render the logo picker inline with the name field', () => {
+      renderComponent({appLogo: 'emoji:🐼'});
+
+      expect(screen.getByTestId('resource-avatar')).toHaveTextContent('emoji:🐼');
+    });
+
+    it('should call onLogoSelect when a new logo is picked', async () => {
+      const user = userEvent.setup();
+      renderComponent({appLogo: 'emoji:🐼'});
+
+      await user.click(screen.getByTestId('resource-avatar'));
+
+      expect(mockOnLogoSelect).toHaveBeenCalledWith('emoji:🚀');
+    });
+
+    it('should auto-select a default entity avatar when appLogo is empty', () => {
+      renderComponent({appLogo: null});
+
+      expect(mockOnLogoSelect).toHaveBeenCalledWith(
+        'avatar:shape=rounded,variant=anonymous_entity,content=briefcase,colors=0',
+      );
+    });
+
+    it('should not auto-select when appLogo is already set', () => {
+      renderComponent({appLogo: 'emoji:🐼'});
+
+      expect(mockOnLogoSelect).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('name suggestion', () => {
+    it('should render a single suggestion instead of a list', () => {
+      renderComponent();
+
+      expect(screen.getByText(mockSuggestion)).toBeInTheDocument();
+    });
+
+    it('should generate the suggestion only once on mount', () => {
+      const {rerender} = renderComponent();
+
+      expect(generateRandomHumanReadableIdentifiers).toHaveBeenCalledTimes(1);
+
+      rerender(
+        <ConfigureName
+          appName="Updated Name"
+          onAppNameChange={mockOnAppNameChange}
+          appLogo="emoji:🐼"
+          onLogoSelect={mockOnLogoSelect}
+        />,
+      );
+
+      expect(generateRandomHumanReadableIdentifiers).toHaveBeenCalledTimes(1);
+    });
+
+    it('should call onAppNameChange when clicking the suggestion', async () => {
+      const user = userEvent.setup();
+      renderComponent();
+
+      await user.click(screen.getByText(mockSuggestion));
+
+      expect(mockOnAppNameChange).toHaveBeenCalledWith(mockSuggestion);
+    });
+
+    it('should request a new suggestion when the shuffle button is clicked', async () => {
+      const user = userEvent.setup();
+      vi.mocked(generateRandomHumanReadableIdentifiers)
+        .mockReturnValueOnce([mockSuggestion])
+        .mockReturnValueOnce(['Fine Cobras Pay']);
+      renderComponent();
+
+      await user.click(screen.getByRole('button', {name: 'Try another suggestion'}));
+
+      expect(generateRandomHumanReadableIdentifiers).toHaveBeenCalledTimes(2);
+      expect(screen.getByText('Fine Cobras Pay')).toBeInTheDocument();
+    });
   });
 
   describe('onReadyChange callback', () => {
@@ -239,7 +265,6 @@ describe('ConfigureName', () => {
     });
 
     it('should not crash when onReadyChange is undefined', () => {
-      // This test ensures the component handles undefined onReadyChange gracefully
       expect(() => {
         renderComponent({appName: 'Test App', onReadyChange: undefined});
       }).not.toThrow();
@@ -247,15 +272,19 @@ describe('ConfigureName', () => {
 
     it('should call onReadyChange when appName transitions from empty to non-empty', () => {
       const mockOnReadyChange = vi.fn();
-      const {rerender} = render(
-        <ConfigureName appName="" onAppNameChange={mockOnAppNameChange} onReadyChange={mockOnReadyChange} />,
-      );
+      const {rerender} = renderComponent({appName: '', onReadyChange: mockOnReadyChange});
 
       expect(mockOnReadyChange).toHaveBeenCalledWith(false);
       mockOnReadyChange.mockClear();
 
       rerender(
-        <ConfigureName appName="New App" onAppNameChange={mockOnAppNameChange} onReadyChange={mockOnReadyChange} />,
+        <ConfigureName
+          appName="New App"
+          onAppNameChange={mockOnAppNameChange}
+          appLogo="emoji:🐼"
+          onLogoSelect={mockOnLogoSelect}
+          onReadyChange={mockOnReadyChange}
+        />,
       );
 
       expect(mockOnReadyChange).toHaveBeenCalledWith(true);
@@ -263,16 +292,115 @@ describe('ConfigureName', () => {
 
     it('should call onReadyChange when appName transitions from non-empty to empty', () => {
       const mockOnReadyChange = vi.fn();
-      const {rerender} = render(
-        <ConfigureName appName="My App" onAppNameChange={mockOnAppNameChange} onReadyChange={mockOnReadyChange} />,
-      );
+      const {rerender} = renderComponent({appName: 'My App', onReadyChange: mockOnReadyChange});
 
       expect(mockOnReadyChange).toHaveBeenCalledWith(true);
       mockOnReadyChange.mockClear();
 
-      rerender(<ConfigureName appName="" onAppNameChange={mockOnAppNameChange} onReadyChange={mockOnReadyChange} />);
+      rerender(
+        <ConfigureName
+          appName=""
+          onAppNameChange={mockOnAppNameChange}
+          appLogo="emoji:🐼"
+          onLogoSelect={mockOnLogoSelect}
+          onReadyChange={mockOnReadyChange}
+        />,
+      );
 
       expect(mockOnReadyChange).toHaveBeenCalledWith(false);
+    });
+  });
+
+  describe('duplicate name detection', () => {
+    const duplicateMessage = 'An application with this name already exists. Choose a different name.';
+
+    it('should show an inline error and block readiness for an exact duplicate name', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'My App', existingAppNames: ['My App'], onReadyChange: mockOnReadyChange});
+
+      expect(screen.getByText(duplicateMessage)).toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('should not flag case-variant names as duplicates', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'my app', existingAppNames: ['My App'], onReadyChange: mockOnReadyChange});
+
+      expect(screen.queryByText(duplicateMessage)).not.toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
+    });
+
+    it('should become ready again when the name is edited to a unique one', () => {
+      const mockOnReadyChange = vi.fn();
+      const {rerender} = render(
+        <ConfigureName
+          appName="My App"
+          existingAppNames={['My App']}
+          onAppNameChange={mockOnAppNameChange}
+          appLogo={defaultProps.appLogo}
+          onLogoSelect={mockOnLogoSelect}
+          onReadyChange={mockOnReadyChange}
+        />,
+      );
+
+      expect(mockOnReadyChange).toHaveBeenCalledWith(false);
+      mockOnReadyChange.mockClear();
+
+      rerender(
+        <ConfigureName
+          appName="My App 2"
+          existingAppNames={['My App']}
+          onAppNameChange={mockOnAppNameChange}
+          appLogo={defaultProps.appLogo}
+          onLogoSelect={mockOnLogoSelect}
+          onReadyChange={mockOnReadyChange}
+        />,
+      );
+
+      expect(screen.queryByText(duplicateMessage)).not.toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
+    });
+
+    it('should behave as before when existingAppNames is omitted', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'My App', onReadyChange: mockOnReadyChange});
+
+      expect(screen.queryByText(duplicateMessage)).not.toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe('length validation', () => {
+    const maxLengthMessage = 'Application name cannot exceed 100 characters';
+
+    it('should show an inline error and block readiness when the name is too long', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'a'.repeat(101), onReadyChange: mockOnReadyChange});
+
+      expect(screen.getByText(maxLengthMessage)).toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(false);
+    });
+
+    it('should not show a length error when the name is empty', () => {
+      renderComponent({appName: ''});
+
+      expect(screen.queryByText(maxLengthMessage)).not.toBeInTheDocument();
+    });
+
+    it('should accept a single character name', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'A', onReadyChange: mockOnReadyChange});
+
+      expect(screen.queryByText(maxLengthMessage)).not.toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
+    });
+
+    it('should accept a name at the maximum length', () => {
+      const mockOnReadyChange = vi.fn();
+      renderComponent({appName: 'a'.repeat(100), onReadyChange: mockOnReadyChange});
+
+      expect(screen.queryByText(maxLengthMessage)).not.toBeInTheDocument();
+      expect(mockOnReadyChange).toHaveBeenCalledWith(true);
     });
   });
 });

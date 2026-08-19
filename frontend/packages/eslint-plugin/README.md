@@ -40,7 +40,7 @@ export default [
 
 General rules for all frontend projects:
 
-- `@thunderid/copyright-header`: Enforces WSO2 Apache 2.0 copyright headers
+- `@thunderid/copyright-header`: Enforces the Apache 2.0 SPDX copyright header
 - `@thunderid/no-internal-imports`: Prevents importing from internal paths
 
 #### `typescript`
@@ -77,7 +77,7 @@ Rules for TypeScript frontend projects:
 
 ### `@thunderid/copyright-header`
 
-Enforces the presence of WSO2 Apache 2.0 copyright header in all source files.
+Enforces the presence of the Apache 2.0 SPDX copyright header in all source files.
 
 **Options:**
 
@@ -91,10 +91,8 @@ Enforces the presence of WSO2 Apache 2.0 copyright header in all source files.
 export const foo = 'bar';
 
 // ✅ Correct - has proper header
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- * ...rest of Apache 2.0 header...
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 export const foo = 'bar';
 ```
 

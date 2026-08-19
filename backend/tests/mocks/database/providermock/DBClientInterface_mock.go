@@ -9,7 +9,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 	"github.com/thunder-id/thunderid/internal/system/database/model"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // NewDBClientInterfaceMock creates a new instance of DBClientInterfaceMock. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -249,23 +249,23 @@ func (_c *DBClientInterfaceMock_ExecuteContext_Call) RunAndReturn(run func(ctx c
 }
 
 // GetTransactioner provides a mock function for the type DBClientInterfaceMock
-func (_mock *DBClientInterfaceMock) GetTransactioner() (transaction.Transactioner, error) {
+func (_mock *DBClientInterfaceMock) GetTransactioner() (providers.Transactioner, error) {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTransactioner")
 	}
 
-	var r0 transaction.Transactioner
+	var r0 providers.Transactioner
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (transaction.Transactioner, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func() (providers.Transactioner, error)); ok {
 		return returnFunc()
 	}
-	if returnFunc, ok := ret.Get(0).(func() transaction.Transactioner); ok {
+	if returnFunc, ok := ret.Get(0).(func() providers.Transactioner); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transaction.Transactioner)
+			r0 = ret.Get(0).(providers.Transactioner)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func() error); ok {
@@ -293,12 +293,12 @@ func (_c *DBClientInterfaceMock_GetTransactioner_Call) Run(run func()) *DBClient
 	return _c
 }
 
-func (_c *DBClientInterfaceMock_GetTransactioner_Call) Return(transactioner transaction.Transactioner, err error) *DBClientInterfaceMock_GetTransactioner_Call {
+func (_c *DBClientInterfaceMock_GetTransactioner_Call) Return(transactioner providers.Transactioner, err error) *DBClientInterfaceMock_GetTransactioner_Call {
 	_c.Call.Return(transactioner, err)
 	return _c
 }
 
-func (_c *DBClientInterfaceMock_GetTransactioner_Call) RunAndReturn(run func() (transaction.Transactioner, error)) *DBClientInterfaceMock_GetTransactioner_Call {
+func (_c *DBClientInterfaceMock_GetTransactioner_Call) RunAndReturn(run func() (providers.Transactioner, error)) *DBClientInterfaceMock_GetTransactioner_Call {
 	_c.Call.Return(run)
 	return _c
 }

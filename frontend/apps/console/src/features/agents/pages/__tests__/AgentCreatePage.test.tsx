@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, react/require-default-props */
+/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import userEvent from '@testing-library/user-event';
 import {render, screen, waitFor} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -39,11 +24,14 @@ const {
   mockUseAgentCreate: vi.fn(),
 }));
 
+let mockPathname = '/agents/create';
+
 vi.mock('react-router', async () => {
   const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useNavigate: () => mockNavigate,
+    useLocation: () => ({pathname: mockPathname}),
   };
 });
 
@@ -55,6 +43,31 @@ vi.mock('@thunderid/configure-agent-types', () => ({
 vi.mock('@thunderid/configure-organization-units', () => ({
   useGetChildOrganizationUnits: (ouId: string | undefined, opts: unknown) =>
     mockUseGetChildOrganizationUnits(ouId, opts),
+  useGetOrganizationUnit: (id?: string) => ({
+    data: id ? {id, name: 'Test Organization Unit'} : undefined,
+    isLoading: false,
+  }),
+  OrganizationUnitPickerScreen: ({
+    onChange,
+    onContinue,
+    onBack,
+  }: {
+    onChange: (id: string) => void;
+    onContinue: () => void;
+    onBack: () => void;
+  }) => (
+    <div data-testid="step-organization-unit">
+      <button type="button" onClick={() => onChange('ou-2')}>
+        Select OU
+      </button>
+      <button type="button" onClick={onContinue}>
+        OU Continue
+      </button>
+      <button type="button" onClick={onBack}>
+        OU Back
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../../api/useCreateAgent', () => ({
@@ -105,27 +118,6 @@ vi.mock('../../components/create-agent/ConfigureOwner', () => ({
   ),
 }));
 
-vi.mock('../../components/create-agent/ShowClientSecret', () => ({
-  default: ({clientSecret, onContinue}: {clientSecret: string; onContinue: () => void}) => (
-    <div data-testid="step-complete">
-      <span data-testid="complete-secret">{clientSecret}</span>
-      <button type="button" onClick={onContinue}>
-        Continue Done
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock('@thunderid/configure-users', () => ({
-  ConfigureOrganizationUnit: ({onReadyChange}: {onReadyChange?: (isReady: boolean) => void}) => (
-    <div data-testid="step-organization-unit">
-      <button type="button" onClick={() => onReadyChange?.(true)}>
-        OU Ready
-      </button>
-    </div>
-  ),
-}));
-
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string | {defaultValue?: string}) => {
@@ -149,6 +141,7 @@ describe('AgentCreatePage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPathname = '/agents/create';
     agentCreateState = {
       currentStep: AgentCreateFlowStep.NAME,
       selectedSchema: {id: 'schema-1', name: 'default', ouId: 'ou-1'},
@@ -216,6 +209,62 @@ describe('AgentCreatePage', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/agents');
   });
 
+  it('renders the Agents breadcrumb outside the welcome flow', () => {
+    render(<AgentCreatePage />);
+
+    expect(screen.getByText('Agents')).toBeInTheDocument();
+  });
+
+  describe('welcome flow', () => {
+    beforeEach(() => {
+      mockPathname = '/welcome/get-started/agents/create';
+    });
+
+    it('renders the welcome breadcrumb trail', () => {
+      render(<AgentCreatePage />);
+
+      expect(screen.getByText('common:welcome.header')).toBeInTheDocument();
+      expect(screen.getByText('common:welcome.createProject.breadcrumb')).toBeInTheDocument();
+      expect(screen.getByText('common:welcome.getStarted.breadcrumb')).toBeInTheDocument();
+      expect(screen.queryByText('Agents')).not.toBeInTheDocument();
+    });
+
+    it('navigates to the Get Started page from the breadcrumb', async () => {
+      const user = userEvent.setup();
+      render(<AgentCreatePage />);
+
+      await user.click(screen.getByText('common:welcome.getStarted.breadcrumb'));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/welcome/get-started');
+    });
+
+    it('navigates to /home when close button is clicked', async () => {
+      const user = userEvent.setup();
+      render(<AgentCreatePage />);
+
+      const closeButton = screen.getAllByRole('button')[0];
+      await user.click(closeButton);
+
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
+    });
+
+    it('goes back to the Get Started page from the organization unit step', async () => {
+      const user = userEvent.setup();
+      agentCreateState.currentStep = AgentCreateFlowStep.ORGANIZATION_UNIT;
+      mockUseGetChildOrganizationUnits.mockReturnValue({
+        data: {totalResults: 2},
+        isLoading: false,
+        error: null,
+      });
+
+      render(<AgentCreatePage />);
+
+      await user.click(screen.getByRole('button', {name: 'OU Back'}));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/welcome/get-started');
+    });
+  });
+
   it('disables the continue button until the step reports ready', () => {
     render(<AgentCreatePage />);
 
@@ -251,7 +300,7 @@ describe('AgentCreatePage', () => {
     );
   });
 
-  it('shows the complete screen with the new client secret on success', async () => {
+  it('navigates to the agent details page with justCreatedSecret state on success', async () => {
     const user = userEvent.setup();
     agentCreateState.currentStep = AgentCreateFlowStep.OWNER;
 
@@ -262,7 +311,15 @@ describe('AgentCreatePage', () => {
         type: 'default',
         name: 'My Agent',
         inboundAuthConfig: [
-          {type: 'oauth2', config: {grantTypes: ['client_credentials'], responseTypes: [], clientSecret: 'shh'}},
+          {
+            type: 'oauth2',
+            config: {
+              grantTypes: ['client_credentials'],
+              responseTypes: [],
+              clientId: 'agent-client-id',
+              clientSecret: 'shh',
+            },
+          },
         ],
       });
     });
@@ -272,24 +329,29 @@ describe('AgentCreatePage', () => {
     await user.click(screen.getByRole('button', {name: /Create agent/i}));
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-complete')).toBeInTheDocument();
-      expect(screen.getByTestId('complete-secret')).toHaveTextContent('shh');
+      expect(mockNavigate).toHaveBeenCalledWith('/agents/agent-1', {
+        state: {
+          justCreatedSecret: {
+            agentName: 'My Agent',
+            clientId: 'agent-client-id',
+            clientSecret: 'shh',
+          },
+        },
+      });
     });
   });
 
-  it('navigates to the agent details page from the complete screen', async () => {
+  it('navigates to the agent details page without navigation state when no client secret is returned', async () => {
     const user = userEvent.setup();
     agentCreateState.currentStep = AgentCreateFlowStep.OWNER;
 
     mockMutate.mockImplementation((_data, opts) => {
       opts.onSuccess({
-        id: 'agent-1',
+        id: 'agent-2',
         ouId: 'ou-1',
         type: 'default',
         name: 'My Agent',
-        inboundAuthConfig: [
-          {type: 'oauth2', config: {grantTypes: ['client_credentials'], responseTypes: [], clientSecret: 'shh'}},
-        ],
+        inboundAuthConfig: [],
       });
     });
 
@@ -298,12 +360,8 @@ describe('AgentCreatePage', () => {
     await user.click(screen.getByRole('button', {name: /Create agent/i}));
 
     await waitFor(() => {
-      expect(screen.getByTestId('step-complete')).toBeInTheDocument();
+      expect(mockNavigate).toHaveBeenCalledWith('/agents/agent-2');
     });
-
-    await user.click(screen.getByText('Continue Done'));
-
-    expect(mockNavigate).toHaveBeenCalledWith('/agents/agent-1');
   });
 
   it('triggers an error path when create fails', async () => {
@@ -330,10 +388,34 @@ describe('AgentCreatePage', () => {
 
     await user.click(screen.getByRole('button', {name: /Create agent/i}));
 
-    expect(setError).toHaveBeenCalledWith('Create failed');
+    expect(setError).toHaveBeenCalledWith('Failed to create agent. Please try again.');
   });
 
-  it('renders the OU step when child organization units exist', () => {
+  it('clears a stale create error as soon as a field changes', async () => {
+    const user = userEvent.setup();
+    agentCreateState.currentStep = AgentCreateFlowStep.NAME;
+    agentCreateState.error = 'Failed to create agent. Please try again.';
+    const setError = vi.fn();
+
+    mockUseAgentCreate.mockImplementation(() => ({
+      ...agentCreateState,
+      setCurrentStep: () => null,
+      setSelectedSchema: () => null,
+      setSelectedOuId: () => null,
+      setAgentName: () => null,
+      setFormValues: () => null,
+      setSelectedOwnerId: () => null,
+      setError,
+    }));
+
+    render(<AgentCreatePage />);
+
+    await user.click(screen.getByRole('button', {name: 'Set Name'}));
+
+    expect(setError).toHaveBeenCalledWith(null);
+  });
+
+  it('renders the OU picker on the organization unit step when child organization units exist', () => {
     mockUseGetChildOrganizationUnits.mockReturnValue({
       data: {totalResults: 3},
       isLoading: false,
@@ -344,6 +426,34 @@ describe('AgentCreatePage', () => {
     render(<AgentCreatePage />);
 
     expect(screen.getByTestId('step-organization-unit')).toBeInTheDocument();
+    expect(screen.queryByTestId('step-name')).not.toBeInTheDocument();
+  });
+
+  it('renders the name step directly when currentStep is NAME, even with child organization units', () => {
+    mockUseGetChildOrganizationUnits.mockReturnValue({
+      data: {totalResults: 3},
+      isLoading: false,
+      error: null,
+    });
+
+    render(<AgentCreatePage />);
+
+    expect(screen.getByTestId('step-name')).toBeInTheDocument();
+    expect(screen.queryByTestId('step-organization-unit')).not.toBeInTheDocument();
+  });
+
+  it('shows a loading indicator on the organization unit step while child OUs are loading', () => {
+    mockUseGetChildOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    });
+    agentCreateState.currentStep = AgentCreateFlowStep.ORGANIZATION_UNIT;
+
+    render(<AgentCreatePage />);
+
+    expect(screen.queryByTestId('step-organization-unit')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('step-name')).not.toBeInTheDocument();
   });
 
   it('renders the profile step when schema has fields', () => {

@@ -1,10 +1,10 @@
 # ThunderID OpenChoreo ResourceType
 
-This Helm chart registers a `ClusterResourceType` (or namespace-scoped
-`ResourceType`) that runs the ThunderID Identity Provider as an
-OpenChoreo-managed platform Resource. It runs on the **SQLite databases
-bundled in the image** by default (zero prerequisites, development only) or
-an **externally hosted PostgreSQL database** (e.g. AWS RDS) for production.
+This manifest (`resourcetype.yaml`) registers a `ClusterResourceType` that
+runs ThunderID, an open-source IAM stack, as an OpenChoreo-managed platform
+Resource. It runs on the **SQLite databases bundled in the image** by
+default (zero prerequisites, development only) or an **externally hosted
+PostgreSQL database** (e.g. AWS RDS) for production.
 
 Provisioning is **fully declarative**: all ThunderID resources
 (organization units, user types, applications, flows, themes, users) come
@@ -16,7 +16,7 @@ Secrets Operator. They never touch the control plane.
 ## How It Works
 
 ```
-thunderid-oc-resourcetype (this chart)
+resourcetype.yaml (this manifest)
   └── ClusterResourceType "thunderid"      ← installed once per cluster
 
 Resource "thunderid" (created by you)
@@ -69,18 +69,12 @@ resources for services explicitly opted into `mutable`/`composite` stores.
 
 ## Install
 
+Apply the manifest once per cluster, as a platform admin. It registers the
+cluster-scoped `ClusterResourceType` (shared across all projects):
+
 ```bash
-# Cluster-scoped (default) — once per cluster, by a platform admin
-helm install thunderid-type install/openchoreo/thunderid-oc-resourcetype
-
-# Namespace-scoped instead
-helm install thunderid-type install/openchoreo/thunderid-oc-resourcetype \
-  --set resourceType.cluster=false
+kubectl apply -f install/openchoreo/thunderid-oc-resourcetype/resourcetype.yaml
 ```
-
-| Value | Description | Default |
-|-------|-------------|---------|
-| `resourceType.cluster` | `true` → `ClusterResourceType` (shared across all projects); `false` → namespaced `ResourceType` in the release namespace | `true` |
 
 ## Secret Store Contract
 
@@ -89,21 +83,24 @@ Secrets Operator `ClusterSecretStore` configured for the data plane, e.g.
 the OpenBao instance installed with OpenChoreo) as properties of **one
 remote secret per environment**:
 
-The image ships **no** JWT signing key material, so generate the two
-signing pairs first (self-signed is fine, the keys sign tokens rather than
+The image ships **no** key material, so generate the AES crypto key and the
+two signing pairs first (self-signed is fine, the keys sign tokens rather than
 terminate TLS). This mirrors what `setup.sh` generates for a local install:
 
 ```bash
+# AES encryption key (64 hex characters)
+openssl rand -hex 32 > crypto.key
+
 # RSA signing pair
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout signing.key -out signing.cert \
-  -subj "/O=WSO2/OU=ThunderID/CN=localhost" \
+  -subj "/O=ThunderID/OU=ThunderID/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 
 # ECDSA signing pair
 openssl ecparam -name prime256v1 -genkey -noout -param_enc named_curve -out ecdsa-signing.key
 openssl req -new -x509 -nodes -days 3650 -key ecdsa-signing.key -out ecdsa-signing.cert \
-  -subj "/O=WSO2/OU=ThunderID/CN=localhost" \
+  -subj "/O=ThunderID/OU=ThunderID/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 
@@ -112,7 +109,7 @@ secret per environment** (`@file` reads a property value from a file):
 
 ```bash
 bao kv put secret/thunderid/dev \
-  CRYPTO_ENCRYPTION_KEY=<64_HEX_CHAR_KEY> \
+  crypto.key=@crypto.key \
   ADMIN_PASSWORD=<PASSWORD> \
   signing.cert=@signing.cert signing.key=@signing.key \
   ecdsa-signing.cert=@ecdsa-signing.cert ecdsa-signing.key=@ecdsa-signing.key \
@@ -122,9 +119,9 @@ bao kv put secret/thunderid/dev \
 ```
 
 The ResourceType renders an `ExternalSecret` that extracts every property at
-`secretStore.key` into the `-env` Secret. Scalar values (`CRYPTO_ENCRYPTION_KEY`,
-`ADMIN_PASSWORD`, `DB_*`) are injected as environment variables via `envFrom`;
-the certificate/key properties are mounted as files under
+`secretStore.key` into the `-env` Secret. Scalar values (`ADMIN_PASSWORD`,
+`DB_*`) are injected as environment variables via `envFrom`; the `crypto.key`,
+certificate, and signing-key properties are mounted as files under
 `config/certs/` instead (their dotted names are not valid environment
 variable names, so `envFrom` skips them, which is expected). ThunderID fails
 fast at startup when a referenced property is missing. The `DB_*` properties
@@ -132,7 +129,7 @@ are only needed with `runtime.dbType: postgres`:
 
 | Property | Description |
 |----------|-------------|
-| `CRYPTO_ENCRYPTION_KEY` | 32-byte hex key (`openssl rand -hex 32`) |
+| `crypto.key` | 32-byte hex AES key (`openssl rand -hex 32`), mounted over `config/certs/` |
 | `ADMIN_PASSWORD` | Admin user password, resolving the `{{.ADMIN_PASSWORD}}` placeholder in the declarative resources file |
 | `signing.cert` / `signing.key` | RSA JWT signing pair, mounted over `config/certs/` |
 | `ecdsa-signing.cert` / `ecdsa-signing.key` | ECDSA JWT signing pair, mounted over `config/certs/` |
@@ -349,14 +346,13 @@ A second `HTTPRoute` is rendered for that hostname and the Console's
 | `runtime.tls.verifyBackend` | Verify the backend certificate at the gateway against the `ca.crt` property at `runtime.certs.storeKey` (publish `ca.crt` there when enabling this); off skips verification (encrypted, unverified) | `false` |
 | `runtime.certs.storeKey` | Optional separate store entry for the certificate/key files. Empty (default): read them from `secretStore.key` alongside the environment values. Set: materialize them from this entry into a dedicated `-certs` Secret. Either way the JWT signing pairs are always mounted over `config/certs/`, plus the serving pair when `tls.enabled` | `""` (use `secretStore.key`) |
 | `runtime.certs.extraFiles` | Additional properties to project over `config/certs/` beyond the always-mounted signing (and, with TLS, serving) pairs | `[]` |
-| `runtime.defaultAuthFlowHandle` | Flow handle used when an application does not pin its own `authFlowId`; empty inherits the server default | `""` |
 | `runtime.dbType` | Database engine — `sqlite` (bundled files, ephemeral pod-local storage, development only) or `postgres` (externally hosted, production) | `sqlite` |
 | `runtime.imagePullPolicy` | `Always` / `IfNotPresent` / `Never` | `Always` |
 | `runtime.port` | Port the ThunderID server listens on | `8090` |
 | `runtime.gate.clientBase` | Gate frontend base path | `/gate` |
 | `runtime.console.clientBase` | Console frontend base path | `/console` |
 | `runtime.console.clientId` | Console OAuth client ID | `CONSOLE` |
-| `runtime.console.scopes` | Console OAuth scopes (JSON array string) — the default covers the management scopes the Console requests | `["openid", "profile", "email", "ou", "system", "system:user", "system:group", "system:ou:view", "system:usertype:view"]` |
+| `runtime.console.scopes` | Console OAuth scopes (JSON array string). The default covers the management scopes the Console requests | `["openid", "profile", "email", "group", "ou", "system"]` |
 | `runtime.jwt.validityPeriod` | JWT validity in seconds | `3600` |
 | `runtime.oauth.refreshTokenValidityPeriod` | Refresh token validity in seconds | `86400` |
 | `runtime.cache.size` | Maximum in-memory cache entries | `10000` |

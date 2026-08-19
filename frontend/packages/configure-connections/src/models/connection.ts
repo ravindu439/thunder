@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {JSX} from 'react';
 
@@ -28,6 +13,7 @@ export const ConnectionTypes = {
   OAUTH: 'oauth',
   TWILIO: 'twilio',
   VONAGE: 'vonage',
+  SMS_GATEWAY: 'sms-gateway',
 } as const;
 
 export type ConnectionType = (typeof ConnectionTypes)[keyof typeof ConnectionTypes];
@@ -45,7 +31,8 @@ export type ConnectionCategory =
   | 'identity-verification'
   | 'crm'
   | 'data-store'
-  | 'trusted-idp';
+  | 'trusted-idp'
+  | 'custom';
 
 /**
  * Functional categories served by the backend /connections?category= filter.
@@ -59,19 +46,13 @@ export type ConnectionInstanceCategory =
   (typeof ConnectionInstanceCategories)[keyof typeof ConnectionInstanceCategories];
 
 /**
- * Instance vendor type — ConnectionType plus 'sms-gateway' (the generic HTTP webhook SMS
- * sender vendor).
- */
-export type ConnectionInstanceType = ConnectionType | 'sms-gateway';
-
-/**
  * One entry of GET /connections — a configured connection instance.
  */
 export interface ConnectionInstance {
   id: string;
   name: string;
   description?: string;
-  type: ConnectionInstanceType;
+  type: ConnectionType;
   categories: ConnectionInstanceCategory[];
   /**
    * Present only for trust-only OIDC instances (trusted issuers); absent for plain federation
@@ -202,7 +183,6 @@ export interface OIDCConnectionRequest extends OAuthConnectionRequest {
   tokenEndpoint: string;
   userInfoEndpoint?: string;
   jwksEndpoint?: string;
-  logoutEndpoint?: string;
   issuer?: string;
   tokenExchangeEnabled?: boolean;
   trustedTokenAudience?: string;
@@ -223,14 +203,14 @@ export interface TwilioConnectionRequest {
 }
 
 /**
- * Request payload for generic OAuth 2.0 connections — no OpenID Connect discovery and no
- * id_token, so the user profile is always fetched from userInfoEndpoint (required, unlike OIDC).
+ * Request payload for generic OAuth 2 connections — no OpenID Connect discovery and no id_token, so
+ * user attributes come from the provider's own profile API (userInfoEndpoint). It is optional:
+ * providers without one carry the subject in a JWT access token.
  */
 export interface OAuth2ConnectionRequest extends OAuthConnectionRequest {
   authorizationEndpoint: string;
   tokenEndpoint: string;
-  userInfoEndpoint: string;
-  logoutEndpoint?: string;
+  userInfoEndpoint?: string;
 }
 
 /**
@@ -245,12 +225,28 @@ export interface VonageConnectionRequest {
   senderId: string;
 }
 
+/**
+ * Request payload for a generic HTTP SMS gateway connection — a webhook ThunderID calls to
+ * deliver the message, for SMS providers without a dedicated vendor integration.
+ */
+export interface SMSGatewayConnectionRequest {
+  name: string;
+  description?: string;
+  /** The HTTP endpoint called to send an SMS. */
+  url: string;
+  httpMethod: string;
+  contentType: string;
+  /** Comma-separated "Key: value" pairs sent with every request. */
+  httpHeaders?: string;
+}
+
 export type ConnectionRequest =
   | OAuthConnectionRequest
   | OIDCConnectionRequest
   | OAuth2ConnectionRequest
   | TwilioConnectionRequest
-  | VonageConnectionRequest;
+  | VonageConnectionRequest
+  | SMSGatewayConnectionRequest;
 
 /**
  * Vendor response — secrets returned masked as "******". A superset carrying every vendor's
@@ -267,6 +263,11 @@ export interface ConnectionResponse extends OIDCConnectionRequest {
   apiSecret?: string;
   /** SMS (shared) field. */
   senderId?: string;
+  /** SMS gateway fields. */
+  url?: string;
+  httpMethod?: string;
+  contentType?: string;
+  httpHeaders?: string;
 }
 
 /**
@@ -282,7 +283,7 @@ export type ConnectionPresentation = 'branded' | 'custom' | 'coming-soon';
  * Frontend-owned presentation metadata for a vendor.
  */
 export interface ConnectionVendorMeta {
-  /** Stable map key (matches backendType for real vendors, e.g. "google", or "custom-sms"). */
+  /** Stable map key (matches backendType for real vendors, e.g. "google"). */
   key: string;
   /** The backend /connections type, when this vendor maps to one. */
   backendType?: ConnectionType;
@@ -294,6 +295,8 @@ export interface ConnectionVendorMeta {
   comingSoon?: boolean;
   /** Whether this connection provisions users and therefore exposes attribute mapping (IdPs only). */
   supportsAttributeMapping?: boolean;
+  /** i18n key for the create-wizard setup hint (vendors that need an OAuth app registered first). */
+  createHintKey?: string;
 }
 
 /**

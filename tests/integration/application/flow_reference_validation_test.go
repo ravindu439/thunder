@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -41,9 +26,10 @@ const (
 
 // FlowReferenceValidationTestSuite exercises the app-side cross-flow reference behavior:
 // on app create/update, if the app's AuthFlow (or another starting flow) transitively invokes a
-// REGISTRATION / RECOVERY flow via a CALL node, the app either has to declare the matching binding
-// or leave it unset (in which case the binding is auto-filled in a disabled state). Genuine
-// mismatches still reject.
+// REGISTRATION / RECOVERY flow via a CALL node, the app must either declare a matching binding
+// (with the corresponding enable flag on) or leave it disabled — in the disabled case the server
+// persists an empty binding regardless of what the auth flow calls. Sign-out still auto-fills
+// because it has no enable toggle. Genuine mismatches with an enabled binding still reject.
 type FlowReferenceValidationTestSuite struct {
 	suite.Suite
 	ouID        string
@@ -209,26 +195,23 @@ func (suite *FlowReferenceValidationTestSuite) TestCreateApp_MatchingRegistratio
 	suite.createdApps = append(suite.createdApps, appID)
 }
 
-func (suite *FlowReferenceValidationTestSuite) TestCreateApp_MissingRegistrationBindingAutoFilled() {
-	app := suite.baseApp("flowref_autofill_reg")
+func (suite *FlowReferenceValidationTestSuite) TestCreateApp_DisabledRegistrationLeftEmpty() {
+	// Auth flow calls a REGISTRATION target, but the caller has left IsRegistrationFlowEnabled
+	// unset (false). The server must persist an empty registration binding.
+	app := suite.baseApp("flowref_disabled_reg")
 	app.AuthFlowID = suite.authFlowID
-	// RegistrationFlowID intentionally omitted — the auth flow calls a REGISTRATION target, so the
-	// server must auto-fill RegistrationFlowID with the reg-callee ID and force
-	// IsRegistrationFlowEnabled to false.
-	app.IsRegistrationFlowEnabled = true
 
 	appID, err := testutils.CreateApplication(app)
 	suite.Require().NoError(err)
 	suite.createdApps = append(suite.createdApps, appID)
 
 	persisted := suite.getApp(appID)
-	suite.Equal(suite.regCalleeID, persisted["registrationFlowId"],
-		"auto-fill must populate registrationFlowId from the reachable target")
-	suite.Equal(false, persisted["isRegistrationFlowEnabled"],
-		"auto-fill must force isRegistrationFlowEnabled to false regardless of the caller's value")
+	suite.Empty(persisted["registrationFlowId"],
+		"disabled registration binding must not be auto-filled from the auth flow's reachable target")
+	suite.Equal(false, persisted["isRegistrationFlowEnabled"])
 }
 
-func (suite *FlowReferenceValidationTestSuite) TestCreateApp_MissingRecoveryBindingAutoFilled() {
+func (suite *FlowReferenceValidationTestSuite) TestCreateApp_DisabledRecoveryLeftEmpty() {
 	// Build a fresh auth flow that calls the RECOVERY callee (rather than reusing the shared
 	// authFlow which calls the registration callee).
 	authCallingRec := flowDefinition{
@@ -256,16 +239,16 @@ func (suite *FlowReferenceValidationTestSuite) TestCreateApp_MissingRecoveryBind
 	authCallingRecID := suite.createFlowReturningID(authCallingRec)
 	suite.extraFlows = append(suite.extraFlows, authCallingRecID)
 
-	app := suite.baseApp("flowref_autofill_rec")
+	app := suite.baseApp("flowref_disabled_rec")
 	app.AuthFlowID = authCallingRecID
-	app.IsRecoveryFlowEnabled = true
 
 	appID, err := testutils.CreateApplication(app)
 	suite.Require().NoError(err)
 	suite.createdApps = append(suite.createdApps, appID)
 
 	persisted := suite.getApp(appID)
-	suite.Equal(suite.recCalleeID, persisted["recoveryFlowId"])
+	suite.Empty(persisted["recoveryFlowId"],
+		"disabled recovery binding must not be auto-filled from the auth flow's reachable target")
 	suite.Equal(false, persisted["isRecoveryFlowEnabled"])
 }
 
@@ -297,6 +280,7 @@ func (suite *FlowReferenceValidationTestSuite) TestCreateApp_MismatchedRegistrat
 	app := suite.baseApp("flowref_mismatch_reg")
 	app.AuthFlowID = suite.authFlowID
 	app.RegistrationFlowID = altRegID // differs from the reg-callee the auth flow calls
+	app.IsRegistrationFlowEnabled = true
 	suite.createApplicationExpectFlowMismatch(app)
 }
 
@@ -355,6 +339,7 @@ func (suite *FlowReferenceValidationTestSuite) TestCreateApp_ReverseAuthReferenc
 	app := suite.baseApp("flowref_reverse_auth")
 	app.AuthFlowID = loneAuthID
 	app.RegistrationFlowID = regCallingAuthID
+	app.IsRegistrationFlowEnabled = true
 	suite.createApplicationExpectFlowMismatch(app)
 }
 
@@ -461,12 +446,10 @@ func (suite *FlowReferenceValidationTestSuite) TestUpdateApp_IntroducingMismatch
 	})
 }
 
-func (suite *FlowReferenceValidationTestSuite) TestUpdateApp_MissingRegistrationBindingAutoFilled() {
-	// Onboard-like path via update: create the app with only AuthFlowID set (which triggers
-	// auto-fill at create time already). Then clear the field via an update payload that omits
-	// registrationFlowId, and verify the update path also reconciles it. To make this test
-	// meaningful, create an app with an auth flow that has NO reachable registration flow first,
-	// then update the app's AuthFlowID to one that does — the update must auto-fill.
+func (suite *FlowReferenceValidationTestSuite) TestUpdateApp_DisabledRegistrationStaysEmptyOnAuthFlowSwitch() {
+	// Create an app with a "quiet" auth flow that has no CALL nodes, then switch its AuthFlowID
+	// to one that transitively references a REGISTRATION target. The caller has left the
+	// registration binding disabled, so the update must NOT auto-fill it.
 	quietAuth := flowDefinition{
 		Name:     "FlowRef Quiet Authentication",
 		Handle:   "flowref-quiet-auth",
@@ -485,27 +468,25 @@ func (suite *FlowReferenceValidationTestSuite) TestUpdateApp_MissingRegistration
 	quietAuthID := suite.createFlowReturningID(quietAuth)
 	suite.extraFlows = append(suite.extraFlows, quietAuthID)
 
-	app := suite.baseApp("flowref_update_autofill")
+	app := suite.baseApp("flowref_update_no_autofill")
 	app.AuthFlowID = quietAuthID
-	app.IsRegistrationFlowEnabled = true
 	appID, err := testutils.CreateApplication(app)
 	suite.Require().NoError(err)
 	suite.createdApps = append(suite.createdApps, appID)
 
-	// Sanity: nothing was auto-filled on create since quietAuth has no calls.
 	initial := suite.getApp(appID)
 	suite.Empty(initial["registrationFlowId"])
 
-	// Switch AuthFlowID to the caller that invokes the registration callee — update must auto-fill.
+	// Switch AuthFlowID to the caller that invokes the registration callee. The registration
+	// binding must remain empty since the caller kept isRegistrationFlowEnabled=false.
 	suite.updateApplicationExpectSuccess(appID, map[string]interface{}{
 		"authFlowId": suite.authFlowID,
 	})
 
 	updated := suite.getApp(appID)
-	suite.Equal(suite.regCalleeID, updated["registrationFlowId"],
-		"update must auto-fill registrationFlowId from the reachable target")
-	suite.Equal(false, updated["isRegistrationFlowEnabled"],
-		"update auto-fill must force isRegistrationFlowEnabled to false")
+	suite.Empty(updated["registrationFlowId"],
+		"disabled registration binding must remain empty after an auth-flow switch")
+	suite.Equal(false, updated["isRegistrationFlowEnabled"])
 }
 
 // ----- helpers -----
@@ -647,6 +628,7 @@ func (suite *FlowReferenceValidationTestSuite) applicationRequestBody(
 		"ouId":                      app.OUID,
 		"name":                      app.Name,
 		"description":               app.Description,
+		"type":                      "fullstack",
 		"isRegistrationFlowEnabled": app.IsRegistrationFlowEnabled,
 		"isRecoveryFlowEnabled":     app.IsRecoveryFlowEnabled,
 		"authFlowId":                app.AuthFlowID,

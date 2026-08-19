@@ -1,23 +1,9 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {OAuth2GrantTypes, OAuth2ResponseTypes, TokenEndpointAuthMethods} from '@thunderid/configure-applications';
+import type {OAuth2Config} from '@thunderid/configure-applications';
 import {describe, it, expect} from 'vitest';
-import {OAuth2GrantTypes, OAuth2ResponseTypes, TokenEndpointAuthMethods, type OAuth2Config} from '../../models/oauth';
 import {
   applyGrantTypesChange,
   applyPublicClientChange,
@@ -25,7 +11,10 @@ import {
   deriveOAuth2Flags,
   getPkceCaption,
   getPublicClientCaption,
+  hasClientAccess,
+  hasUserAccess,
   isGrantItemDisabled,
+  isOAuthTokenMode,
 } from '../oauth2Rules';
 
 const baseConfig = (overrides: Partial<OAuth2Config> = {}): OAuth2Config => ({
@@ -45,6 +34,15 @@ describe('deriveOAuth2Flags', () => {
     const flags = deriveOAuth2Flags(baseConfig({grantTypes: [OAuth2GrantTypes.CLIENT_CREDENTIALS]}));
     expect(flags.isPkceDisabledByGrants).toBe(true);
     expect(flags.isPublicClientDisabledByGrants).toBe(true);
+  });
+
+  it('disables PAR when authorization_code is absent', () => {
+    expect(deriveOAuth2Flags(baseConfig({grantTypes: [OAuth2GrantTypes.TOKEN_EXCHANGE]})).isParDisabledByGrants).toBe(
+      true,
+    );
+    expect(
+      deriveOAuth2Flags(baseConfig({grantTypes: [OAuth2GrantTypes.AUTHORIZATION_CODE]})).isParDisabledByGrants,
+    ).toBe(false);
   });
 
   it('disables public client when client_credentials is present', () => {
@@ -68,12 +66,25 @@ describe('applyGrantTypesChange', () => {
     expect(updates.grantTypes).toEqual([]);
   });
 
-  it('allows refresh_token alongside another grant', () => {
+  it('drops refresh_token when no token-issuing grant is present', () => {
+    const updates = applyGrantTypesChange(baseConfig(), [
+      OAuth2GrantTypes.CLIENT_CREDENTIALS,
+      OAuth2GrantTypes.REFRESH_TOKEN,
+    ]);
+    expect(updates.grantTypes).toEqual([OAuth2GrantTypes.CLIENT_CREDENTIALS]);
+  });
+
+  it('allows refresh_token alongside authorization_code', () => {
     const updates = applyGrantTypesChange(baseConfig(), [
       OAuth2GrantTypes.AUTHORIZATION_CODE,
       OAuth2GrantTypes.REFRESH_TOKEN,
     ]);
     expect(updates.grantTypes).toEqual([OAuth2GrantTypes.AUTHORIZATION_CODE, OAuth2GrantTypes.REFRESH_TOKEN]);
+  });
+
+  it('allows refresh_token alongside ciba', () => {
+    const updates = applyGrantTypesChange(baseConfig(), [OAuth2GrantTypes.CIBA, OAuth2GrantTypes.REFRESH_TOKEN]);
+    expect(updates.grantTypes).toEqual([OAuth2GrantTypes.CIBA, OAuth2GrantTypes.REFRESH_TOKEN]);
   });
 
   it('turns off PKCE when authorization_code is removed', () => {
@@ -85,6 +96,28 @@ describe('applyGrantTypesChange', () => {
       [OAuth2GrantTypes.CLIENT_CREDENTIALS],
     );
     expect(updates.pkceRequired).toBe(false);
+  });
+
+  it('turns off PAR when authorization_code is removed', () => {
+    const updates = applyGrantTypesChange(
+      baseConfig({
+        grantTypes: [OAuth2GrantTypes.AUTHORIZATION_CODE],
+        requirePushedAuthorizationRequests: true,
+      }),
+      [OAuth2GrantTypes.TOKEN_EXCHANGE],
+    );
+    expect(updates.requirePushedAuthorizationRequests).toBe(false);
+  });
+
+  it('keeps PAR when authorization_code remains', () => {
+    const updates = applyGrantTypesChange(
+      baseConfig({
+        grantTypes: [OAuth2GrantTypes.AUTHORIZATION_CODE],
+        requirePushedAuthorizationRequests: true,
+      }),
+      [OAuth2GrantTypes.AUTHORIZATION_CODE, OAuth2GrantTypes.TOKEN_EXCHANGE],
+    );
+    expect(updates.requirePushedAuthorizationRequests).toBeUndefined();
   });
 
   it('turns off public client and reverts token method when grants become invalid', () => {
@@ -197,8 +230,13 @@ describe('isGrantItemDisabled', () => {
     expect(isGrantItemDisabled(OAuth2GrantTypes.REFRESH_TOKEN, [])).toBe(true);
   });
 
-  it('enables refresh_token once another grant is selected', () => {
+  it('enables refresh_token once a token-issuing grant is selected', () => {
     expect(isGrantItemDisabled(OAuth2GrantTypes.REFRESH_TOKEN, [OAuth2GrantTypes.AUTHORIZATION_CODE])).toBe(false);
+    expect(isGrantItemDisabled(OAuth2GrantTypes.REFRESH_TOKEN, [OAuth2GrantTypes.CIBA])).toBe(false);
+  });
+
+  it('keeps refresh_token disabled when only a non-token-issuing grant is selected', () => {
+    expect(isGrantItemDisabled(OAuth2GrantTypes.REFRESH_TOKEN, [OAuth2GrantTypes.CLIENT_CREDENTIALS])).toBe(true);
   });
 
   it('keeps refresh_token enabled when already selected so it can be unchecked', () => {
@@ -233,6 +271,54 @@ describe('getPublicClientCaption', () => {
     expect(getPublicClientCaption(deriveOAuth2Flags(confidentialConfig), confidentialConfig)[0]).toBe(
       'applications:edit.advanced.publicClient.confidential',
     );
+  });
+});
+
+describe('hasUserAccess', () => {
+  it('is true for authorization_code, CIBA, and password grants', () => {
+    expect(hasUserAccess([OAuth2GrantTypes.AUTHORIZATION_CODE])).toBe(true);
+    expect(hasUserAccess([OAuth2GrantTypes.CIBA])).toBe(true);
+    expect(hasUserAccess([OAuth2GrantTypes.PASSWORD])).toBe(true);
+  });
+
+  it('is false for client_credentials only and for no grants', () => {
+    expect(hasUserAccess([OAuth2GrantTypes.CLIENT_CREDENTIALS])).toBe(false);
+    expect(hasUserAccess([])).toBe(false);
+    expect(hasUserAccess(undefined)).toBe(false);
+  });
+});
+
+describe('hasClientAccess', () => {
+  it('is true only when client_credentials is granted', () => {
+    expect(hasClientAccess([OAuth2GrantTypes.CLIENT_CREDENTIALS])).toBe(true);
+    expect(hasClientAccess([OAuth2GrantTypes.AUTHORIZATION_CODE])).toBe(false);
+    expect(hasClientAccess(undefined)).toBe(false);
+  });
+});
+
+describe('isOAuthTokenMode', () => {
+  // Either block alone flips the flag, so each case is asserted with only one of them populated.
+  const partialToken = (block: Record<string, unknown>): OAuth2Config['token'] =>
+    block as unknown as OAuth2Config['token'];
+
+  it('is true when the access token config is present', () => {
+    expect(
+      isOAuthTokenMode(baseConfig({token: partialToken({accessToken: {userConfig: {validityPeriod: 3600}}})})),
+    ).toBe(true);
+  });
+
+  it('is true when only the ID token config is present', () => {
+    expect(
+      isOAuthTokenMode(baseConfig({token: partialToken({idToken: {validityPeriod: 3600, userAttributes: []}})})),
+    ).toBe(true);
+  });
+
+  it('is false for an app-native application with no OAuth config', () => {
+    expect(isOAuthTokenMode(undefined)).toBe(false);
+  });
+
+  it('is false when an OAuth config carries no token block', () => {
+    expect(isOAuthTokenMode(baseConfig({grantTypes: [OAuth2GrantTypes.AUTHORIZATION_CODE]}))).toBe(false);
   });
 });
 

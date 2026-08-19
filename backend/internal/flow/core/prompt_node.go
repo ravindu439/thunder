@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package core
 
@@ -532,14 +517,14 @@ func (n *promptNode) enrichInputsFromForwardedData(ctx *providers.NodeContext, n
 			}
 			continue
 		}
-		if _, ok := ctx.UserInputs[fwdInput.Identifier]; ok {
+		if val, ok := ctx.UserInputs[fwdInput.Identifier]; ok && val != "" {
 			continue
 		}
-		if _, ok := ctx.RuntimeData[fwdInput.Identifier]; ok {
+		if val, ok := ctx.RuntimeData[fwdInput.Identifier]; ok && val != "" {
 			continue
 		}
 		if value, ok := ctx.ForwardedData[fwdInput.Identifier]; ok {
-			if _, isString := value.(string); isString {
+			if val, isString := value.(string); isString && val != "" {
 				continue
 			}
 		}

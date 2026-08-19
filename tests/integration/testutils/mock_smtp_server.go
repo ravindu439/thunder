@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -24,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -203,6 +189,22 @@ func extractSMTPAngle(s string) string {
 	s = strings.TrimPrefix(s, "<")
 	s = strings.TrimSuffix(s, ">")
 	return strings.TrimSpace(s)
+}
+
+// otpCellPattern matches the OTP the email template renders inside its own table cell.
+var otpCellPattern = regexp.MustCompile(`>\s*([A-Za-z0-9]{4,10})\s*</td>`)
+
+// ExtractOTP returns the one time code carried by an OTP email, which the template renders as the
+// sole contents of a table cell. Returns "" if no code is found.
+func (e *EmailMessage) ExtractOTP() string {
+	// Undo quoted-printable soft line breaks, which can split the code across lines.
+	body := strings.ReplaceAll(e.Body, "=\r\n", "")
+	body = strings.ReplaceAll(body, "=\n", "")
+
+	if match := otpCellPattern.FindStringSubmatch(body); match != nil {
+		return match[1]
+	}
+	return ""
 }
 
 // ExtractRecoveryLink searches the email body for a URL containing "inviteToken"

@@ -1,27 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {zodResolver} from '@hookform/resolvers/zod';
-import {generateRandomHumanReadableIdentifiers} from '@thunderid/utils';
-import {Box, Chip, FormControl, FormLabel, Stack, TextField, Typography, useTheme} from '@wso2/oxygen-ui';
-import {Lightbulb} from '@wso2/oxygen-ui-icons-react';
+import {NameSuggestion} from '@thunderid/components';
+import {FormControl, FormLabel, Stack, TextField, Typography} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
-import {useEffect, useMemo, useRef} from 'react';
+import {useEffect, useRef} from 'react';
 import {Controller, useForm} from 'react-hook-form';
 import {useTranslation} from 'react-i18next';
 import {z} from 'zod';
@@ -50,10 +34,7 @@ interface ConfigureFlowNameProps {
 
 export default function ConfigureFlowName({value, onChange, onReadyChange}: ConfigureFlowNameProps): JSX.Element {
   const {t} = useTranslation();
-  const theme = useTheme();
   const isHandleManuallyEditedRef = useRef(false);
-
-  const nameSuggestions = useMemo(() => generateRandomHumanReadableIdentifiers(), []);
 
   const generateHandle = (name: string): string =>
     name
@@ -92,7 +73,7 @@ export default function ConfigureFlowName({value, onChange, onReadyChange}: Conf
     onChange({name: value.name, handle: newHandle});
   };
 
-  const handleSuggestionClick = (suggestion: string): void => {
+  const handleSuggestionSelect = (suggestion: string): void => {
     setValue('name', suggestion, {shouldValidate: true});
     onChange({
       name: suggestion,
@@ -106,7 +87,7 @@ export default function ConfigureFlowName({value, onChange, onReadyChange}: Conf
   return (
     <Stack direction="column" spacing={4} data-testid="configure-flow-name">
       <Typography variant="h1" gutterBottom>
-        {t('flows:create.configure.title', 'Name your flow')}
+        {t('flows:create.configure.title', "Let's collect some details about your flow")}
       </Typography>
 
       <FormControl fullWidth required>
@@ -125,34 +106,9 @@ export default function ConfigureFlowName({value, onChange, onReadyChange}: Conf
             />
           )}
         />
-      </FormControl>
 
-      <Stack direction="column" spacing={2}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Lightbulb size={20} color={theme.vars?.palette.warning.main} />
-          <Typography variant="body2" color="text.secondary">
-            {t('flows:create.configure.suggestions.label', 'Need inspiration? Try one of these:')}
-          </Typography>
-        </Stack>
-        <Box sx={{display: 'flex', flexWrap: 'wrap', gap: 1}}>
-          {nameSuggestions.map((suggestion) => (
-            <Chip
-              key={suggestion}
-              label={suggestion}
-              onClick={() => handleSuggestionClick(suggestion)}
-              variant="outlined"
-              clickable
-              sx={{
-                '&:hover': {
-                  bgcolor: 'primary.main',
-                  color: 'primary.contrastText',
-                  borderColor: 'primary.main',
-                },
-              }}
-            />
-          ))}
-        </Box>
-      </Stack>
+        <NameSuggestion onSelect={handleSuggestionSelect} />
+      </FormControl>
 
       <FormControl fullWidth required>
         <FormLabel htmlFor="flow-handle-input">{t('flows:create.configure.handle.label', 'Handle')}</FormLabel>

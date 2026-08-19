@@ -1,25 +1,22 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {PageLoadingAnimation, UnsavedChangesBar} from '@thunderid/components';
-import {useToast} from '@thunderid/contexts';
+import {PageLoadingAnimation, QueryErrorNotice, UnsavedChangesBar} from '@thunderid/components';
+import {getBreakingSchemaChanges} from '@thunderid/configure-user-types';
 import {useLogger} from '@thunderid/logger/react';
-import {Stack, Typography, Button, Alert, PageContent, PageTitle} from '@wso2/oxygen-ui';
+import {getErrorMessage, isEqualIgnoringEmpty} from '@thunderid/utils';
+import {
+  Stack,
+  Typography,
+  Button,
+  Alert,
+  PageContent,
+  PageTitle,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+} from '@wso2/oxygen-ui';
 import {ArrowLeft} from '@wso2/oxygen-ui-icons-react';
 import type {JSX} from 'react';
 import {useState, useMemo, useCallback} from 'react';
@@ -28,6 +25,7 @@ import {Link, useNavigate, useParams} from 'react-router';
 import useGetAgentType from '../api/useGetAgentType';
 import useUpdateAgentType from '../api/useUpdateAgentType';
 import EditSchemaSettings from '../components/edit-agent-type/schema-settings/EditSchemaSettings';
+import useAgentTypeRoutes from '../hooks/useAgentTypeRoutes';
 import type {
   AgentTypeDefinition,
   PropertyDefinition,
@@ -105,19 +103,35 @@ function convertPropertiesToSchema(properties: SchemaPropertyInput[]): AgentType
 
 export default function ViewAgentTypePage(): JSX.Element {
   const navigate = useNavigate();
+  const routes = useAgentTypeRoutes();
   const {t} = useTranslation();
   const logger = useLogger('ViewAgentTypePage');
-  const {showToast} = useToast();
   const {id} = useParams<{id: string}>();
   // Agent types are restricted to a single `default` schema; there is no agent-types listing
   // page anymore, so the back button returns to the agent listing.
-  const listUrl = '/agents';
+  const listUrl = routes.agents.list();
 
-  const {data: agentType, isLoading, error: fetchError} = useGetAgentType(id);
+  const {data: agentType, isLoading, error: fetchError, refetch} = useGetAgentType(id);
   const updateAgentTypeMutation = useUpdateAgentType();
+
+  // Resolves an error through the `agentTypes` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agentTypes:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string =>
+      t(key.includes(':') ? key : `agentTypes:${key}`, options),
+    [t],
+  );
 
   // Edited schema properties (null = no changes, non-null = user edited)
   const [editedProperties, setEditedProperties] = useState<SchemaPropertyInput[] | null>(null);
+
+  // Validation error from the last save attempt. Takes precedence over the mutation's own error.
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  // Schema-change warning confirmation
+  const [showSchemaWarning, setShowSchemaWarning] = useState(false);
+  const [breakingAttributes, setBreakingAttributes] = useState<string[]>([]);
 
   // Base properties from server data (useMemo so they're available synchronously)
   const baseProperties = useMemo(() => (agentType ? convertSchemaToProperties(agentType.schema) : []), [agentType]);
@@ -128,39 +142,41 @@ export default function ViewAgentTypePage(): JSX.Element {
   // Effective name (locked to the server-side value)
   const effectiveName = agentType?.name ?? '';
 
-  // Change detection
-  const hasChanges = useMemo(() => editedProperties !== null, [editedProperties]);
+  // Whether there are unsaved changes (deep compare edited vs base)
+  const hasChanges = useMemo(
+    () => editedProperties !== null && !isEqualIgnoringEmpty(editedProperties, baseProperties),
+    [editedProperties, baseProperties],
+  );
 
   const handleBack = async (): Promise<void> => {
     await navigate(listUrl);
   };
 
-  const handlePropertiesChange = useCallback((newProperties: SchemaPropertyInput[]): void => {
-    setEditedProperties(newProperties);
-  }, []);
+  const handlePropertiesChange = useCallback(
+    (newProperties: SchemaPropertyInput[]): void => {
+      // A previous save error is stale once the schema changes again.
+      if (updateAgentTypeMutation.isError) {
+        updateAgentTypeMutation.reset();
+      }
+      setValidationError(null);
+      setEditedProperties(newProperties);
+    },
+    [updateAgentTypeMutation],
+  );
 
   const handleReset = useCallback((): void => {
     setEditedProperties(null);
-    updateAgentTypeMutation.reset();
+    setValidationError(null);
+    if (updateAgentTypeMutation.isError) {
+      updateAgentTypeMutation.reset();
+    }
   }, [updateAgentTypeMutation]);
 
-  const handleSave = useCallback(async (): Promise<void> => {
+  const performSave = useCallback(async (): Promise<void> => {
     if (!id || !agentType) return;
 
     const name = agentType.name.trim();
     const ouId = agentType.ouId.trim();
-
-    // Check for duplicate property names
-    const trimmedNames = effectiveProperties.filter((p) => p.name.trim()).map((p) => p.name.trim());
-    const duplicates = trimmedNames.filter((n, i) => trimmedNames.indexOf(n) !== i);
-    if (duplicates.length > 0) {
-      showToast(
-        t('agentTypes:validationErrors.duplicateProperties', {duplicates: [...new Set(duplicates)].join(', ')}),
-        'error',
-      );
-      return;
-    }
-
     const schema = convertPropertiesToSchema(effectiveProperties);
 
     try {
@@ -182,10 +198,46 @@ export default function ViewAgentTypePage(): JSX.Element {
       setEditedProperties(null);
     } catch (err: unknown) {
       logger.error('Failed to update agent type', {error: err});
-      const message = err instanceof Error ? err.message : t('agentTypes:edit.saveError', 'Failed to save agent type');
-      showToast(message, 'error');
     }
-  }, [id, agentType, effectiveProperties, updateAgentTypeMutation, logger, showToast, t]);
+  }, [id, agentType, effectiveProperties, updateAgentTypeMutation, logger]);
+
+  const handleSave = useCallback(async (): Promise<void> => {
+    if (!id || !agentType) return;
+
+    setValidationError(null);
+
+    // Check for duplicate property names
+    const trimmedNames = effectiveProperties.filter((p) => p.name.trim()).map((p) => p.name.trim());
+    const duplicates = trimmedNames.filter((n, i) => trimmedNames.indexOf(n) !== i);
+    if (duplicates.length > 0) {
+      setValidationError(
+        t('agentTypes:validationErrors.duplicateProperties', {
+          duplicates: [...new Set(duplicates)].join(', '),
+          defaultValue: 'Duplicate property names found: {{duplicates}}',
+        }),
+      );
+      return;
+    }
+
+    // Warn only when a schema change could strand existing agents (removed/newly-required/tightened attribute).
+    const breaking = getBreakingSchemaChanges(
+      convertPropertiesToSchema(baseProperties),
+      convertPropertiesToSchema(effectiveProperties),
+    );
+
+    if (breaking.length > 0) {
+      setBreakingAttributes(breaking);
+      setShowSchemaWarning(true);
+      return;
+    }
+
+    await performSave();
+  }, [id, agentType, effectiveProperties, baseProperties, t, performSave]);
+
+  const handleConfirmSchemaChange = useCallback((): void => {
+    setShowSchemaWarning(false);
+    void performSave();
+  }, [performSave]);
 
   // Loading state
   if (isLoading) {
@@ -196,17 +248,25 @@ export default function ViewAgentTypePage(): JSX.Element {
   if (fetchError) {
     return (
       <PageContent>
-        <Alert severity="error" sx={{mb: 2}}>
-          {fetchError.message ?? t('agentTypes:edit.loadError', 'Failed to load agent type information')}
-        </Alert>
-        <Button
-          onClick={() => {
-            handleBack().catch(() => null);
-          }}
-          startIcon={<ArrowLeft size={16} />}
-        >
-          {t('agentTypes:edit.back', 'Back to Agents')}
-        </Button>
+        <QueryErrorNotice
+          error={fetchError}
+          t={tForErrors}
+          variant="block"
+          title={t('agentTypes:edit.loadErrorTitle', 'Failed to load agent type')}
+          fallbackKey="agentTypes:edit.loadError"
+          fallbackDefaultValue="Failed to load agent type information"
+          onRetry={() => void refetch()}
+          action={
+            <Button
+              onClick={() => {
+                handleBack().catch(() => null);
+              }}
+              startIcon={<ArrowLeft size={16} />}
+            >
+              {t('agentTypes:edit.back', 'Back to Agents')}
+            </Button>
+          }
+        />
       </PageContent>
     );
   }
@@ -252,6 +312,38 @@ export default function ViewAgentTypePage(): JSX.Element {
         />
       </Stack>
 
+      {/* Schema-change warning */}
+      <Dialog open={showSchemaWarning} onClose={() => setShowSchemaWarning(false)}>
+        <DialogTitle>{t('agentTypes:schemaChangeWarning.title', 'Confirm schema changes')}</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning">
+            {t(
+              'agentTypes:schemaChangeWarning.description',
+              'Existing agents may require updates if their attributes no longer match the revised schema. Applications that return removed attributes in tokens or userinfo must also be updated.',
+            )}
+            <Typography variant="body2" sx={{mt: 1}}>
+              {t('agentTypes:schemaChangeWarning.affected', 'Affected attributes:')}
+            </Typography>
+            <Stack component="ul" sx={{mt: 0.5, mb: 0, pl: 2.5}}>
+              {breakingAttributes.map((name) => (
+                <Typography component="li" variant="body2" key={name}>
+                  {name}
+                </Typography>
+              ))}
+            </Stack>
+            <Typography variant="body2" sx={{mt: 1}}>
+              {t('agentTypes:schemaChangeWarning.areYouSure', 'Do you want to continue?')}
+            </Typography>
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSchemaWarning(false)}>{t('common:actions.cancel', 'Cancel')}</Button>
+          <Button color="warning" variant="contained" onClick={handleConfirmSchemaChange}>
+            {t('agentTypes:schemaChangeWarning.confirm', 'Continue')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Unsaved Changes Bar */}
       {hasChanges && (
         <UnsavedChangesBar
@@ -260,6 +352,17 @@ export default function ViewAgentTypePage(): JSX.Element {
           saveLabel={t('common:actions.save', 'Save')}
           savingLabel={t('common:status.saving', 'Saving...')}
           isSaving={updateAgentTypeMutation.isPending}
+          error={
+            validationError ??
+            (updateAgentTypeMutation.error
+              ? getErrorMessage(
+                  updateAgentTypeMutation.error,
+                  tForErrors,
+                  'update.error',
+                  'Failed to update agent type. Please try again.',
+                )
+              : undefined)
+          }
           onReset={handleReset}
           onSave={() => {
             handleSave().catch(() => null);

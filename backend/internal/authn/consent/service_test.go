@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package consent
 
@@ -467,6 +452,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestVerifyAndDecodeConsentSession_Inva
 
 func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_SessionTokenInvalid() {
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true},
 		},
@@ -491,6 +477,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_MissingPurpose_Treat
 		{PurposeName: "purpose2", Essential: []string{"phone"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -532,6 +519,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_SearchFails_ClientEr
 		{PurposeName: "purpose1", Essential: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -560,6 +548,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_SearchFails_ServerEr
 		{PurposeName: "purpose1", Essential: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -589,6 +578,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_NoExisting_CreateSuc
 		{PurposeName: purposeName, Essential: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{
 				PurposeName: purposeName,
@@ -627,11 +617,55 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_NoExisting_CreateSuc
 	s.Equal(providers.ConsentTypeAuthentication, result.Type)
 }
 
+func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_TopLevelDenial_PersistsNothingApproved() {
+	purposeName := consent.AttributePurposeNamePrefix + "app1"
+	sessionToken := buildTestSessionToken([]consentSessionPurpose{
+		{PurposeName: purposeName, Optional: []string{"email", "phone"}},
+	})
+	// The purpose and its elements claim approval, but the top level denies the whole consent
+	decisions := &providers.ConsentDecisions{
+		Approved: false,
+		Purposes: []providers.PurposeDecision{
+			{
+				PurposeName: purposeName,
+				Approved:    true,
+				Elements: []providers.ElementDecision{
+					{Name: "email", Approved: true},
+					{Name: "phone", Approved: true},
+				},
+			},
+		},
+	}
+
+	s.mockJWTSvc.On("VerifyJWT", mock.Anything, sessionToken, consentSessionTokenAudience, mock.Anything).
+		Return((*tidcommon.ServiceError)(nil))
+	s.mockConsentSvc.On("SearchConsents", mock.Anything, mock.Anything).Return([]*consent.Consent{}, nil)
+	s.mockConsentSvc.On("CreateConsent", mock.Anything,
+		mock.MatchedBy(func(req *consent.ConsentRequest) bool {
+			for _, p := range req.Purposes {
+				for _, e := range p.Elements {
+					if e.IsUserApproved {
+						return false
+					}
+				}
+			}
+			return true
+		})).Return(&consent.Consent{ID: "consent-denied"}, nil)
+
+	result, svcErr := s.service.RecordConsent(context.Background(), "ou1", "app1", "user1",
+		decisions, sessionToken, 0, nil)
+
+	s.Nil(svcErr)
+	s.NotNil(result)
+	s.mockConsentSvc.AssertExpectations(s.T())
+}
+
 func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_NoExisting_CreateFails_ClientError() {
 	sessionToken := buildTestSessionToken([]consentSessionPurpose{
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -662,6 +696,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_NoExisting_CreateFai
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -693,6 +728,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_ExistingConsent_Upda
 		{PurposeName: purposeName, Essential: []string{"email"}, Optional: []string{"phone"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{
 				PurposeName: purposeName,
@@ -751,6 +787,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_ExistingConsent_Upda
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -783,6 +820,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_ExistingConsent_Upda
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -815,6 +853,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_WithValidityPeriod()
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -844,6 +883,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_ZeroValidityPeriod()
 		{PurposeName: "purpose1", Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "purpose1", Approved: true, Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -873,6 +913,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_EssentialDenied_Retu
 		{PurposeName: purposeName, Essential: []string{"email"}, Optional: []string{"phone"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{
 				PurposeName: purposeName,
@@ -920,6 +961,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestRecordConsent_UnpromptedElementFil
 		{PurposeName: purposeName, Optional: []string{"email"}},
 	})
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{
 				PurposeName: purposeName,
@@ -1353,6 +1395,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestBuildConsentElementApprovals_Multi
 		},
 	}
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{
 				PurposeName: "attributes:app1",
@@ -1384,6 +1427,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestBuildConsentElementApprovals_Drops
 		},
 	}
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "attributes:app1", Elements: []providers.ElementDecision{
 				{Name: "email", Approved: true},
@@ -1410,6 +1454,78 @@ func (s *ConsentEnforcerServiceTestSuite) TestPurposeElementKey() {
 	s.Equal("purpose1:email", key)
 }
 
+// applyDecisionHierarchy tests
+
+func (s *ConsentEnforcerServiceTestSuite) TestApplyDecisionHierarchy_TopLevelDenialDeniesEverything() {
+	decisions := &providers.ConsentDecisions{
+		Approved: false,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "email", Approved: true},
+				{Name: "phone", Approved: true},
+			}},
+			{PurposeName: "p2", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "address", Approved: true},
+			}},
+		},
+	}
+
+	applyDecisionHierarchy(decisions)
+
+	for _, p := range decisions.Purposes {
+		s.False(p.Approved)
+		for _, e := range p.Elements {
+			s.False(e.Approved)
+		}
+	}
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestApplyDecisionHierarchy_PurposeDenialOnlyAffectsItsElements() {
+	decisions := &providers.ConsentDecisions{
+		Approved: true,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "denied", Approved: false, Elements: []providers.ElementDecision{
+				{Name: "email", Approved: true},
+			}},
+			{PurposeName: "approved", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "phone", Approved: true},
+			}},
+		},
+	}
+
+	applyDecisionHierarchy(decisions)
+
+	s.False(decisions.Purposes[0].Approved)
+	s.False(decisions.Purposes[0].Elements[0].Approved)
+	s.True(decisions.Purposes[1].Approved)
+	s.True(decisions.Purposes[1].Elements[0].Approved)
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestApplyDecisionHierarchy_ApprovalDoesNotOverrideDeniedElements() {
+	decisions := &providers.ConsentDecisions{
+		Approved: true,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "email", Approved: true},
+				{Name: "phone", Approved: false},
+			}},
+		},
+	}
+
+	applyDecisionHierarchy(decisions)
+
+	s.True(decisions.Purposes[0].Elements[0].Approved)
+	s.False(decisions.Purposes[0].Elements[1].Approved)
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestApplyDecisionHierarchy_NoPurposes() {
+	decisions := &providers.ConsentDecisions{Approved: false}
+
+	applyDecisionHierarchy(decisions)
+
+	s.Empty(decisions.Purposes)
+}
+
 // fillMissingDecisions tests
 
 func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_AllPresent() {
@@ -1419,6 +1535,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_AllPresent() 
 		},
 	}
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{{Name: "email", Approved: true}}},
 		},
@@ -1435,6 +1552,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_MissingPurpos
 		},
 	}
 	decisions := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{{Name: "email", Approved: true}}},
 		},
@@ -1450,6 +1568,86 @@ func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_MissingPurpos
 	s.False(added.Elements[0].Approved)
 	s.Equal("address", added.Elements[1].Name)
 	s.False(added.Elements[1].Approved)
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_RootDeniedFillsMissingElements() {
+	session := &consentSessionData{
+		Purposes: []consentSessionPurpose{
+			{PurposeName: "p1", Essential: []string{"email"}, Optional: []string{"phone"}},
+		},
+	}
+	// Client sent a minimal deny payload: root approved=false and the purpose is present but its
+	// element list is empty. The backend fills in every prompted element as denied.
+	decisions := &providers.ConsentDecisions{
+		Approved: false,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "p1", Approved: false, Elements: []providers.ElementDecision{}},
+		},
+	}
+	fillMissingDecisions(session, decisions)
+
+	s.Len(decisions.Purposes, 1)
+	filled := decisions.Purposes[0]
+	s.Len(filled.Elements, 2)
+	s.Equal("email", filled.Elements[0].Name)
+	s.False(filled.Elements[0].Approved)
+	s.Equal("phone", filled.Elements[1].Name)
+	s.False(filled.Elements[1].Approved)
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_PurposeDeniedFillsMissingElements() {
+	session := &consentSessionData{
+		Purposes: []consentSessionPurpose{
+			{PurposeName: "p1", Optional: []string{"address"}},
+			{PurposeName: "p2", Essential: []string{"phone"}, Optional: []string{"birthday"}},
+		},
+	}
+	// Root is approved but p2 is denied and its elements were omitted. Missing elements under the
+	// denied purpose must be filled in as denied.
+	decisions := &providers.ConsentDecisions{
+		Approved: true,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "address", Approved: true}}},
+			{PurposeName: "p2", Approved: false},
+		},
+	}
+	fillMissingDecisions(session, decisions)
+
+	s.Len(decisions.Purposes, 2)
+	// p1 is unchanged: parent approved so omitted elements stay omitted
+	s.Len(decisions.Purposes[0].Elements, 1)
+	s.Equal("address", decisions.Purposes[0].Elements[0].Name)
+	s.True(decisions.Purposes[0].Elements[0].Approved)
+	// p2 gets both prompted elements filled in as denied
+	deniedPurpose := decisions.Purposes[1]
+	s.Len(deniedPurpose.Elements, 2)
+	s.Equal("phone", deniedPurpose.Elements[0].Name)
+	s.False(deniedPurpose.Elements[0].Approved)
+	s.Equal("birthday", deniedPurpose.Elements[1].Name)
+	s.False(deniedPurpose.Elements[1].Approved)
+}
+
+func (s *ConsentEnforcerServiceTestSuite) TestFillMissingDecisions_ApprovedPurposeLeftUntouched() {
+	session := &consentSessionData{
+		Purposes: []consentSessionPurpose{
+			{PurposeName: "p1", Essential: []string{"email"}, Optional: []string{"phone"}},
+		},
+	}
+	// Approval is not propagated down, so an omitted optional element under an approved parent
+	// stays omitted (treated as not-consented on subsequent reads).
+	decisions := &providers.ConsentDecisions{
+		Approved: true,
+		Purposes: []providers.PurposeDecision{
+			{PurposeName: "p1", Approved: true, Elements: []providers.ElementDecision{
+				{Name: "email", Approved: true}}},
+		},
+	}
+	fillMissingDecisions(session, decisions)
+
+	s.Len(decisions.Purposes, 1)
+	s.Len(decisions.Purposes[0].Elements, 1)
+	s.Equal("email", decisions.Purposes[0].Elements[0].Name)
 }
 
 // buildEssentialElementSet / hasEssentialDenials tests
@@ -1473,6 +1671,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestHasEssentialDenials() {
 	essentialElements := map[string]bool{"p1:email": true}
 
 	denied := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "p1", Elements: []providers.ElementDecision{{Name: "email", Approved: false}}},
 		},
@@ -1480,6 +1679,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestHasEssentialDenials() {
 	s.True(hasEssentialDenials(denied, essentialElements))
 
 	approved := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "p1", Elements: []providers.ElementDecision{{Name: "email", Approved: true}}},
 		},
@@ -1488,6 +1688,7 @@ func (s *ConsentEnforcerServiceTestSuite) TestHasEssentialDenials() {
 
 	// A denied element that is not essential does not count.
 	optionalDenied := &providers.ConsentDecisions{
+		Approved: true,
 		Purposes: []providers.PurposeDecision{
 			{PurposeName: "p1", Elements: []providers.ElementDecision{{Name: "phone", Approved: false}}},
 		},

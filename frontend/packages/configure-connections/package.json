@@ -8,14 +8,13 @@
     "admin",
     "connections",
     "react",
-    "feature",
-    "wso2"
+    "feature"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/packages/configure-connections#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
@@ -47,6 +46,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lib.json"
   },
@@ -63,9 +63,10 @@
     "@thunderid/prettier-config": "workspace:^",
     "@thunderid/test-utils": "workspace:^",
     "@thunderid/utils": "workspace:^",
-    "@vitest/browser-playwright": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
     "eslint": "catalog:",
     "prettier": "catalog:",
     "react": "catalog:",

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 
@@ -95,6 +80,10 @@ describe('useVisualFlowHandlers', () => {
     setFlowEdgeTypes: vi.fn(),
     flowNodes: [],
     setFlowNodes: vi.fn(),
+    flowEdges: [],
+    setFlowEdges: vi.fn(),
+    graphValidationRules: [],
+    setGraphValidationRules: vi.fn(),
   };
 
   const createWrapper = (overrides: Partial<FlowConfigContextProps> = {}) => {
@@ -417,6 +406,139 @@ describe('useVisualFlowHandlers', () => {
         const updated = updater({data: sourceNode.data});
         expect(updated.components[0].action).toEqual({ref: 'existing'});
         expect(updated.components[1].action).toEqual({ref: 'target-1'});
+      });
+
+      describe('label sentinel sync', () => {
+        interface SyncedComponent {
+          action: {ref: string};
+          label?: string;
+        }
+
+        const connectTo = (target: string, node: {id: string; data: unknown}): SyncedComponent => {
+          mockGetNodes.mockReturnValue([node, {id: target}]);
+
+          const {result} = renderHook(() => useVisualFlowHandlers({setEdges: mockSetEdges}), {
+            wrapper: createWrapper(),
+          });
+
+          act(() => {
+            result.current.handleConnect({
+              source: 'view-1',
+              target,
+              sourceHandle: `${richTextComponentId}${nextSuffix}`,
+              targetHandle: null,
+            });
+          });
+
+          const [, updater] = mockUpdateNodeData.mock.calls[0];
+          const updated = updater({data: node.data}) as {components: SyncedComponent[]};
+
+          return updated.components[0];
+        };
+
+        const buildLabelledNode = (actionRef: string, label: string) => ({
+          id: 'view-1',
+          data: {
+            components: [{id: richTextComponentId, type: 'RICH_TEXT', action: {ref: actionRef}, label}],
+          },
+        });
+
+        it('rewrites the sentinel alongside the ref', () => {
+          const component = connectTo(
+            'target-1',
+            buildLabelledNode('action_recovery', '<p><a href="#" data-action-ref="action_recovery">Reset</a></p>'),
+          );
+
+          expect(component.action).toEqual({ref: 'target-1'});
+          expect(component.label).toBe('<p><a href="#" data-action-ref="target-1">Reset</a></p>');
+        });
+
+        it('rewrites a lone sentinel that has drifted from the ref', () => {
+          // Flows saved before the two moved together carry a target node id in `action.ref`
+          // while the label kept the authored name. Redrawing the edge has to heal that.
+          const component = connectTo(
+            'target-1',
+            buildLabelledNode('recovery_call_g0v6', '<p><a href="#" data-action-ref="action_recovery">Reset</a></p>'),
+          );
+
+          expect(component.label).toBe('<p><a href="#" data-action-ref="target-1">Reset</a></p>');
+        });
+
+        it('leaves a foreign sentinel alone when the label has several', () => {
+          const component = connectTo(
+            'target-1',
+            buildLabelledNode(
+              'action_recovery',
+              '<p><a href="#" data-action-ref="action_recovery">Reset</a>' +
+                '<a href="#" data-action-ref="action_signup">Sign up</a></p>',
+            ),
+          );
+
+          expect(component.label).toBe(
+            '<p><a href="#" data-action-ref="target-1">Reset</a>' +
+              '<a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          );
+        });
+
+        it('rewrites only the first sentinel when the ref is empty and the label has several', () => {
+          // With no ref to match on, the anchor the properties panel derives the ref from is the
+          // first. Rewriting them all would point the unrelated link at this action too.
+          const component = connectTo(
+            'target-1',
+            buildLabelledNode(
+              '',
+              '<p><a href="#" data-action-ref="action_recovery">Reset</a>' +
+                '<a href="#" data-action-ref="action_signup">Sign up</a></p>',
+            ),
+          );
+
+          expect(component.action).toEqual({ref: 'target-1'});
+          expect(component.label).toBe(
+            '<p><a href="#" data-action-ref="target-1">Reset</a>' +
+              '<a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          );
+        });
+
+        it('leaves a label with no sentinel untouched', () => {
+          const label = '<p><a href="#">Reset</a></p>';
+          const component = connectTo('target-1', buildLabelledNode('action_recovery', label));
+
+          expect(component.action).toEqual({ref: 'target-1'});
+          expect(component.label).toBe(label);
+        });
+
+        it('heals a drifted sentinel when reconnected to the step the ref already names', () => {
+          // Redrawing the edge to the same step is the most direct repair gesture. Keying the
+          // update off the ref alone would make it a no-op and leave the link dead.
+          const component = connectTo(
+            'target-1',
+            buildLabelledNode('target-1', '<p><a href="#" data-action-ref="action_recovery">Reset</a></p>'),
+          );
+
+          expect(component.label).toBe('<p><a href="#" data-action-ref="target-1">Reset</a></p>');
+        });
+
+        it('does not touch the node when the ref and the sentinel already match the target', () => {
+          mockGetNodes.mockReturnValue([
+            buildLabelledNode('target-1', '<p><a href="#" data-action-ref="target-1">Reset</a></p>'),
+            {id: 'target-1'},
+          ]);
+
+          const {result} = renderHook(() => useVisualFlowHandlers({setEdges: mockSetEdges}), {
+            wrapper: createWrapper(),
+          });
+
+          act(() => {
+            result.current.handleConnect({
+              source: 'view-1',
+              target: 'target-1',
+              sourceHandle: `${richTextComponentId}${nextSuffix}`,
+              targetHandle: null,
+            });
+          });
+
+          expect(mockUpdateNodeData).not.toHaveBeenCalled();
+        });
       });
     });
 

@@ -1,24 +1,11 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import {render, screen, userEvent, waitFor} from '@thunderid/test-utils';
 import type {User} from '@thunderid/types';
+import {isEqualIgnoringEmpty} from '@thunderid/utils';
+import {useCallback, useState, type JSX} from 'react';
 import {Controller, type Control} from 'react-hook-form';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import EditUserAttributes from '../EditUserAttributes';
@@ -51,6 +38,12 @@ vi.mock('@/utils/renderSchemaField', () => ({
     </div>
   ),
 }));
+
+// Mirrors useMutation: a fresh object every render, so a callback memoized on it churns.
+const freshMutationResult = (): {isError: boolean; reset: () => void} => ({
+  isError: false,
+  reset: () => undefined,
+});
 
 describe('EditUserAttributes', () => {
   const mockOnFieldChange = vi.fn();
@@ -113,10 +106,54 @@ describe('EditUserAttributes', () => {
     expect(screen.getByText('No schema available for editing')).toBeInTheDocument();
   });
 
-  it('does not call onFieldChange on initial mount', () => {
+  it('stages the original attributes on mount without reporting a spurious change', async () => {
     render(<EditUserAttributes user={baseUser} editedUser={{}} onFieldChange={mockOnFieldChange} />);
 
-    expect(mockOnFieldChange).not.toHaveBeenCalled();
+    // The page treats staged values equal to the original (via isEqualIgnoringEmpty) as "no
+    // change", so mounting must not stage anything that differs from user.attributes.
+    await waitFor(() => {
+      expect(mockOnFieldChange).toHaveBeenCalledWith('attributes', baseUser.attributes);
+    });
+    expect(mockOnFieldChange.mock.calls.every(([, value]) => isEqualIgnoringEmpty(value, baseUser.attributes))).toBe(
+      true,
+    );
+  });
+
+  it('stages a bounded number of times when the parent recreates onFieldChange on every render', async () => {
+    // The loop that wedged the React root and broke navigation: staging re-rendered the page,
+    // which produced a new onFieldChange, which refired this effect. Capped so a regression
+    // fails instead of hanging the test browser.
+    const CALL_CAP = 25;
+    const staged = vi.fn();
+    const identities = new Set<unknown>();
+
+    function Harness(): JSX.Element {
+      const [editedUser, setEditedUser] = useState<Partial<User>>({});
+      const mutation = freshMutationResult();
+      const onFieldChange = useCallback(
+        (field: keyof User, value: unknown) => {
+          if (mutation.isError) mutation.reset();
+          staged(field, value);
+          if (staged.mock.calls.length > CALL_CAP) return;
+          setEditedUser((prev) => ({...prev, [field]: value}));
+        },
+        [mutation],
+      );
+
+      identities.add(onFieldChange);
+      return <EditUserAttributes user={baseUser} editedUser={editedUser} onFieldChange={onFieldChange} />;
+    }
+
+    render(<Harness />);
+
+    await screen.findByTestId('field-email');
+    await waitFor(() => {
+      expect(staged).toHaveBeenCalled();
+    });
+
+    // Guards the harness: without churn this test would pass vacuously.
+    expect(identities.size).toBeGreaterThan(1);
+    expect(staged.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
   it('stages the merged attributes into the shared editedUser state as the user types', async () => {
@@ -132,6 +169,24 @@ describe('EditUserAttributes', () => {
         'attributes',
         expect.objectContaining({email: 'new@b.com', count: 5}),
       );
+    });
+  });
+
+  it('restores the original attributes when the user manually reverts an edit', async () => {
+    const user = userEvent.setup();
+    render(<EditUserAttributes user={baseUser} editedUser={{}} onFieldChange={mockOnFieldChange} />);
+
+    const input = screen.getByLabelText('email-input');
+    await user.clear(input);
+    await user.type(input, 'new@b.com');
+    await waitFor(() => {
+      expect(mockOnFieldChange).toHaveBeenLastCalledWith('attributes', expect.objectContaining({email: 'new@b.com'}));
+    });
+
+    await user.clear(input);
+    await user.type(input, 'a@b.com');
+    await waitFor(() => {
+      expect(mockOnFieldChange).toHaveBeenLastCalledWith('attributes', baseUser.attributes);
     });
   });
 

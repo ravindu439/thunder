@@ -1,43 +1,25 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {useLogger} from '@thunderid/logger/react';
 import {
-  Box,
-  Stack,
-  Button,
-  IconButton,
-  LinearProgress,
-  Typography,
-  Alert,
-  Snackbar,
-  AppBreadcrumbs,
-} from '@wso2/oxygen-ui';
-import {X} from '@wso2/oxygen-ui-icons-react';
-import {useState, useCallback, useMemo} from 'react';
+  OrganizationUnitPickerScreen,
+  useGetOrganizationUnit,
+  useHasMultipleOUs,
+} from '@thunderid/configure-organization-units';
+import {useLogger} from '@thunderid/logger/react';
+import {getErrorMessage} from '@thunderid/utils';
+import {Box, Stack, Button, CircularProgress, IconButton, LinearProgress, Alert, AppBreadcrumbs} from '@wso2/oxygen-ui';
+import {Home, X} from '@wso2/oxygen-ui-icons-react';
+import {useState, useCallback, useEffect, useMemo} from 'react';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import useCreateUserType from '../api/useCreateUserType';
-import ConfigureGeneral from '../components/create-user-type/ConfigureGeneral';
 import ConfigureName from '../components/create-user-type/ConfigureName';
 import ConfigureProperties from '../components/create-user-type/ConfigureProperties';
+import UserTypeConstraints from '../constants/user-type-constraints';
 import useUserTypeCreate from '../contexts/UserTypeCreate/useUserTypeCreate';
+import useUserTypeRoutes from '../hooks/useUserTypeRoutes';
 import {UserTypeCreateFlowStep} from '../models/user-type-create-flow';
 import type {PropertyDefinition, UserTypeDefinition, CreateUserTypeRequest} from '../types/user-types';
 
@@ -46,6 +28,7 @@ export default function CreateUserTypePage(): JSX.Element {
   const navigate = useNavigate();
   const logger = useLogger('CreateUserTypePage');
   const createUserTypeMutation = useCreateUserType();
+  const routes = useUserTypeRoutes();
 
   const {
     currentStep,
@@ -66,27 +49,110 @@ export default function CreateUserTypePage(): JSX.Element {
     setError,
   } = useUserTypeCreate();
 
-  const steps: Record<UserTypeCreateFlowStep, {label: string; order: number}> = useMemo(
-    () => ({
-      NAME: {label: t('userTypes:createWizard.steps.name'), order: 1},
-      GENERAL: {label: t('userTypes:createWizard.steps.general'), order: 2},
-      PROPERTIES: {label: t('userTypes:createWizard.steps.properties'), order: 3},
-    }),
-    [t],
+  const {hasMultipleOUs, isLoading: isOuLoading, ouList} = useHasMultipleOUs();
+
+  // The organization unit is the wizard's first step whenever there's a choice to make. Single-OU
+  // deployments never need it, so once that's known, resolve it automatically and skip straight
+  // past it.
+  useEffect(() => {
+    if (isOuLoading || hasMultipleOUs || currentStep !== UserTypeCreateFlowStep.ORGANIZATION_UNIT) return;
+    setOuId(ouList[0]?.id ?? '');
+    setCurrentStep(UserTypeCreateFlowStep.NAME);
+  }, [isOuLoading, hasMultipleOUs, ouList, currentStep, setOuId, setCurrentStep]);
+
+  // The organization unit whose name is shown in the Details step's summary chip.
+  const resolvedOuId = hasMultipleOUs ? ouId : ouList[0]?.id;
+  const {data: resolvedOrganizationUnit, isLoading: isResolvedOuLoading} = useGetOrganizationUnit(
+    resolvedOuId,
+    Boolean(resolvedOuId),
   );
 
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const activeSteps = useMemo((): UserTypeCreateFlowStep[] => {
+    const base: UserTypeCreateFlowStep[] = [];
+    if (hasMultipleOUs) base.push(UserTypeCreateFlowStep.ORGANIZATION_UNIT);
+    base.push(UserTypeCreateFlowStep.NAME, UserTypeCreateFlowStep.PROPERTIES);
+    return base;
+  }, [hasMultipleOUs]);
+
+  const steps: Partial<Record<UserTypeCreateFlowStep, {label: string}>> = useMemo(() => {
+    const map: Partial<Record<UserTypeCreateFlowStep, {label: string}>> = {};
+    if (hasMultipleOUs) {
+      map.ORGANIZATION_UNIT = {label: t('userTypes:createWizard.steps.organizationUnit', 'Organization Unit')};
+    }
+    map.NAME = {label: t('userTypes:createWizard.steps.name', 'Details')};
+    map.PROPERTIES = {label: t('userTypes:createWizard.steps.properties', 'Properties')};
+    return map;
+  }, [t, hasMultipleOUs]);
 
   const [stepReady, setStepReady] = useState<Record<UserTypeCreateFlowStep, boolean>>({
+    ORGANIZATION_UNIT: false,
     NAME: false,
-    GENERAL: false,
     PROPERTIES: false,
   });
 
   const handleClose = (): void => {
-    void navigate('/user-types');
+    void navigate(routes.list());
   };
+
+  // A create failure is stale once the user edits any field, so every field-change path below
+  // clears both the validation error and the mutation's own error before applying the change.
+  // Only reset the mutation once it has actually failed: resetting while it's still pending would
+  // flip isPending back to false and re-enable the submit button before the in-flight request
+  // settles, letting the user fire a second concurrent create.
+  const clearCreateError = useCallback((): void => {
+    setError(null);
+    if (createUserTypeMutation.isError) {
+      createUserTypeMutation.reset();
+    }
+  }, [setError, createUserTypeMutation]);
+
+  const handleNameChange = useCallback(
+    (newName: string): void => {
+      clearCreateError();
+      setName(newName);
+    },
+    [clearCreateError, setName],
+  );
+
+  const handleOuIdChange = useCallback(
+    (newOuId: string): void => {
+      clearCreateError();
+      setOuId(newOuId);
+    },
+    [clearCreateError, setOuId],
+  );
+
+  const handleAllowSelfRegistrationChange = useCallback(
+    (allow: boolean): void => {
+      clearCreateError();
+      setAllowSelfRegistration(allow);
+    },
+    [clearCreateError, setAllowSelfRegistration],
+  );
+
+  const handlePropertiesChange = useCallback(
+    (newProperties: typeof properties): void => {
+      clearCreateError();
+      setProperties(newProperties);
+    },
+    [clearCreateError, setProperties],
+  );
+
+  const handleEnumInputChange = useCallback(
+    (newEnumInput: typeof enumInput): void => {
+      clearCreateError();
+      setEnumInput(newEnumInput);
+    },
+    [clearCreateError, setEnumInput],
+  );
+
+  const handleDisplayAttributeChange = useCallback(
+    (newDisplayAttribute: string): void => {
+      clearCreateError();
+      setDisplayAttribute(newDisplayAttribute);
+    },
+    [clearCreateError, setDisplayAttribute],
+  );
 
   const handleStepReadyChange = useCallback((step: UserTypeCreateFlowStep, isReady: boolean): void => {
     setStepReady((prev) => ({
@@ -102,13 +168,6 @@ export default function CreateUserTypePage(): JSX.Element {
     [handleStepReadyChange],
   );
 
-  const handleGeneralStepReadyChange = useCallback(
-    (isReady: boolean): void => {
-      handleStepReadyChange(UserTypeCreateFlowStep.GENERAL, isReady);
-    },
-    [handleStepReadyChange],
-  );
-
   const handlePropertiesStepReadyChange = useCallback(
     (isReady: boolean): void => {
       handleStepReadyChange(UserTypeCreateFlowStep.PROPERTIES, isReady);
@@ -117,27 +176,34 @@ export default function CreateUserTypePage(): JSX.Element {
   );
 
   const handleSubmit = async (): Promise<void> => {
-    setValidationError(null);
     setError(null);
 
     // Validate
-    if (!name.trim()) {
-      setValidationError(t('userTypes:validationErrors.nameRequired'));
-      setSnackbarOpen(true);
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError(t('userTypes:validationErrors.nameRequired', 'Please enter a user type name'));
+      return;
+    }
+
+    if (trimmedName.length > UserTypeConstraints.NAME_MAX_LENGTH) {
+      setError(
+        t('userTypes:createWizard.name.maxLength', {
+          max: UserTypeConstraints.NAME_MAX_LENGTH,
+          defaultValue: `User type name cannot exceed ${UserTypeConstraints.NAME_MAX_LENGTH} characters`,
+        }),
+      );
       return;
     }
 
     const trimmedOuId = ouId.trim();
     if (!trimmedOuId) {
-      setValidationError(t('userTypes:validationErrors.ouIdRequired'));
-      setSnackbarOpen(true);
+      setError(t('userTypes:validationErrors.ouIdRequired', 'Please provide an organization unit ID'));
       return;
     }
 
     const validProperties = properties.filter((prop) => prop.name.trim());
     if (validProperties.length === 0) {
-      setValidationError(t('userTypes:validationErrors.propertiesRequired'));
-      setSnackbarOpen(true);
+      setError(t('userTypes:validationErrors.propertiesRequired', 'Please add at least one property'));
       return;
     }
 
@@ -145,8 +211,12 @@ export default function CreateUserTypePage(): JSX.Element {
     const propertyNames = validProperties.map((prop) => prop.name.trim());
     const duplicates = propertyNames.filter((propName, index) => propertyNames.indexOf(propName) !== index);
     if (duplicates.length > 0) {
-      setValidationError(t('userTypes:validationErrors.duplicateProperties', {duplicates: duplicates.join(', ')}));
-      setSnackbarOpen(true);
+      setError(
+        t('userTypes:validationErrors.duplicateProperties', {
+          duplicates: duplicates.join(', '),
+          defaultValue: 'Duplicate property names found: {{duplicates}}',
+        }),
+      );
       return;
     }
 
@@ -204,18 +274,37 @@ export default function CreateUserTypePage(): JSX.Element {
 
     try {
       await createUserTypeMutation.mutateAsync(requestBody);
-      await navigate('/user-types');
+      await navigate(routes.list());
     } catch (submitError) {
       logger.error('Failed to create user type or navigate', {error: submitError, userTypeName: name});
     }
   };
 
+  // Resolves an error through the `userTypes` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `userTypes:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = (key: string, options?: Record<string, unknown>): string =>
+    t(key.includes(':') ? key : `userTypes:${key}`, options);
+
+  // Precedence: a validation error (raised at submit time) wins over the mutation's own error, so
+  // the user always sees the most actionable message for their current attempt.
+  const displayError =
+    error ??
+    (createUserTypeMutation.error
+      ? getErrorMessage(
+          createUserTypeMutation.error,
+          tForErrors,
+          'create.error',
+          'Failed to create user type. Please try again.',
+        )
+      : null);
+
   const handleNextStep = (): void => {
     switch (currentStep) {
-      case UserTypeCreateFlowStep.NAME:
-        setCurrentStep(UserTypeCreateFlowStep.GENERAL);
+      case UserTypeCreateFlowStep.ORGANIZATION_UNIT:
+        setCurrentStep(UserTypeCreateFlowStep.NAME);
         break;
-      case UserTypeCreateFlowStep.GENERAL:
+      case UserTypeCreateFlowStep.NAME:
         setCurrentStep(UserTypeCreateFlowStep.PROPERTIES);
         break;
       case UserTypeCreateFlowStep.PROPERTIES:
@@ -230,11 +319,11 @@ export default function CreateUserTypePage(): JSX.Element {
 
   const handlePrevStep = (): void => {
     switch (currentStep) {
-      case UserTypeCreateFlowStep.GENERAL:
-        setCurrentStep(UserTypeCreateFlowStep.NAME);
+      case UserTypeCreateFlowStep.NAME:
+        if (hasMultipleOUs) setCurrentStep(UserTypeCreateFlowStep.ORGANIZATION_UNIT);
         break;
       case UserTypeCreateFlowStep.PROPERTIES:
-        setCurrentStep(UserTypeCreateFlowStep.GENERAL);
+        setCurrentStep(UserTypeCreateFlowStep.NAME);
         break;
       default:
         break;
@@ -244,26 +333,29 @@ export default function CreateUserTypePage(): JSX.Element {
   const renderStepContent = (): JSX.Element | null => {
     switch (currentStep) {
       case UserTypeCreateFlowStep.NAME:
-        return <ConfigureName name={name} onNameChange={setName} onReadyChange={handleNameStepReadyChange} />;
-      case UserTypeCreateFlowStep.GENERAL:
         return (
-          <ConfigureGeneral
-            ouId={ouId}
-            onOuIdChange={setOuId}
+          <ConfigureName
+            name={name}
+            onNameChange={handleNameChange}
+            onReadyChange={handleNameStepReadyChange}
+            hasMultipleOUs={hasMultipleOUs}
+            organizationUnitName={resolvedOrganizationUnit?.name}
+            organizationUnitLogoUrl={resolvedOrganizationUnit?.logoUrl}
+            isOrganizationUnitLoading={isResolvedOuLoading}
+            onChangeOu={() => setCurrentStep(UserTypeCreateFlowStep.ORGANIZATION_UNIT)}
             allowSelfRegistration={allowSelfRegistration}
-            onAllowSelfRegistrationChange={setAllowSelfRegistration}
-            onReadyChange={handleGeneralStepReadyChange}
+            onAllowSelfRegistrationChange={handleAllowSelfRegistrationChange}
           />
         );
       case UserTypeCreateFlowStep.PROPERTIES:
         return (
           <ConfigureProperties
             properties={properties}
-            onPropertiesChange={setProperties}
+            onPropertiesChange={handlePropertiesChange}
             enumInput={enumInput}
-            onEnumInputChange={setEnumInput}
+            onEnumInputChange={handleEnumInputChange}
             displayAttribute={displayAttribute}
-            onDisplayAttributeChange={setDisplayAttribute}
+            onDisplayAttributeChange={handleDisplayAttributeChange}
             onReadyChange={handlePropertiesStepReadyChange}
             userTypeName={name.trim()}
           />
@@ -274,29 +366,46 @@ export default function CreateUserTypePage(): JSX.Element {
   };
 
   const getStepProgress = (): number => {
-    const stepNames = Object.keys(steps) as UserTypeCreateFlowStep[];
-    return ((stepNames.indexOf(currentStep) + 1) / stepNames.length) * 100;
+    const currentIndex = activeSteps.indexOf(currentStep);
+    return ((currentIndex + 1) / activeSteps.length) * 100;
   };
 
   const getBreadcrumbSteps = (): UserTypeCreateFlowStep[] => {
-    const allSteps: UserTypeCreateFlowStep[] = [
-      UserTypeCreateFlowStep.NAME,
-      UserTypeCreateFlowStep.GENERAL,
-      UserTypeCreateFlowStep.PROPERTIES,
-    ];
-
-    const currentIndex = allSteps.indexOf(currentStep);
-    return allSteps.slice(0, currentIndex + 1);
-  };
-
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
+    const currentIndex = activeSteps.indexOf(currentStep);
+    return activeSteps.slice(0, currentIndex + 1);
   };
 
   const isLastStep = currentStep === UserTypeCreateFlowStep.PROPERTIES;
   // The Properties step uses a two-panel builder that needs more horizontal room
   // than the single-column Name/General forms.
   const isPropertiesStep = currentStep === UserTypeCreateFlowStep.PROPERTIES;
+
+  if (currentStep === UserTypeCreateFlowStep.ORGANIZATION_UNIT) {
+    if (isOuLoading || !hasMultipleOUs) {
+      return (
+        <Box sx={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    return (
+      <OrganizationUnitPickerScreen
+        icon={<Home size={26} />}
+        title={t('userTypes:createWizard.organizationUnit.title', 'Where should this user type belong?')}
+        subtitle={t(
+          'userTypes:createWizard.organizationUnit.subtitle',
+          "Choose the organization unit that will own this user type. You can't change this once created.",
+        )}
+        value={ouId}
+        onChange={handleOuIdChange}
+        onBack={handleClose}
+        onContinue={handleNextStep}
+        backLabel={t('common:actions.back', 'Back')}
+        continueLabel={t('common:actions.continue', 'Continue')}
+      />
+    );
+  }
 
   return (
     <Box sx={{minHeight: '100vh', display: 'flex', flexDirection: 'column'}}>
@@ -321,7 +430,7 @@ export default function CreateUserTypePage(): JSX.Element {
             <AppBreadcrumbs
               items={getBreadcrumbSteps().map((step, index, array) => ({
                 key: step,
-                label: steps[step].label,
+                label: steps[step]?.label ?? step,
                 onClick: index < array.length - 1 ? () => setCurrentStep(step) : undefined,
               }))}
             />
@@ -335,9 +444,8 @@ export default function CreateUserTypePage(): JSX.Element {
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
-              py: 8,
-              px: isPropertiesStep ? 8 : 20,
-              mx: currentStep === UserTypeCreateFlowStep.NAME ? 'auto' : 0,
+              py: 4,
+              px: {xs: 4, md: 10},
               alignItems: 'flex-start',
             }}
           >
@@ -349,27 +457,37 @@ export default function CreateUserTypePage(): JSX.Element {
                 flexDirection: 'column',
               }}
             >
-              {/* Error Alerts */}
-              {error && (
-                <Alert severity="error" sx={{my: 3}} onClose={() => setError(null)}>
-                  {error}
-                </Alert>
-              )}
-
-              {createUserTypeMutation.error && (
-                <Alert severity="error" sx={{mb: 3}}>
-                  <Typography variant="body2" sx={{fontWeight: 'bold', mb: 0.5}}>
-                    {createUserTypeMutation.error.message}
-                  </Typography>
+              {/* Error Alert — validation error takes precedence over the mutation's own error */}
+              {displayError && (
+                <Alert
+                  severity="error"
+                  sx={{my: 3}}
+                  onClose={() => {
+                    setError(null);
+                    createUserTypeMutation.reset();
+                  }}
+                >
+                  {displayError}
                 </Alert>
               )}
 
               {renderStepContent()}
 
               {/* Navigation buttons */}
-              <Stack direction="row" justifyContent="flex-end" alignItems="center" spacing={2} sx={{mt: 4}}>
-                {currentStep !== UserTypeCreateFlowStep.NAME && (
-                  <Button variant="text" onClick={handlePrevStep} disabled={createUserTypeMutation.isPending}>
+              <Stack
+                direction="row"
+                justifyContent={activeSteps.indexOf(currentStep) > 0 ? 'space-between' : 'flex-end'}
+                alignItems="center"
+                spacing={2}
+                sx={{mt: 4}}
+              >
+                {activeSteps.indexOf(currentStep) > 0 && (
+                  <Button
+                    variant="outlined"
+                    onClick={handlePrevStep}
+                    sx={{minWidth: 100}}
+                    disabled={createUserTypeMutation.isPending}
+                  >
                     {t('common:actions.back')}
                   </Button>
                 )}
@@ -391,18 +509,6 @@ export default function CreateUserTypePage(): JSX.Element {
           </Box>
         </Box>
       </Box>
-
-      {/* Validation Error Snackbar */}
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{vertical: 'top', horizontal: 'right'}}
-      >
-        <Alert onClose={handleCloseSnackbar} severity="error" sx={{width: '100%'}}>
-          {validationError}
-        </Alert>
-      </Snackbar>
     </Box>
   );
 }

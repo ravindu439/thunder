@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package entitytype handles the entity type management operations.
 package entitytype
@@ -26,6 +11,7 @@ import (
 	"fmt"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/thunder-id/thunderid/internal/entitytype/model"
 	oupkg "github.com/thunder-id/thunderid/internal/ou"
@@ -33,7 +19,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
 	"github.com/thunder-id/thunderid/internal/system/sysauthz"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 )
 
@@ -42,6 +27,10 @@ const entityTypeLoggerComponentName = "EntityTypeService"
 // AttributeInfo is an alias for model.AttributeInfo, exported at the entitytype package
 // level so callers do not need to import the internal model package directly.
 type AttributeInfo = model.AttributeInfo
+
+// AttributeFilter is an alias for model.AttributeFilter, exported at the entitytype package
+// level so callers do not need to import the internal model package directly.
+type AttributeFilter = model.AttributeFilter
 
 // EntityTypeServiceInterface defines the interface for the entity type service.
 // All methods take a TypeCategory to scope the operation to a specific entity kind
@@ -74,8 +63,7 @@ type EntityTypeServiceInterface interface {
 		exists func(map[string]interface{}) (bool, error),
 	) (bool, *tidcommon.ServiceError)
 	GetAttributes(
-		ctx context.Context, category TypeCategory, entityType string,
-		allowCredential, allowNonCredential, requiredOnly bool,
+		ctx context.Context, category TypeCategory, entityType string, filter AttributeFilter,
 	) ([]AttributeInfo, *tidcommon.ServiceError)
 	GetUniqueAttributes(
 		ctx context.Context, category TypeCategory, entityType string,
@@ -84,13 +72,16 @@ type EntityTypeServiceInterface interface {
 		ctx context.Context, category TypeCategory, names []string,
 	) (map[string]string, *tidcommon.ServiceError)
 	ResolveEntityTypeHandles(ctx context.Context, entityType *EntityType) *tidcommon.ServiceError
+	GetEntityTypeSchema(
+		ctx context.Context, category TypeCategory, userTypeName string,
+	) (*EntityType, *tidcommon.ServiceError)
 }
 
 // entityTypeService is the default implementation of the EntityTypeServiceInterface.
 type entityTypeService struct {
 	entityTypeStore entityTypeStoreInterface
 	ouService       oupkg.OrganizationUnitServiceInterface
-	transactioner   transaction.Transactioner
+	transactioner   providers.Transactioner
 	authzService    sysauthz.SystemAuthorizationServiceInterface
 }
 
@@ -98,7 +89,7 @@ type entityTypeService struct {
 func newEntityTypeService(
 	ouService oupkg.OrganizationUnitServiceInterface,
 	store entityTypeStoreInterface,
-	transactioner transaction.Transactioner,
+	transactioner providers.Transactioner,
 	authzService sysauthz.SystemAuthorizationServiceInterface,
 ) EntityTypeServiceInterface {
 	return &entityTypeService{
@@ -322,6 +313,31 @@ func (us *entityTypeService) GetEntityType(
 		} else if handle, ok := handleMap[entityType.OUID]; ok {
 			entityType.OUHandle = handle
 		}
+	}
+
+	return &entityType, nil
+}
+
+// GetEntityTypeSchema retrieves the schema config by name without admin access check
+func (us *entityTypeService) GetEntityTypeSchema(
+	ctx context.Context, category TypeCategory, userTypeName string,
+) (*EntityType, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, entityTypeLoggerComponentName))
+
+	if svcErr := validateCategory(category); svcErr != nil {
+		return nil, svcErr
+	}
+
+	if userTypeName == "" {
+		return nil, invalidEntityTypeRequestErr(category, "schema name must not be empty")
+	}
+
+	entityType, err := us.entityTypeStore.GetEntityTypeByName(ctx, category, userTypeName)
+	if err != nil {
+		if errors.Is(err, ErrEntityTypeNotFound) {
+			return nil, entityTypeNotFoundErr(category)
+		}
+		return nil, logAndReturnServerError(ctx, logger, "Failed to get entity type", err)
 	}
 
 	return &entityType, nil
@@ -575,12 +591,9 @@ func (us *entityTypeService) ValidateEntityUniqueness(
 	return true, nil
 }
 
-// GetAttributes returns schema properties filtered by the provided flags for the given entity type.
-// allowCredential includes credential properties; allowNonCredential includes non-credential properties.
-// When requiredOnly is true, only required properties are included.
+// GetAttributes returns schema properties matching the given filter for the given entity type.
 func (us *entityTypeService) GetAttributes(
-	ctx context.Context, category TypeCategory, entityType string,
-	allowCredential, allowNonCredential, requiredOnly bool,
+	ctx context.Context, category TypeCategory, entityType string, filter AttributeFilter,
 ) ([]AttributeInfo, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, entityTypeLoggerComponentName))
 
@@ -596,7 +609,7 @@ func (us *entityTypeService) GetAttributes(
 		return nil, logAndReturnServerError(ctx, logger, "Failed to load entity type for attribute infos", err)
 	}
 
-	return compiledSchema.GetAttributes(allowCredential, allowNonCredential, requiredOnly), nil
+	return compiledSchema.GetAttributes(filter), nil
 }
 
 // GetUniqueAttributes returns the names of schema properties marked as unique for a given entity type.

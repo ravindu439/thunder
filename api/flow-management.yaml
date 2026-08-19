@@ -1411,9 +1411,11 @@ components:
         type:
           type: string
           description: |
-            Optional action type forwarded to the next executor so it can determine which
-            processing path to take. Predefined values are `SUBMIT` (approve/confirm) and
-            `REJECT` (deny/cancel). If omitted, no action-type hint is forwarded.
+            Optional action type forwarded to the next node's executor so it can determine which
+            processing path to take. The value is an opaque string: the flow author and the
+            executor that consumes it agree on the vocabulary, so the recognized values are
+            documented by that executor rather than fixed here. If omitted, no action-type hint
+            is forwarded.
           example: SUBMIT
         nextNode:
           type: string

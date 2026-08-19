@@ -1,0 +1,43 @@
+name: Backend Integration Patch Coverage
+description: >-
+  Measures how much of a pull request's changed backend production Go was actually
+  executed by the integration test suite, and enforces a threshold. Deliberately
+  separate from the combined Patch Coverage Gate: this check loads the SQLite,
+  PostgreSQL, and Redis integration profiles and nothing else, so backend unit
+  coverage and frontend coverage cannot raise or lower the result.
+inputs:
+  base-ref:
+    description: 'Git ref or SHA the diff is compared against'
+    required: true
+  fail-under:
+    description: >-
+      Minimum percentage of changed coverable backend lines that the integration
+      suite must execute. Compared exactly, with no tolerance.
+    required: false
+    default: '70'
+  artifact-pattern:
+    description: 'Pattern matching the integration coverage artifacts to download'
+    required: false
+    default: 'integration-coverage-*'
+
+runs:
+  using: "composite"
+  steps:
+    # Only the integration artifacts are downloaded. Pulling the unit or frontend
+    # reports into this workspace would make it possible for a later change to
+    # feed them in by accident, which is the exact failure mode of the combined
+    # gate that this check exists to avoid.
+    # Left unmerged (the default) so each artifact lands in its own directory:
+    # the database name is read back from the directory name to label the report.
+    - name: 📥 Download Integration Coverage Artifacts
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        pattern: ${{ inputs.artifact-pattern }}
+        path: coverage-artifacts
+
+    - name: 🛡️ Measure Backend Integration Patch Coverage
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+        FAIL_UNDER: ${{ inputs.fail-under }}
+      run: bash "${{ github.action_path }}/compute-integration-patch-coverage.sh"

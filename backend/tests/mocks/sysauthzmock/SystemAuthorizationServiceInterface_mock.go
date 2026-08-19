@@ -40,6 +40,130 @@ func (_m *SystemAuthorizationServiceInterfaceMock) EXPECT() *SystemAuthorization
 	return &SystemAuthorizationServiceInterfaceMock_Expecter{mock: &_m.Mock}
 }
 
+// CanGrantMembership provides a mock function for the type SystemAuthorizationServiceInterfaceMock
+func (_mock *SystemAuthorizationServiceInterfaceMock) CanGrantMembership(ctx context.Context, principalType sysauthz.PrincipalType, containerID string) *common.ServiceError {
+	ret := _mock.Called(ctx, principalType, containerID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CanGrantMembership")
+	}
+
+	var r0 *common.ServiceError
+	if returnFunc, ok := ret.Get(0).(func(context.Context, sysauthz.PrincipalType, string) *common.ServiceError); ok {
+		r0 = returnFunc(ctx, principalType, containerID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*common.ServiceError)
+		}
+	}
+	return r0
+}
+
+// SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CanGrantMembership'
+type SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call struct {
+	*mock.Call
+}
+
+// CanGrantMembership is a helper method to define mock.On call
+//   - ctx context.Context
+//   - principalType sysauthz.PrincipalType
+//   - containerID string
+func (_e *SystemAuthorizationServiceInterfaceMock_Expecter) CanGrantMembership(ctx interface{}, principalType interface{}, containerID interface{}) *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call {
+	return &SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call{Call: _e.mock.On("CanGrantMembership", ctx, principalType, containerID)}
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call) Run(run func(ctx context.Context, principalType sysauthz.PrincipalType, containerID string)) *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 sysauthz.PrincipalType
+		if args[1] != nil {
+			arg1 = args[1].(sysauthz.PrincipalType)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call) Return(serviceError *common.ServiceError) *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call {
+	_c.Call.Return(serviceError)
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call) RunAndReturn(run func(ctx context.Context, principalType sysauthz.PrincipalType, containerID string) *common.ServiceError) *SystemAuthorizationServiceInterfaceMock_CanGrantMembership_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// CanGrantPermissions provides a mock function for the type SystemAuthorizationServiceInterfaceMock
+func (_mock *SystemAuthorizationServiceInterfaceMock) CanGrantPermissions(ctx context.Context, granted security.PermissionSet) *common.ServiceError {
+	ret := _mock.Called(ctx, granted)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CanGrantPermissions")
+	}
+
+	var r0 *common.ServiceError
+	if returnFunc, ok := ret.Get(0).(func(context.Context, security.PermissionSet) *common.ServiceError); ok {
+		r0 = returnFunc(ctx, granted)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*common.ServiceError)
+		}
+	}
+	return r0
+}
+
+// SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CanGrantPermissions'
+type SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call struct {
+	*mock.Call
+}
+
+// CanGrantPermissions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - granted security.PermissionSet
+func (_e *SystemAuthorizationServiceInterfaceMock_Expecter) CanGrantPermissions(ctx interface{}, granted interface{}) *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call {
+	return &SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call{Call: _e.mock.On("CanGrantPermissions", ctx, granted)}
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call) Run(run func(ctx context.Context, granted security.PermissionSet)) *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 security.PermissionSet
+		if args[1] != nil {
+			arg1 = args[1].(security.PermissionSet)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call) Return(serviceError *common.ServiceError) *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call {
+	_c.Call.Return(serviceError)
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call) RunAndReturn(run func(ctx context.Context, granted security.PermissionSet) *common.ServiceError) *SystemAuthorizationServiceInterfaceMock_CanGrantPermissions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAccessibleResources provides a mock function for the type SystemAuthorizationServiceInterfaceMock
 func (_mock *SystemAuthorizationServiceInterfaceMock) GetAccessibleResources(ctx context.Context, action security.Action, resourceType security.ResourceType) (*sysauthz.AccessibleResources, *common.ServiceError) {
 	ret := _mock.Called(ctx, action, resourceType)
@@ -226,6 +350,46 @@ func (_c *SystemAuthorizationServiceInterfaceMock_SetOUHierarchyResolver_Call) R
 }
 
 func (_c *SystemAuthorizationServiceInterfaceMock_SetOUHierarchyResolver_Call) RunAndReturn(run func(resolver sysauthz.OUHierarchyResolver)) *SystemAuthorizationServiceInterfaceMock_SetOUHierarchyResolver_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetPermissionResolver provides a mock function for the type SystemAuthorizationServiceInterfaceMock
+func (_mock *SystemAuthorizationServiceInterfaceMock) SetPermissionResolver(resolver sysauthz.PermissionResolver) {
+	_mock.Called(resolver)
+	return
+}
+
+// SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetPermissionResolver'
+type SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call struct {
+	*mock.Call
+}
+
+// SetPermissionResolver is a helper method to define mock.On call
+//   - resolver sysauthz.PermissionResolver
+func (_e *SystemAuthorizationServiceInterfaceMock_Expecter) SetPermissionResolver(resolver interface{}) *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call {
+	return &SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call{Call: _e.mock.On("SetPermissionResolver", resolver)}
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call) Run(run func(resolver sysauthz.PermissionResolver)) *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 sysauthz.PermissionResolver
+		if args[0] != nil {
+			arg0 = args[0].(sysauthz.PermissionResolver)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call) Return() *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call) RunAndReturn(run func(resolver sysauthz.PermissionResolver)) *SystemAuthorizationServiceInterfaceMock_SetPermissionResolver_Call {
 	_c.Run(run)
 	return _c
 }

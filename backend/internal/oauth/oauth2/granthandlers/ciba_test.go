@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -33,6 +18,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/attributecache"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/ciba"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
 	"github.com/thunder-id/thunderid/tests/mocks/attributecachemock"
@@ -63,7 +49,14 @@ func (suite *CIBAGrantHandlerTestSuite) SetupTest() {
 	suite.mockResource = resourcemock.NewResourceServiceInterfaceMock(suite.T())
 	suite.handler = newCIBAGrantHandler(suite.mockCIBAService, suite.mockTokenBuilder,
 		suite.mockAttrCacheService, suite.mockResource)
-	suite.oauthApp = &providers.OAuthClient{ClientID: "client-1"}
+	suite.oauthApp = &providers.OAuthClient{
+		ClientID: "client-1",
+		ScopeClaims: map[string][]string{
+			"openid":  {"sub"},
+			"profile": {"name", "given_name", "family_name", "picture"},
+			"email":   {"email", "email_verified"},
+		},
+	}
 	suite.tokenReq = &model.TokenRequest{
 		GrantType: string(providers.GrantTypeCIBA),
 		ClientID:  "client-1",
@@ -209,6 +202,18 @@ func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Denied() {
 	suite.Equal(constants.ErrorAccessDenied, errResp.Error)
 }
 
+func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Failed() {
+	// A server-side flow failure surfaces as server_error, which the token endpoint maps to HTTP 500.
+	record := suite.pendingRecord()
+	record.State = ciba.CIBAStateFailed
+	suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
+
+	resp, errResp := suite.handler.HandleGrant(context.Background(), suite.tokenReq, suite.oauthApp)
+	suite.Nil(resp)
+	suite.NotNil(errResp)
+	suite.Equal(constants.ErrorServerError, errResp.Error)
+}
+
 func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Consumed() {
 	record := suite.pendingRecord()
 	record.State = ciba.CIBAStateConsumed
@@ -248,6 +253,42 @@ func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_IssuesToke
 	suite.Equal("id-token", resp.IDToken.Token)
 }
 
+// A CIBA access token is sender-constrained to the key the client proved possession of when polling
+// the token endpoint, so a stolen token cannot be replayed without the matching DPoP proof.
+func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_BindsDPoPJkt() {
+	record := suite.boundAuthenticatedRecord(testScopeRead)
+	suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
+	suite.expectResourceServer()
+	suite.mockTokenBuilder.EXPECT().BuildAccessToken(mock.Anything, mock.MatchedBy(
+		func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return ctx.DPoPJkt == "test-jkt"
+		})).Return(&model.TokenDTO{Token: "access-token", TokenType: "DPoP"}, nil)
+	suite.mockCIBAService.EXPECT().MarkConsumed(mock.Anything, "auth-req-1").Return(true, nil)
+
+	ctx := dpop.WithJkt(context.Background(), "test-jkt")
+	resp, errResp := suite.handler.HandleGrant(ctx, suite.tokenReq, suite.oauthApp)
+	suite.Nil(errResp)
+	suite.NotNil(resp)
+	suite.Equal("access-token", resp.AccessToken.Token)
+}
+
+// Without a verified DPoP proof the access token stays unbound, so non-DPoP clients are unaffected.
+func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_NoProofLeavesTokenUnbound() {
+	record := suite.boundAuthenticatedRecord(testScopeRead)
+	suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
+	suite.expectResourceServer()
+	suite.mockTokenBuilder.EXPECT().BuildAccessToken(mock.Anything, mock.MatchedBy(
+		func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return ctx.DPoPJkt == ""
+		})).Return(&model.TokenDTO{Token: "access-token", TokenType: "Bearer"}, nil)
+	suite.mockCIBAService.EXPECT().MarkConsumed(mock.Anything, "auth-req-1").Return(true, nil)
+
+	resp, errResp := suite.handler.HandleGrant(context.Background(), suite.tokenReq, suite.oauthApp)
+	suite.Nil(errResp)
+	suite.NotNil(resp)
+	suite.Equal("access-token", resp.AccessToken.Token)
+}
+
 func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_NoOpenIDSkipsIDToken() {
 	record := suite.boundAuthenticatedRecord(testScopeRead)
 	suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
@@ -261,6 +302,86 @@ func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_NoOpenIDSk
 	suite.NotNil(resp)
 	suite.Equal("access-token", resp.AccessToken.Token)
 	suite.Empty(resp.IDToken.Token)
+}
+
+// An unbound OIDC-only CIBA access token uses the app's configured default audience for the aud
+// claim instead of the client_id.
+func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_UsesConfiguredDefaultAudience() {
+	suite.oauthApp.Token = &providers.OAuthTokenConfig{
+		AccessToken: &providers.AccessTokenConfig{DefaultAudience: "https://api.example.com"},
+	}
+	record := suite.pendingRecord()
+	record.State = ciba.CIBAStateAuthenticated
+	record.AuthorizedScopes = constants.ScopeOpenID
+	suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
+	suite.mockTokenBuilder.EXPECT().BuildAccessToken(mock.Anything, mock.MatchedBy(
+		func(ctx *tokenservice.AccessTokenBuildContext) bool {
+			return len(ctx.Audiences) == 1 && ctx.Audiences[0] == "https://api.example.com"
+		})).Return(&model.TokenDTO{Token: "access-token", TokenType: "Bearer"}, nil)
+	suite.mockTokenBuilder.EXPECT().BuildIDToken(mock.Anything, mock.Anything).
+		Return(&model.TokenDTO{Token: "id-token"}, nil)
+	suite.mockCIBAService.EXPECT().MarkConsumed(mock.Anything, "auth-req-1").Return(true, nil)
+
+	resp, errResp := suite.handler.HandleGrant(context.Background(), suite.tokenReq, suite.oauthApp)
+	suite.Nil(errResp)
+	suite.NotNil(resp)
+	suite.Equal("access-token", resp.AccessToken.Token)
+}
+
+// The act claim follows the authenticated client, not the grant: an agent polling the CIBA token
+// endpoint always gets an OBO actor claim naming itself, while an application gets one only when it
+// opts in through includeActClaim.
+func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_ActorClaim() {
+	const actAppID = "act-entity-id"
+	testCases := []struct {
+		name            string
+		entityCategory  providers.EntityCategory
+		includeActClaim bool
+		expectActor     bool
+	}{
+		{name: "AgentClientAlwaysAppendsActor", entityCategory: providers.EntityCategoryAgent,
+			includeActClaim: false, expectActor: true},
+		{name: "AppClientWithoutFlagOmitsActor", entityCategory: providers.EntityCategoryApp,
+			includeActClaim: false, expectActor: false},
+		{name: "AppClientWithFlagAppendsActor", entityCategory: providers.EntityCategoryApp,
+			includeActClaim: true, expectActor: true},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			suite.SetupTest()
+			suite.oauthApp.ID = actAppID
+			suite.oauthApp.EntityCategory = tc.entityCategory
+			suite.oauthApp.IncludeActClaim = tc.includeActClaim
+
+			record := suite.pendingRecord()
+			record.State = ciba.CIBAStateAuthenticated
+			record.AuthorizedScopes = constants.ScopeOpenID
+			suite.mockCIBAService.EXPECT().GetByAuthReqID(mock.Anything, "auth-req-1").Return(record, nil)
+
+			var capturedActor *tokenservice.SubjectTokenClaims
+			suite.mockTokenBuilder.EXPECT().BuildAccessToken(mock.Anything, mock.MatchedBy(
+				func(ctx *tokenservice.AccessTokenBuildContext) bool {
+					capturedActor = ctx.ActorClaims
+					return ctx.GrantType == string(providers.GrantTypeCIBA)
+				})).Return(&model.TokenDTO{Token: "access-token", TokenType: "Bearer"}, nil)
+			suite.mockTokenBuilder.EXPECT().BuildIDToken(mock.Anything, mock.Anything).
+				Return(&model.TokenDTO{Token: "id-token"}, nil)
+			suite.mockCIBAService.EXPECT().MarkConsumed(mock.Anything, "auth-req-1").Return(true, nil)
+
+			resp, errResp := suite.handler.HandleGrant(context.Background(), suite.tokenReq, suite.oauthApp)
+			suite.Nil(errResp)
+			suite.NotNil(resp)
+
+			if tc.expectActor {
+				suite.Require().NotNil(capturedActor)
+				suite.Equal(actAppID, capturedActor.Sub)
+				suite.Empty(capturedActor.Iss)
+			} else {
+				suite.Nil(capturedActor)
+			}
+		})
+	}
 }
 
 func (suite *CIBAGrantHandlerTestSuite) TestHandleGrant_Authenticated_OneTimeUseRace() {

@@ -1,0 +1,10 @@
+/*
+ * Copyright 2025 The ThunderID Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}

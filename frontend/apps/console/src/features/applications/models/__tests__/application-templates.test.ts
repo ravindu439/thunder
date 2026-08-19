@@ -1,24 +1,9 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, expect, it} from 'vitest';
 import {TechnologyApplicationTemplate, PlatformApplicationTemplate} from '../application-templates';
-import type {IntegrationGuide, IntegrationStepCode, TemplateCategory} from '../application-templates';
+import type {IntegrationGuide, TemplateCategory} from '../application-templates';
 
 describe('Application Templates Models', () => {
   describe('TechnologyApplicationTemplate', () => {
@@ -47,7 +32,20 @@ describe('Application Templates Models', () => {
     });
 
     it('should have all expected properties', () => {
-      const expectedKeys = ['REACT', 'EXPRESS', 'NEXTJS', 'VANILLA_JS', 'VUE', 'NUXT', 'NODEJS', 'OTHER', 'MCP_CLIENT'];
+      const expectedKeys = [
+        'REACT',
+        'EXPRESS',
+        'NEXTJS',
+        'VANILLA_JS',
+        'VUE',
+        'NUXT',
+        'NODEJS',
+        'IOS',
+        'ANDROID',
+        'FLUTTER',
+        'OTHER',
+        'MCP_CLIENT',
+      ];
 
       expect(Object.keys(TechnologyApplicationTemplate)).toEqual(expectedKeys);
     });
@@ -94,72 +92,26 @@ describe('Application Templates Models', () => {
   });
 
   describe('IntegrationGuide Interface', () => {
-    it('should accept valid integration guide with llm type', () => {
+    it('should accept a docsUrl referencing a documentation.links key', () => {
       const guide: IntegrationGuide = {
-        id: 'guide-1',
-        title: 'AI-Assisted Integration',
-        description: 'Use AI to integrate your app',
-        type: 'llm',
-        icon: 'ai-icon',
-        content: 'LLM prompt content',
+        docsUrl: '{{applications.templates.react.llmPrompt.redirectBased}}',
       };
 
-      expect(guide.type).toBe('llm');
-      expect(guide.content).toBe('LLM prompt content');
+      expect(guide.docsUrl).toBe('{{applications.templates.react.llmPrompt.redirectBased}}');
     });
 
-    it('should accept valid integration guide with manual type', () => {
+    it('should accept a literal docsUrl', () => {
       const guide: IntegrationGuide = {
-        id: 'guide-2',
-        title: 'Manual Integration',
-        description: 'Step-by-step integration',
-        type: 'manual',
-        icon: 'manual-icon',
+        docsUrl: 'https://thunderid.dev/prompts/react/redirect-based.txt',
       };
 
-      expect(guide.type).toBe('manual');
-      expect(guide.content).toBeUndefined();
+      expect(guide.docsUrl).toBe('https://thunderid.dev/prompts/react/redirect-based.txt');
     });
 
-    it('should have required properties', () => {
-      const guide: IntegrationGuide = {
-        id: 'test',
-        title: 'Test Guide',
-        description: 'Test description',
-        type: 'manual',
-        icon: 'test-icon',
-      };
+    it('should allow an integration guide with no docsUrl', () => {
+      const guide: IntegrationGuide = {};
 
-      expect(guide).toHaveProperty('id');
-      expect(guide).toHaveProperty('title');
-      expect(guide).toHaveProperty('description');
-      expect(guide).toHaveProperty('type');
-      expect(guide).toHaveProperty('icon');
-    });
-  });
-
-  describe('IntegrationStepCode Interface', () => {
-    it('should accept code block with all properties', () => {
-      const codeBlock: IntegrationStepCode = {
-        language: 'typescript',
-        filename: 'app.ts',
-        content: 'const app = "test";',
-      };
-
-      expect(codeBlock.language).toBe('typescript');
-      expect(codeBlock.filename).toBe('app.ts');
-      expect(codeBlock.content).toBe('const app = "test";');
-    });
-
-    it('should accept code block without optional filename', () => {
-      const codeBlock: IntegrationStepCode = {
-        language: 'javascript',
-        content: 'console.log("hello");',
-      };
-
-      expect(codeBlock.language).toBe('javascript');
-      expect(codeBlock.filename).toBeUndefined();
-      expect(codeBlock.content).toBe('console.log("hello");');
+      expect(guide.docsUrl).toBeUndefined();
     });
   });
 });

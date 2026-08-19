@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -38,8 +23,10 @@ import (
 	"github.com/thunder-id/thunderid/internal/entityprovider"
 	"github.com/thunder-id/thunderid/internal/inboundclient"
 	inboundmodel "github.com/thunder-id/thunderid/internal/inboundclient/model"
+	"github.com/thunder-id/thunderid/internal/serverconfig"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/cors"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
@@ -48,6 +35,7 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/i18n/mgtmock"
 	"github.com/thunder-id/thunderid/tests/mocks/inboundclientmock"
 	"github.com/thunder-id/thunderid/tests/mocks/oumock"
+	"github.com/thunder-id/thunderid/tests/mocks/serverconfigmock"
 )
 
 const testServiceAppID = "app123"
@@ -882,6 +870,79 @@ func (suite *ServiceTestSuite) TestValidateApplicationForUpdate_Success() {
 	assert.Equal(suite.T(), "Test App", result.Name)
 }
 
+func (suite *ServiceTestSuite) TestValidateApplicationForUpdate_TypeImmutable() {
+	testConfig := &config.Config{
+		DeclarativeResources: config.DeclarativeResources{
+			Enabled: false,
+		},
+	}
+	config.ResetServerRuntime()
+	err := config.InitializeServerRuntime("/tmp/test", testConfig)
+	require.NoError(suite.T(), err)
+	defer config.ResetServerRuntime()
+
+	service, mockStore := suite.setupTestService()
+
+	existingApp := &model.ApplicationProcessedDTO{
+		ID:   testServiceAppID,
+		Name: "Test App",
+		Type: model.ApplicationTypeMobile,
+	}
+
+	app := &model.ApplicationDTO{
+		Name:    "Test App",
+		OUID:    testOUID,
+		Type:    model.ApplicationTypeBrowser,
+		URL:     "https://example.com",
+		LogoURL: "https://example.com/logo.png",
+	}
+
+	mockStore.On("IsDeclarative", mock.Anything, testServiceAppID).Maybe().Return(false)
+	mockLoadFullApplication(mockStore, service, existingApp)
+
+	result, _, svcErr := service.validateApplicationForUpdate(context.Background(), testServiceAppID, app)
+
+	assert.Nil(suite.T(), result)
+	require.NotNil(suite.T(), svcErr)
+	assert.Equal(suite.T(), ErrorApplicationTypeImmutable.Code, svcErr.Code)
+}
+
+func (suite *ServiceTestSuite) TestValidateApplicationForUpdate_TypeInheritedWhenOmitted() {
+	testConfig := &config.Config{
+		DeclarativeResources: config.DeclarativeResources{
+			Enabled: false,
+		},
+	}
+	config.ResetServerRuntime()
+	err := config.InitializeServerRuntime("/tmp/test", testConfig)
+	require.NoError(suite.T(), err)
+	defer config.ResetServerRuntime()
+
+	service, mockStore := suite.setupTestService()
+
+	existingApp := &model.ApplicationProcessedDTO{
+		ID:   testServiceAppID,
+		Name: "Test App",
+		Type: model.ApplicationTypeMobile,
+	}
+
+	app := &model.ApplicationDTO{
+		Name:    "Test App",
+		OUID:    testOUID,
+		URL:     "https://example.com",
+		LogoURL: "https://example.com/logo.png",
+	}
+
+	mockStore.On("IsDeclarative", mock.Anything, testServiceAppID).Maybe().Return(false)
+	mockLoadFullApplication(mockStore, service, existingApp)
+
+	result, _, svcErr := service.validateApplicationForUpdate(context.Background(), testServiceAppID, app)
+
+	require.Nil(suite.T(), svcErr)
+	assert.NotNil(suite.T(), result)
+	assert.Equal(suite.T(), model.ApplicationTypeMobile, app.Type)
+}
+
 func (suite *ServiceTestSuite) TestDeleteApplication_EmptyAppID() {
 	testConfig := &config.Config{
 		DeclarativeResources: config.DeclarativeResources{
@@ -1132,6 +1193,10 @@ func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_NilOAut
 }
 
 func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_WithDefaults() {
+	config.ResetServerRuntime()
+	require.NoError(suite.T(), config.InitializeServerRuntime("/tmp/test", &config.Config{}))
+	defer config.ResetServerRuntime()
+
 	app := &model.ApplicationDTO{
 		Name: "Test App",
 		OUID: testOUID,
@@ -1162,6 +1227,10 @@ func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_WithDef
 }
 
 func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_WithResponseTypeDefault() {
+	config.ResetServerRuntime()
+	require.NoError(suite.T(), config.InitializeServerRuntime("/tmp/test", &config.Config{}))
+	defer config.ResetServerRuntime()
+
 	app := &model.ApplicationDTO{
 		Name: "Test App",
 		OUID: testOUID,
@@ -1187,6 +1256,10 @@ func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_WithRes
 }
 
 func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_WithGrantTypeButNoResponseType() {
+	config.ResetServerRuntime()
+	require.NoError(suite.T(), config.InitializeServerRuntime("/tmp/test", &config.Config{}))
+	defer config.ResetServerRuntime()
+
 	app := &model.ApplicationDTO{
 		Name: "Test App",
 		OUID: testOUID,
@@ -1276,6 +1349,10 @@ func (suite *ServiceTestSuite) TestEnrichApplicationWithCertificate_Success() {
 }
 
 func (suite *ServiceTestSuite) TestValidateOAuthParamsForCreateAndUpdate_PublicClientSuccess() {
+	config.ResetServerRuntime()
+	require.NoError(suite.T(), config.InitializeServerRuntime("/tmp/test", &config.Config{}))
+	defer config.ResetServerRuntime()
+
 	app := &model.ApplicationDTO{
 		Name: "Test App",
 		OUID: testOUID,
@@ -1404,8 +1481,7 @@ func (suite *ServiceTestSuite) TestValidateApplication_AmbiguousAttestationConfi
 	assert.Equal(suite.T(), &ErrorAmbiguousAttestationConfig, svcErr)
 }
 
-//nolint:dupl // Testing different URL validation scenarios
-func (suite *ServiceTestSuite) TestValidateApplication_InvalidLogoURL() {
+func (suite *ServiceTestSuite) TestValidateApplication_InvalidURLs() {
 	testConfig := &config.Config{}
 	config.ResetServerRuntime()
 	err := config.InitializeServerRuntime("/tmp/test", testConfig)
@@ -1414,21 +1490,34 @@ func (suite *ServiceTestSuite) TestValidateApplication_InvalidLogoURL() {
 
 	service, _ := suite.setupTestService()
 
-	app := &model.ApplicationDTO{
-		Name:    "Test App",
-		OUID:    testOUID,
-		LogoURL: "://invalid",
-		InboundAuthProfile: providers.InboundAuthProfile{
-			AuthFlowID: "edc013d0-e893-4dc0-990c-3e1d203e005b",
-		},
+	cases := []struct {
+		name    string
+		apply   func(*model.ApplicationDTO)
+		wantErr *tidcommon.ServiceError
+	}{
+		{"InvalidLogoURL", func(a *model.ApplicationDTO) { a.LogoURL = "://invalid" }, &ErrorInvalidLogoURL},
+		{"InvalidTosURI", func(a *model.ApplicationDTO) { a.TosURI = "not-a-valid-uri" }, &ErrorInvalidTosURI},
+		{"InvalidPolicyURI", func(a *model.ApplicationDTO) { a.PolicyURI = "not-a-valid-uri" }, &ErrorInvalidPolicyURI},
 	}
 
-	result, inboundAuth, svcErr := service.ValidateApplication(context.Background(), app)
+	for _, tc := range cases {
+		suite.Run(tc.name, func() {
+			app := &model.ApplicationDTO{
+				Name: "Test App",
+				OUID: testOUID,
+				InboundAuthProfile: providers.InboundAuthProfile{
+					AuthFlowID: "edc013d0-e893-4dc0-990c-3e1d203e005b",
+				},
+			}
+			tc.apply(app)
 
-	assert.Nil(suite.T(), result)
-	assert.Nil(suite.T(), inboundAuth)
-	assert.NotNil(suite.T(), svcErr)
-	assert.Equal(suite.T(), &ErrorInvalidLogoURL, svcErr)
+			result, inboundAuth, svcErr := service.ValidateApplication(context.Background(), app)
+
+			assert.Nil(suite.T(), result)
+			assert.Nil(suite.T(), inboundAuth)
+			assert.Equal(suite.T(), tc.wantErr, svcErr)
+		})
+	}
 }
 
 func (suite *ServiceTestSuite) TestCreateApplication_StoreErrorWithRollback() {
@@ -1454,6 +1543,7 @@ func (suite *ServiceTestSuite) runCreateApplicationStoreErrorTest() {
 	service, mockStore := suite.setupTestService()
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Test App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -1658,7 +1748,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_WithAttestation_EncryptsAnd
 	service.cryptoSvc = mockCrypto
 
 	const rawCreds = `{"type":"service_account"}`
-	mockCrypto.EXPECT().Encrypt(mock.Anything, mock.Anything, mock.Anything, []byte(rawCreds)).
+	mockCrypto.EXPECT().Encrypt(mock.Anything, mock.Anything, mock.Anything, mock.Anything, []byte(rawCreds)).
 		Return([]byte("encrypted-creds"), nil, nil)
 
 	var persistedClient *inboundmodel.InboundClient
@@ -1669,6 +1759,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_WithAttestation_EncryptsAnd
 		}).Return(nil)
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeMobile,
 		Name: "Mobile App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -1742,6 +1833,30 @@ func (suite *ServiceTestSuite) TestResolveAttestationCredentials_PreservesExisti
 	assert.Equal(suite.T(), "com.example.app", inboundClient.Attestation.Android.PackageName)
 }
 
+// The Android credential rebuild must not drop a DevMode setting configured alongside it.
+func (suite *ServiceTestSuite) TestResolveAttestationCredentials_PreservesDevMode() {
+	service, mockStore := suite.setupTestService()
+
+	const appID = "app-1"
+	mockStore.On("GetInboundClientByEntityID", mock.Anything, appID).Return(
+		&inboundmodel.InboundClient{
+			Attestation: &providers.AttestationConfig{
+				Android: &providers.AndroidAttestationConfig{ServiceAccountCredentials: "stored-encrypted"},
+			},
+		}, nil)
+
+	inboundClient := &inboundmodel.InboundClient{
+		Attestation: &providers.AttestationConfig{
+			Android: &providers.AndroidAttestationConfig{PackageName: "com.example.app"},
+			DevMode: true,
+		},
+	}
+
+	svcErr := service.resolveAttestationCredentialsForPersist(context.Background(), appID, inboundClient)
+	require.Nil(suite.T(), svcErr)
+	assert.True(suite.T(), inboundClient.Attestation.DevMode)
+}
+
 // A non-"not found" lookup failure while preserving omitted credentials is propagated as an internal
 // error, so a transient store failure cannot silently overwrite stored credentials with an empty
 // value.
@@ -1802,6 +1917,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_WithOAuthCertificate_Succes
 	service, mockStore := suite.setupTestService()
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Test OAuth Cert App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -1852,6 +1968,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_IssuesFlowSecretForEmbedded
 
 	// An embedded server-side app: no OAuth config, so no OAuth profile.
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Embedded App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -1893,6 +2010,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_NoFlowSecretForM2MClient() 
 	// A machine-to-machine app using client_credentials only. It obtains tokens directly and cannot
 	// consume a flow assertion, so it gets no Flow Secret. A caller-supplied FlowSecret is ignored.
 	app := &model.ApplicationDTO{
+		Type:       model.ApplicationTypeM2M,
 		Name:       "M2M App",
 		OUID:       testOUID,
 		FlowSecret: "caller-supplied-secret",
@@ -1945,6 +2063,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_NoFlowSecretForRedirectClie
 	// client secret but no Flow Secret, since it cannot initiate flows directly. A caller-supplied
 	// FlowSecret must be ignored for such an ineligible app.
 	app := &model.ApplicationDTO{
+		Type:       model.ApplicationTypeFullStack,
 		Name:       "Full-stack App",
 		OUID:       testOUID,
 		FlowSecret: "caller-supplied-secret",
@@ -2000,6 +2119,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_NoFlowSecretForPublicClient
 
 	// A browser SPA: public client, no client secret. A caller-supplied FlowSecret must be ignored.
 	app := &model.ApplicationDTO{
+		Type:       model.ApplicationTypeBrowser,
 		Name:       "SPA App",
 		OUID:       testOUID,
 		FlowSecret: "caller-supplied-secret",
@@ -2060,6 +2180,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_StoreErrorWithOAuthCertRoll
 	service, mockStore := suite.setupTestService()
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Test OAuth Cert App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -3007,6 +3128,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_DeclarativeMode() {
 	service, _ := suite.setupTestService()
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Test App",
 		OUID: testOUID,
 	}
@@ -3323,14 +3445,16 @@ func (suite *ServiceTestSuite) TestTranslateOAuthValidationError() {
 			wantDescKey: "error.applicationservice.auth_code_requires_redirect_uris_description",
 		},
 		{
-			name:     "InvalidGrantType",
-			err:      inboundclient.ErrOAuthInvalidGrantType,
-			wantCode: ErrorInvalidGrantType.Code,
+			name:        "InvalidGrantType",
+			err:         inboundclient.ErrOAuthInvalidGrantType,
+			wantCode:    ErrorInvalidGrantType.Code,
+			wantDescKey: "error.applicationservice.invalid_grant_type_description",
 		},
 		{
-			name:     "InvalidResponseType",
-			err:      inboundclient.ErrOAuthInvalidResponseType,
-			wantCode: ErrorInvalidResponseType.Code,
+			name:        "InvalidResponseType",
+			err:         inboundclient.ErrOAuthInvalidResponseType,
+			wantCode:    ErrorInvalidResponseType.Code,
+			wantDescKey: "error.applicationservice.invalid_response_type_description",
 		},
 		{
 			name:        "ClientCredentialsCannotUseResponseTypes",
@@ -3345,10 +3469,10 @@ func (suite *ServiceTestSuite) TestTranslateOAuthValidationError() {
 			wantDescKey: "error.applicationservice.auth_code_requires_code_response_type_description",
 		},
 		{
-			name:        "RefreshTokenCannotBeSoleGrant",
-			err:         inboundclient.ErrOAuthRefreshTokenCannotBeSoleGrant,
+			name:        "RefreshTokenRequiresTokenIssuingGrant",
+			err:         inboundclient.ErrOAuthRefreshTokenRequiresTokenIssuingGrant,
 			wantCode:    ErrorInvalidOAuthConfiguration.Code,
-			wantDescKey: "error.applicationservice.refresh_token_cannot_be_sole_grant_description",
+			wantDescKey: "error.applicationservice.refresh_token_requires_token_issuing_grant_description",
 		},
 		{
 			name:        "PKCERequiresAuthCode",
@@ -3363,9 +3487,10 @@ func (suite *ServiceTestSuite) TestTranslateOAuthValidationError() {
 			wantDescKey: "error.applicationservice.response_types_require_authorization_code_description",
 		},
 		{
-			name:     "InvalidTokenEndpointAuthMethod",
-			err:      inboundclient.ErrOAuthInvalidTokenEndpointAuthMethod,
-			wantCode: ErrorInvalidTokenEndpointAuthMethod.Code,
+			name:        "InvalidTokenEndpointAuthMethod",
+			err:         inboundclient.ErrOAuthInvalidTokenEndpointAuthMethod,
+			wantCode:    ErrorInvalidTokenEndpointAuthMethod.Code,
+			wantDescKey: "error.applicationservice.invalid_token_endpoint_auth_method_description",
 		},
 		{
 			name:        "PrivateKeyJWTRequiresCertificate",
@@ -3386,28 +3511,34 @@ func (suite *ServiceTestSuite) TestTranslateOAuthValidationError() {
 			wantDescKey: "error.applicationservice.private_key_jwt_cannot_have_client_secret_description",
 		},
 		{
-			name:        "ClientSecretCannotHaveCertificate",
-			err:         inboundclient.ErrOAuthClientSecretCannotHaveCertificate,
-			wantCode:    ErrorInvalidOAuthConfiguration.Code,
-			wantDescKey: "error.applicationservice.client_secret_cannot_have_certificate_description",
-		},
-		{
 			name:        "NoneAuthRequiresPublicClient",
 			err:         inboundclient.ErrOAuthNoneAuthRequiresPublicClient,
 			wantCode:    ErrorInvalidOAuthConfiguration.Code,
 			wantDescKey: "error.applicationservice.none_auth_method_requires_public_client_description",
 		},
 		{
-			name:        "NoneAuthCannotHaveCertOrSecret",
-			err:         inboundclient.ErrOAuthNoneAuthCannotHaveCertOrSecret,
+			name:        "NoneAuthCannotHaveSecret",
+			err:         inboundclient.ErrOAuthNoneAuthCannotHaveSecret,
 			wantCode:    ErrorInvalidOAuthConfiguration.Code,
-			wantDescKey: "error.applicationservice.none_auth_method_cannot_have_cert_or_secret_description",
+			wantDescKey: "error.applicationservice.none_auth_method_cannot_have_secret_description",
 		},
 		{
 			name:        "ClientCredentialsCannotUseNoneAuth",
 			err:         inboundclient.ErrOAuthClientCredentialsCannotUseNoneAuth,
 			wantCode:    ErrorInvalidOAuthConfiguration.Code,
 			wantDescKey: "error.applicationservice.client_credentials_cannot_use_none_auth_description",
+		},
+		{
+			name:        "ClientJWTBearerCannotUseNoneAuth",
+			err:         inboundclient.ErrOAuthClientJWTBearerCannotUseNoneAuth,
+			wantCode:    ErrorInvalidOAuthConfiguration.Code,
+			wantDescKey: "error.applicationservice.jwt_bearer_cannot_use_none_auth_description",
+		},
+		{
+			name:        "ClientIDJAGCannotUseNoneAuth",
+			err:         inboundclient.ErrOAuthClientIDJAGCannotUseNoneAuth,
+			wantCode:    ErrorInvalidOAuthConfiguration.Code,
+			wantDescKey: "error.applicationservice.idjag_cannot_use_none_auth_description",
 		},
 		{
 			name:        "PublicClientMustUseNoneAuth",
@@ -3480,11 +3611,6 @@ func (suite *ServiceTestSuite) TestTranslateUserInfoValidationError() {
 			name:        "UnsupportedResponseType",
 			err:         inboundclient.ErrOAuthUserInfoUnsupportedResponseType,
 			wantDescKey: "error.applicationservice.userinfo_unsupported_response_type_description",
-		},
-		{
-			name:        "JWSRequiresSigningAlg",
-			err:         inboundclient.ErrOAuthUserInfoJWSRequiresSigningAlg,
-			wantDescKey: "error.applicationservice.userinfo_jws_requires_signing_alg_description",
 		},
 		{
 			name:        "JWERequiresEncryption",
@@ -3939,6 +4065,7 @@ func (suite *ServiceTestSuite) TestCreateApplication_CreateInboundClientFailsAnd
 	service, mockStore := suite.setupTestService()
 
 	app := &model.ApplicationDTO{
+		Type: model.ApplicationTypeFullStack,
 		Name: "Test App",
 		OUID: testOUID,
 		InboundAuthProfile: providers.InboundAuthProfile{
@@ -3961,6 +4088,22 @@ func (suite *ServiceTestSuite) TestCreateApplication_CreateInboundClientFailsAnd
 	assert.Equal(suite.T(), &tidcommon.InternalServerError, svcErr)
 }
 
+func (suite *ServiceTestSuite) TestValidateApplication_TypeRequired() {
+	service, _ := suite.setupTestService()
+
+	app := &model.ApplicationDTO{
+		Name: "Test App",
+		OUID: testOUID,
+	}
+
+	processed, inboundAuthConfig, svcErr := service.ValidateApplication(context.Background(), app)
+
+	assert.Nil(suite.T(), processed)
+	assert.Nil(suite.T(), inboundAuthConfig)
+	assert.NotNil(suite.T(), svcErr)
+	assert.Equal(suite.T(), &ErrorApplicationTypeRequired, svcErr)
+}
+
 func (suite *ServiceTestSuite) TestValidateApplication_InboundClientValidateError() {
 	service, mockStore := suite.setupTestService()
 
@@ -3976,6 +4119,7 @@ func (suite *ServiceTestSuite) TestValidateApplication_InboundClientValidateErro
 	app := &model.ApplicationDTO{
 		Name: "Test App",
 		OUID: testOUID,
+		Type: model.ApplicationTypeFullStack,
 	}
 
 	processed, inboundAuthConfig, svcErr := service.ValidateApplication(context.Background(), app)
@@ -4225,4 +4369,91 @@ func (suite *ServiceTestSuite) TestDeleteApplication_EntityDeleteFailsAfterCasca
 	// Dependents were removed even though the application delete did not complete.
 	assert.Equal(suite.T(), 1, cascadeCalls)
 	ep.AssertCalled(suite.T(), "DeleteEntity", mock.Anything)
+}
+
+// ----- syncPasskeyOriginsToCORS -----
+
+func (suite *ServiceTestSuite) TestSyncPasskeyOriginsToCORS_NilService_Noop() {
+	svc := &applicationService{serverConfigService: nil}
+	// Should not panic when serverConfigService is nil
+	svc.syncPasskeyOriginsToCORS(context.Background(), []string{"https://app.example.com"})
+}
+
+func (suite *ServiceTestSuite) TestSyncPasskeyOriginsToCORS_EmptyOrigins_Noop() {
+	mockCfgSvc := serverconfigmock.NewServerConfigServiceMock(suite.T())
+	svc := &applicationService{serverConfigService: mockCfgSvc}
+	// No mock expectations — GetWritableConfig must not be called with empty input
+	svc.syncPasskeyOriginsToCORS(context.Background(), nil)
+	svc.syncPasskeyOriginsToCORS(context.Background(), []string{})
+}
+
+func (suite *ServiceTestSuite) TestSyncPasskeyOriginsToCORS_AddsNewOrigins() {
+	mockCfgSvc := serverconfigmock.NewServerConfigServiceMock(suite.T())
+	svc := &applicationService{
+		serverConfigService: mockCfgSvc,
+		logger:              log.GetLogger(),
+	}
+
+	existing := cors.OriginConfig{}
+	mockCfgSvc.On("GetWritableConfig", mock.Anything, string(serverconfig.ConfigNameCORS)).
+		Return(existing, (*tidcommon.ServiceError)(nil))
+
+	var capturedRaw json.RawMessage
+	mockCfgSvc.On("SetConfig", mock.Anything, serverconfig.ConfigNameCORS, mock.MatchedBy(
+		func(raw json.RawMessage) bool {
+			capturedRaw = raw
+			return true
+		})).Return((*tidcommon.ServiceError)(nil))
+
+	svc.syncPasskeyOriginsToCORS(context.Background(), []string{"https://app.example.com"})
+
+	var saved map[string]json.RawMessage
+	require.NoError(suite.T(), json.Unmarshal(capturedRaw, &saved))
+	var origins []string
+	require.NoError(suite.T(), json.Unmarshal(saved["allowedOrigins"], &origins))
+	assert.Contains(suite.T(), origins, "https://app.example.com")
+}
+
+func (suite *ServiceTestSuite) TestSyncPasskeyOriginsToCORS_SkipsDuplicates() {
+	mockCfgSvc := serverconfigmock.NewServerConfigServiceMock(suite.T())
+	svc := &applicationService{
+		serverConfigService: mockCfgSvc,
+		logger:              log.GetLogger(),
+	}
+
+	existing := cors.OriginConfig{}
+	_ = json.Unmarshal([]byte(`{"allowedOrigins":["https://app.example.com"]}`), &existing)
+	mockCfgSvc.On("GetWritableConfig", mock.Anything, string(serverconfig.ConfigNameCORS)).
+		Return(existing, (*tidcommon.ServiceError)(nil))
+	// SetConfig must NOT be called because nothing changed
+
+	svc.syncPasskeyOriginsToCORS(context.Background(), []string{"https://app.example.com"})
+}
+
+func (suite *ServiceTestSuite) TestSyncPasskeyOriginsToCORS_SkipsInvalidOrigins() {
+	mockCfgSvc := serverconfigmock.NewServerConfigServiceMock(suite.T())
+	svc := &applicationService{
+		serverConfigService: mockCfgSvc,
+		logger:              log.GetLogger(),
+	}
+
+	invalidOrigins := []string{
+		"",                           // empty
+		"   ",                        // whitespace only
+		"*",                          // bare wildcard
+		"http://*.example.com",       // wildcard in hostname
+		"null",                       // null origin
+		"ftp://example.com",          // unsupported scheme
+		"https://example.com/path",   // has path
+		"https://example.com?q=1",    // has query
+		"https://example.com#frag",   // has fragment
+		"https://exam\tple.com",      // control character
+		"https://user:pass@host.com", // userinfo
+	}
+
+	mockCfgSvc.On("GetWritableConfig", mock.Anything, string(serverconfig.ConfigNameCORS)).
+		Return(cors.OriginConfig{}, (*tidcommon.ServiceError)(nil))
+	// SetConfig must NOT be called because all origins are invalid
+
+	svc.syncPasskeyOriginsToCORS(context.Background(), invalidOrigins)
 }

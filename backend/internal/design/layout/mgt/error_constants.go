@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package layoutmgt
 
@@ -176,48 +161,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "layout.error.invalid_offset_param_description",
 			DefaultValue: "Offset must be a valid integer",
-		},
-	}
-
-	// ErrorCannotUpdateDeclarativeLayout is returned when attempting to update a declarative layout.
-	ErrorCannotUpdateDeclarativeLayout = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "LAY-1013",
-		Error: tidcommon.I18nMessage{
-			Key:          "layout.error.cannot_update_declarative",
-			DefaultValue: "Cannot update declarative layout",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "layout.error.cannot_update_declarative_description",
-			DefaultValue: "Layout is defined in declarative resources and cannot be modified",
-		},
-	}
-
-	// ErrorCannotDeleteDeclarativeLayout is returned when attempting to delete a declarative layout.
-	ErrorCannotDeleteDeclarativeLayout = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "LAY-1014",
-		Error: tidcommon.I18nMessage{
-			Key:          "layout.error.cannot_delete_declarative",
-			DefaultValue: "Cannot delete declarative layout",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "layout.error.cannot_delete_declarative_description",
-			DefaultValue: "Layout is defined in declarative resources and cannot be deleted",
-		},
-	}
-
-	// ErrorResultLimitExceededInCompositeMode is returned when composite store result count exceeds max limit.
-	ErrorResultLimitExceededInCompositeMode = tidcommon.ServiceError{
-		Type: tidcommon.ServerErrorType,
-		Code: "LAY-5001",
-		Error: tidcommon.I18nMessage{
-			Key:          "layout.error.result_limit_exceeded",
-			DefaultValue: "Result limit exceeded",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "layout.error.result_limit_exceeded_description",
-			DefaultValue: "Total count of layouts exceeds maximum allowed limit in composite mode",
 		},
 	}
 

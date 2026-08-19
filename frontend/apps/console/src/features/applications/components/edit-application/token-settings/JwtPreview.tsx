@@ -1,25 +1,12 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import Editor, {type OnMount} from '@monaco-editor/react';
-import {Box, Stack, Typography} from '@wso2/oxygen-ui';
+import {JsonLogo, JwtLogo} from '@thunderid/components';
+import {getCspNonce} from '@thunderid/design';
+import {Stack, Typography, Box} from '@wso2/oxygen-ui';
 import type {editor as MonacoEditor, IDisposable, IRange} from 'monaco-editor';
-import {useRef, useEffect} from 'react';
+import {useRef, useEffect, useState, useCallback} from 'react';
 
 /**
  * Descriptions for standard JWT claims, shown as hover tooltips in the preview.
@@ -28,12 +15,12 @@ const JWT_CLAIM_DESCRIPTIONS: Record<string, string> = {
   aud: 'Audience — who or what the token is intended for',
   client_id: 'Client ID that requested this token',
   exp: 'Expiration time — Unix timestamp when the token expires',
-  grant_type: 'OAuth 2.0 grant type used to obtain this token',
+  grant_type: 'OAuth 2 grant type used to obtain this token',
   iat: 'Issued at — Unix timestamp when the token was created',
   iss: 'Issuer — entity that created and signed the token',
   jti: 'JWT ID — unique identifier for this specific token',
   nbf: 'Not before — token not valid before this Unix timestamp',
-  scope: 'OAuth 2.0 scopes granted to the token',
+  scope: 'OAuth 2 scopes granted to the token',
   sub: 'Subject — the principal (user) this token represents',
 };
 
@@ -71,147 +58,6 @@ interface JwtPreviewProps {
 }
 
 /**
- * JSON logo SVG — curly-brace icon with "JSON" wordmark.
- */
-function JsonLogo() {
-  return (
-    <Box
-      component="svg"
-      viewBox="0 0 108 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      sx={{flexShrink: 0, height: 18, width: 'auto'}}
-    >
-      {/* Left curly brace */}
-      <path
-        d="M14 4C10 4 8 6 8 9L8 13C8 15 6 16 4 16C6 16 8 17 8 19L8 23C8 26 10 28 14 28"
-        stroke="#F89820"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* Right curly brace */}
-      <path
-        d="M18 4C22 4 24 6 24 9L24 13C24 15 26 16 28 16C26 16 24 17 24 19L24 23C24 26 22 28 18 28"
-        stroke="#F89820"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* J */}
-      <path
-        d="M48 6 V21 C48 25 44 27 41 26"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* S */}
-      <path
-        d="M66 9 C66 7 64 6 61 6 C57 6 54 8 54 12 C54 16 66 16 66 20 C66 24 64 26 61 26 C57 26 54 25 54 22"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* O */}
-      <ellipse cx="77" cy="16" rx="6" ry="10" stroke="currentColor" strokeWidth="3.5" />
-      {/* N */}
-      <path
-        d="M88 26 L88 6 L103 26 L103 6"
-        stroke="currentColor"
-        strokeWidth="3.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </Box>
-  );
-}
-
-/**
- * JWT logo SVG — combines the geometric icon and the "JWT" wordmark.
- */
-function JwtLogo() {
-  return (
-    <Box
-      component="svg"
-      viewBox="0 0 90 32"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      sx={{flexShrink: 0, height: 20, width: 'auto'}}
-    >
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M18.3683 8.60806V0H13.5682V8.60806L15.9683 11.9041L18.3683 8.60806Z"
-        fill="#191919"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M13.5682 23.3919V32H18.3683V23.3919L15.9683 20.0959L13.5682 23.3919Z"
-        fill="#191919"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M18.3684 23.3928L23.4244 30.3689L27.3285 27.5208L22.2404 20.5768L18.3684 19.2968V23.3928Z"
-        fill="#3EC6EB"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M13.5682 8.60823L8.51218 1.63218L4.60815 4.4802L9.69619 11.4243L13.5682 12.7043V8.60823Z"
-        fill="#3EC6EB"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M9.69607 11.4244L1.50401 8.76841L0 13.3444L8.19206 16.0005L12.0961 14.7525L9.69607 11.4244Z"
-        fill="#FF44DD"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M19.8402 17.2478L22.2402 20.5758L30.4323 23.2319L31.9363 18.6558L23.7442 15.9998L19.8402 17.2478Z"
-        fill="#FF44DD"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M23.7442 16.0005L31.9363 13.3444L30.4323 8.76841L22.2402 11.4244L19.8402 14.7525L23.7442 16.0005Z"
-        fill="#635DFF"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M8.19206 15.9998L0 18.6558L1.50401 23.2319L9.69607 20.5758L12.0961 17.2478L8.19206 15.9998Z"
-        fill="#635DFF"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M9.69619 20.5768L4.60815 27.5208L8.51218 30.3689L13.5682 23.3928V19.2968L9.69619 20.5768Z"
-        fill="#FF4F40"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M22.2404 11.4243L27.3285 4.4802L23.4244 1.63218L18.3684 8.60823V12.7043L22.2404 11.4243Z"
-        fill="#FF4F40"
-      />
-      <path d="M46 6V18C46 21.3137 43.3137 24 40 24V24" stroke="currentColor" strokeWidth="4" />
-      <path
-        d="M52.8932 6V20.5C52.8932 22.433 54.4602 24 56.3932 24V24C58.3262 24 59.8932 22.433 59.8932 20.5V11C59.8932 9.34315 61.2363 8 62.8932 8V8C64.55 8 65.8932 9.34315 65.8932 11V20.5C65.8932 22.433 67.4602 24 69.3932 24V24C71.3262 24 72.8932 22.433 72.8932 20.5V6"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path d="M77.8932 8H83.8932M83.8932 8V26M83.8932 8H89.8932" stroke="currentColor" strokeWidth="4" />
-    </Box>
-  );
-}
-
-/**
  * Renders a JWT payload preview with the JWT logo, a label, and a Monaco JSON viewer.
  *
  * Default claims are highlighted in purple with a dotted underline. Hovering over
@@ -227,8 +73,10 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
   const decorationIdsRef = useRef<string[]>([]);
   const defaultClaimsRef = useRef<readonly string[]>(defaultClaims);
   const contentListenerRef = useRef<IDisposable | null>(null);
+  const sizeListenerRef = useRef<IDisposable | null>(null);
+  const [measuredPayloadHeight, setMeasuredPayloadHeight] = useState<number | null>(null);
 
-  const applyDecorations = () => {
+  const applyDecorations = useCallback(() => {
     if (format === 'json') return;
     const editorInstance = editorRef.current;
     const monacoInstance = monacoRef.current;
@@ -264,7 +112,7 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
     });
 
     decorationIdsRef.current = editorInstance.deltaDecorations(decorationIdsRef.current, newDecorations);
-  };
+  }, [format]);
 
   // Keep defaultClaimsRef in sync so the content-change listener always sees latest claims
   useEffect(() => {
@@ -273,7 +121,7 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
     if (editorRef.current && monacoRef.current) {
       applyDecorations();
     }
-  }, [defaultClaims]);
+  }, [defaultClaims, applyDecorations]);
 
   const handleMount: OnMount = (editorInstance, monacoInstance) => {
     editorRef.current = editorInstance;
@@ -287,12 +135,20 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
     contentListenerRef.current = editorInstance.onDidChangeModelContent(() => {
       applyDecorations();
     });
+
+    // Follow the height the editor actually needs, so wrapped values are never cut off.
+    setMeasuredPayloadHeight(editorInstance.getContentHeight());
+    sizeListenerRef.current?.dispose();
+    sizeListenerRef.current = editorInstance.onDidContentSizeChange((event) => {
+      setMeasuredPayloadHeight(event.contentHeight);
+    });
   };
 
-  // Clean up content listener on unmount
+  // Clean up editor listeners on unmount
   useEffect(
     () => () => {
       contentListenerRef.current?.dispose();
+      sizeListenerRef.current?.dispose();
     },
     [],
   );
@@ -301,7 +157,10 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
   const headerJson = !isJson && header ? JSON.stringify(header, null, 2) : null;
   const payloadJson = JSON.stringify(payload, null, 2);
   const headerHeight = headerJson ? Math.min(200, Math.max(60, headerJson.split('\n').length * 20 + 16)) : 0;
-  const payloadHeight = Math.min(600, Math.max(80, payloadJson.split('\n').length * 20 + 16));
+  // Line count alone under-measures: the rendered line height differs from any constant we pick,
+  // and wrapped values occupy more than one line each. The editor reports what it actually needs,
+  // so the estimate is only the starting height until it does.
+  const payloadHeight = Math.min(600, Math.max(80, measuredPayloadHeight ?? payloadJson.split('\n').length * 20 + 16));
 
   const editorOptions = {
     readOnly: true,
@@ -316,11 +175,14 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
     renderLineHighlight: 'none' as const,
     wordWrap: 'on' as const,
     scrollbar: {
-      vertical: 'hidden' as const,
+      vertical: 'auto' as const,
+      // Lines wrap, so there is nothing to scroll horizontally.
       horizontal: 'hidden' as const,
-      verticalScrollbarSize: 0,
+      verticalScrollbarSize: 8,
       horizontalScrollbarSize: 0,
-      handleMouseWheel: false,
+      handleMouseWheel: true,
+      // Once the preview reaches its end the wheel goes back to the page, so scrolling past the
+      // preview never traps the cursor.
       alwaysConsumeMouseWheel: false,
     },
     guides: {
@@ -337,11 +199,17 @@ export default function JwtPreview({payload, defaultClaims = [], header = undefi
         borderRadius: 1,
         p: 2,
         height: '100%',
+        // The editor measures its own container, so without these it can widen the column it sits
+        // in rather than scrolling inside it.
+        minWidth: 0,
+        overflow: 'hidden',
       }}
     >
       {/* Styling for default claim annotations */}
       {!isJson && (
-        <style>{`.jwt-default-claim { color: #C586C0 !important; text-decoration: underline dotted; text-decoration-color: #C586C0; cursor: help; }`}</style>
+        <style nonce={getCspNonce()}>
+          {`.jwt-default-claim { color: #C586C0 !important; text-decoration: underline dotted; text-decoration-color: #C586C0; cursor: help; }`}
+        </style>
       )}
       <Stack spacing={2}>
         <Stack direction="row" spacing={1} alignItems="center">

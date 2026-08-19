@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -87,6 +72,9 @@ func (suite *SSOCheckExecutorTestSuite) assertAbsent(resp *providers.ExecutorRes
 	suite.Equal("false",
 		resp.RuntimeData[common.SSOCheckpointKey(common.RuntimeKeySSOSessionPresent, "session")])
 	suite.Empty(resp.RuntimeData[common.RuntimeKeySSOSessionHandle])
+	// The Authenticate outcome prompts and suspends the flow, and forwarded data that outlived the node
+	// would be persisted with the flow context, so nothing is forwarded on this path.
+	suite.Empty(resp.ForwardedData)
 }
 
 // TestPresent covers a live session that already holds this checkpoint: routes to Skip and shares the
@@ -94,7 +82,8 @@ func (suite *SSOCheckExecutorTestSuite) assertAbsent(resp *providers.ExecutorRes
 func (suite *SSOCheckExecutorTestSuite) TestPresent() {
 	sso := sessionmock.NewServiceMock(suite.T())
 	sso.EXPECT().Resolve(mock.Anything, "handle-abc", "flow-1", 3, mock.Anything).Return(liveSession(), nil)
-	sso.EXPECT().HasCheckpoint(mock.Anything, "sess-1", "session").Return(true, nil)
+	sso.EXPECT().FindCheckpoint(mock.Anything, "sess-1", "session").
+		Return(&session.SessionContext{SessionID: "sess-1", CheckpointID: "session"}, nil)
 	exec := suite.newExecutor(sso)
 
 	resp, err := exec.Execute(ssoNodeContext())
@@ -104,6 +93,14 @@ func (suite *SSOCheckExecutorTestSuite) TestPresent() {
 	suite.Equal(dataValueTrue,
 		resp.RuntimeData[common.SSOCheckpointKey(common.RuntimeKeySSOSessionPresent, "session")])
 	suite.Equal("handle-abc", resp.RuntimeData[common.RuntimeKeySSOSessionHandle])
+	// Both rows this node read are forwarded to the paired Session node so the load path does not read
+	// them again. Losing this makes the reuse correct but two queries more expensive.
+	forwardedSession, ok := resp.ForwardedData[common.ForwardedDataKeySSOSession].(*session.Session)
+	suite.Require().True(ok, "the resolved session must be forwarded to the Session node")
+	suite.Equal("sess-1", forwardedSession.SessionID)
+	forwardedContext, ok := resp.ForwardedData[common.ForwardedDataKeySSOSessionContext].(*session.SessionContext)
+	suite.Require().True(ok, "the checkpoint context must be forwarded to the Session node")
+	suite.Equal("session", forwardedContext.CheckpointID)
 }
 
 // TestAbsentCheckpointNotPresent covers a live session that lacks this checkpoint: the node routes to
@@ -113,7 +110,7 @@ func (suite *SSOCheckExecutorTestSuite) TestAbsentCheckpointNotPresent() {
 	sso := sessionmock.NewServiceMock(suite.T())
 	sso.EXPECT().Resolve(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(liveSession(), nil)
-	sso.EXPECT().HasCheckpoint(mock.Anything, "sess-1", "session").Return(false, nil)
+	sso.EXPECT().FindCheckpoint(mock.Anything, "sess-1", "session").Return(nil, nil)
 	exec := suite.newExecutor(sso)
 
 	resp, err := exec.Execute(ssoNodeContext())
@@ -170,14 +167,14 @@ func (suite *SSOCheckExecutorTestSuite) TestResolverErrorFailsFlow() {
 	suite.Contains(err.Error(), "store down")
 }
 
-// TestCheckpointListErrorFailsFlow covers a checkpoint-existence lookup failure on a live session:
+// TestCheckpointLookupErrorFailsFlow covers a checkpoint lookup failure on a live session:
 // Execute returns a Go error rather than skipping on incomplete information.
-func (suite *SSOCheckExecutorTestSuite) TestCheckpointListErrorFailsFlow() {
+func (suite *SSOCheckExecutorTestSuite) TestCheckpointLookupErrorFailsFlow() {
 	sso := sessionmock.NewServiceMock(suite.T())
 	sso.EXPECT().Resolve(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Return(liveSession(), nil)
-	sso.EXPECT().HasCheckpoint(mock.Anything, mock.Anything, mock.Anything).
-		Return(false, errors.New("store down"))
+	sso.EXPECT().FindCheckpoint(mock.Anything, mock.Anything, mock.Anything).
+		Return(nil, errors.New("store down"))
 	exec := suite.newExecutor(sso)
 
 	_, err := exec.Execute(ssoNodeContext())

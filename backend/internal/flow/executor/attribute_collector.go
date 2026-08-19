@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -136,8 +121,9 @@ func (a *attributeCollector) HasRequiredInputs(ctx *providers.NodeContext,
 		return true
 	}
 
+	metadata := core.BuildGetAttributesMetadata(ctx)
 	// Update the executor response with the required inputs retrieved from authenticated user attributes.
-	authUser, authnUserAttrs, svcErr := a.authnProvider.GetUserAttributes(ctx.Context, nil, nil, execResp.AuthUser)
+	authUser, authnUserAttrs, svcErr := a.authnProvider.GetUserAttributes(ctx.Context, nil, metadata, execResp.AuthUser)
 	if svcErr != nil {
 		logger.Warn(ctx.Context, "Failed to retrieve authenticated user attributes")
 	}
@@ -366,7 +352,9 @@ func (a *attributeCollector) getUpdatedUserObject(ctx *providers.NodeContext,
 	return true, updatedUser, nil
 }
 
-// getInputAttributes retrieves the input attributes from the context.
+// getInputAttributes retrieves the input attributes from the context. Values are converted from the
+// engine's string representation to the type implied by the input type, so that non-string
+// attributes satisfy schema validation when the collected profile is persisted.
 func (a *attributeCollector) getInputAttributes(ctx *providers.NodeContext) map[string]interface{} {
 	attributesMap := make(map[string]interface{})
 	requiredInputAttrs := a.getInputs(ctx)
@@ -377,11 +365,12 @@ func (a *attributeCollector) getInputAttributes(ctx *providers.NodeContext) map[
 			continue
 		}
 
+		schemaType := schemaTypeForInputType(inputAttr.Type)
 		value, exists := ctx.UserInputs[inputAttr.Identifier]
 		if exists {
-			attributesMap[inputAttr.Identifier] = value
+			attributesMap[inputAttr.Identifier] = convertToSchemaType(value, schemaType)
 		} else if runtimeValue, exists := ctx.RuntimeData[inputAttr.Identifier]; exists {
-			attributesMap[inputAttr.Identifier] = runtimeValue
+			attributesMap[inputAttr.Identifier] = convertToSchemaType(runtimeValue, schemaType)
 		}
 	}
 

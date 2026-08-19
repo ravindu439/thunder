@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderWithProviders, screen, fireEvent} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -59,7 +44,12 @@ describe('SetDefaultResourceServerDialog', () => {
     renderWithProviders(<SetDefaultResourceServerDialog open resourceServer={resourceServer} onClose={vi.fn()} />);
 
     expect(screen.getByText('Set default resource server')).toBeInTheDocument();
-    expect(screen.getByText('Payments API')).toBeInTheDocument();
+    // Emphasised inside the translated sentence, not concatenated around it, so translators can
+    // reorder it.
+    expect(screen.getByText('Payments API').tagName).toBe('STRONG');
+    expect(screen.getByText(/will become the default resource server/)).toHaveTextContent(
+      'Payments API will become the default resource server.',
+    );
   });
 
   it('does not render when closed', () => {
@@ -94,13 +84,34 @@ describe('SetDefaultResourceServerDialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows an error toast on a failed mutation', () => {
-    mockMutate.mockImplementation((_vars, opts: {onError: (err: Error) => void}) => opts.onError(new Error('nope')));
+  it('shows the resolved catalog message inline, never the raw server text, on a failed mutation, and keeps the dialog open', () => {
+    const rawServerMessage = 'raw backend set-default failure detail';
+    mockMutate.mockImplementation((_vars, opts: {onError: (err: Error) => void}) =>
+      opts.onError(new Error(rawServerMessage)),
+    );
+    const onClose = vi.fn();
 
-    renderWithProviders(<SetDefaultResourceServerDialog open resourceServer={resourceServer} onClose={vi.fn()} />);
+    renderWithProviders(<SetDefaultResourceServerDialog open resourceServer={resourceServer} onClose={onClose} />);
 
     fireEvent.click(screen.getByRole('button', {name: 'Set as default'}));
 
-    expect(mockShowToast).toHaveBeenCalledWith('Failed to set the default resource server.', 'error');
+    expect(screen.getByText('Failed to set the default resource server.')).toBeInTheDocument();
+    expect(screen.queryByText(rawServerMessage)).not.toBeInTheDocument();
+    expect(mockShowToast).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('clears the error and closes when Cancel is clicked after a failed mutation', () => {
+    mockMutate.mockImplementation((_vars, opts: {onError: (err: Error) => void}) => opts.onError(new Error('nope')));
+    const onClose = vi.fn();
+
+    renderWithProviders(<SetDefaultResourceServerDialog open resourceServer={resourceServer} onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', {name: 'Set as default'}));
+    expect(screen.getByText('Failed to set the default resource server.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', {name: 'Cancel'}));
+
+    expect(onClose).toHaveBeenCalled();
   });
 });

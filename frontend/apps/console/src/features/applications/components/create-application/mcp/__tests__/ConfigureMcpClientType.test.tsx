@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
@@ -54,7 +39,7 @@ describe('ConfigureMcpClientType', () => {
       />,
     );
 
-    expect(screen.getByText('Client type')).toBeInTheDocument();
+    expect(screen.getByText('Client Type')).toBeInTheDocument();
     expect(screen.getByText('How will this client obtain tokens?')).toBeInTheDocument();
   });
 
@@ -92,7 +77,7 @@ describe('ConfigureMcpClientType', () => {
       />,
     );
 
-    expect(screen.getByRole('radiogroup', {name: 'Client type'})).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', {name: 'Client Type'})).toBeInTheDocument();
   });
 
   it('should default-select the user-delegated card', () => {
@@ -106,8 +91,8 @@ describe('ConfigureMcpClientType', () => {
     );
 
     const [userDelegatedCard, m2mCard] = screen.getAllByRole('radio');
-    expect(userDelegatedCard).toHaveAttribute('aria-checked', 'true');
-    expect(m2mCard).toHaveAttribute('aria-checked', 'false');
+    expect(userDelegatedCard).toBeChecked();
+    expect(m2mCard).not.toBeChecked();
   });
 
   it('should mark the machine-to-machine card as selected when selectedType is m2m', () => {
@@ -116,8 +101,8 @@ describe('ConfigureMcpClientType', () => {
     );
 
     const [userDelegatedCard, m2mCard] = screen.getAllByRole('radio');
-    expect(userDelegatedCard).toHaveAttribute('aria-checked', 'false');
-    expect(m2mCard).toHaveAttribute('aria-checked', 'true');
+    expect(userDelegatedCard).not.toBeChecked();
+    expect(m2mCard).toBeChecked();
   });
 
   it('should call onSelect with "userDelegated" when the user-delegated card is clicked', () => {
@@ -152,57 +137,6 @@ describe('ConfigureMcpClientType', () => {
     m2mCard.click();
 
     expect(onSelect).toHaveBeenCalledWith('m2m');
-  });
-
-  it('should call onSelect when Enter is pressed on a card', () => {
-    const onSelect = vi.fn();
-    render(
-      <ConfigureMcpClientType
-        selectedType="userDelegated"
-        onSelect={onSelect}
-        redirectUris={[]}
-        onRedirectUrisChange={vi.fn()}
-      />,
-    );
-
-    const [, m2mCard] = screen.getAllByRole('radio');
-    m2mCard.focus();
-    m2mCard.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true, cancelable: true}));
-
-    expect(onSelect).toHaveBeenCalledWith('m2m');
-  });
-
-  it('should call onSelect when Space is pressed on a card', () => {
-    const onSelect = vi.fn();
-    render(
-      <ConfigureMcpClientType
-        selectedType="m2m"
-        onSelect={onSelect}
-        redirectUris={[]}
-        onRedirectUrisChange={vi.fn()}
-      />,
-    );
-
-    const [userDelegatedCard] = screen.getAllByRole('radio');
-    userDelegatedCard.focus();
-    userDelegatedCard.dispatchEvent(new KeyboardEvent('keydown', {key: ' ', bubbles: true, cancelable: true}));
-
-    expect(onSelect).toHaveBeenCalledWith('userDelegated');
-  });
-
-  it('should make each card keyboard-focusable', () => {
-    render(
-      <ConfigureMcpClientType
-        selectedType="userDelegated"
-        onSelect={vi.fn()}
-        redirectUris={[]}
-        onRedirectUrisChange={vi.fn()}
-      />,
-    );
-
-    screen.getAllByRole('radio').forEach((card) => {
-      expect(card).toHaveAttribute('tabIndex', '0');
-    });
   });
 
   it('should render the redirect URI section when userDelegated is selected', () => {
@@ -242,7 +176,7 @@ describe('ConfigureMcpClientType', () => {
   });
 
   describe('preview panel', () => {
-    it('should show the user-delegated OAuth profile chips and next-step line by default', () => {
+    it('should show the user-delegated OAuth profile chips by default', () => {
       render(
         <ConfigureMcpClientType
           selectedType="userDelegated"
@@ -256,10 +190,9 @@ describe('ConfigureMcpClientType', () => {
       expect(screen.getByText('Authorization Code + PKCE (required)')).toBeInTheDocument();
       expect(screen.getByText('Public client')).toBeInTheDocument();
       expect(screen.getByText('Refresh tokens')).toBeInTheDocument();
-      expect(screen.getByText('Add your redirect URIs below.')).toBeInTheDocument();
     });
 
-    it('should show the machine-to-machine OAuth profile chips and next-step line when m2m is selected', () => {
+    it('should show the machine-to-machine OAuth profile chips when m2m is selected', () => {
       render(
         <ConfigureMcpClientType
           selectedType="m2m"
@@ -272,7 +205,6 @@ describe('ConfigureMcpClientType', () => {
       expect(screen.getByText('Client Credentials')).toBeInTheDocument();
       expect(screen.getByText('Confidential client')).toBeInTheDocument();
       expect(screen.getByText('Client secret issued')).toBeInTheDocument();
-      expect(screen.getByText('Next: your client ID and secret are generated.')).toBeInTheDocument();
     });
 
     it('should swap the preview content when the selected type changes', () => {

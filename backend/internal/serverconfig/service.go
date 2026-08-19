@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package serverconfig
 
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/common"
@@ -43,6 +29,7 @@ type serverConfigService struct {
 	store    serverConfigStoreInterface
 	handlers map[ConfigName]ServerConfigHandlerInterface
 	logger   *log.Logger
+	configMu sync.Mutex
 }
 
 // newServerConfigService creates a new instance of serverConfigService. Handlers are injected at
@@ -148,6 +135,9 @@ func (s *serverConfigService) SetConfig(ctx context.Context,
 		s.logger.Debug(ctx, "Config value decode failed", log.String("name", string(name)), log.Error(err))
 		return &ErrorInvalidConfigValue
 	}
+
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
 
 	rawLayers, err := s.store.GetServerConfig(ctx, name)
 	if err != nil {

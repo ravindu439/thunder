@@ -1,45 +1,45 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"gopkg.in/yaml.v3"
+
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 const (
 	testServerURL = "https://localhost:8095"
+
+	vcExportConfigHandle     = "export_test_credential"
+	vcExportConfigVCT        = "https://credentials.thunderid.local/ExportTestCredential"
+	vcExportDefinitionHandle = "export_test_presentation"
+
+	// Seeded from resources/declarative_resources; declarative resources are
+	// excluded from wildcard export because they already live in configuration.
+	vcExportDeclarativeConfigID     = "decl-credential-config-1"
+	vcExportDeclarativeDefinitionID = "decl-presentation-def-1"
 )
 
 // ExportAPITestSuite is a test suite for export API tests.
 type ExportAPITestSuite struct {
 	suite.Suite
-	ouID string
+	ouID           string
+	vcConfigID     string
+	vcDefinitionID string
 }
 
 // TestExportAPITestSuite runs the export API test suite.
@@ -59,10 +59,56 @@ func (ts *ExportAPITestSuite) SetupSuite() {
 		ts.T().Fatalf("Failed to create test organization unit: %v", err)
 	}
 	ts.ouID = ouID
+
+	validity := 3600
+	configID, err := testutils.CreateCredentialConfiguration(testutils.CredentialConfiguration{
+		Handle:      vcExportConfigHandle,
+		OUID:        ouID,
+		Name:        "Export Test Credential",
+		Description: "Credential configuration for export testing",
+		Format:      "dc+sd-jwt",
+		VCT:         vcExportConfigVCT,
+		Claims: []testutils.ClaimMapping{
+			{Name: "given_name", DisplayName: "Given Name"},
+			{Name: "family_name", DisplayName: "Family Name"},
+		},
+		ValiditySeconds: &validity,
+	})
+	if err != nil {
+		ts.T().Fatalf("Failed to create test credential configuration: %v", err)
+	}
+	ts.vcConfigID = configID
+
+	enforceTrustedIssuer := false
+	definitionID, err := testutils.CreatePresentationDefinition(testutils.PresentationDefinition{
+		Handle:               vcExportDefinitionHandle,
+		OUID:                 ouID,
+		Name:                 "Export Test Presentation",
+		Description:          "Presentation definition for export testing",
+		VCT:                  vcExportConfigVCT,
+		Format:               "dc+sd-jwt",
+		RequestedClaims:      []string{"given_name", "family_name"},
+		MandatoryClaims:      []string{"given_name"},
+		EnforceTrustedIssuer: &enforceTrustedIssuer,
+	})
+	if err != nil {
+		ts.T().Fatalf("Failed to create test presentation definition: %v", err)
+	}
+	ts.vcDefinitionID = definitionID
 }
 
 // TearDownSuite tears down the test suite.
 func (ts *ExportAPITestSuite) TearDownSuite() {
+	if ts.vcDefinitionID != "" {
+		if err := testutils.DeletePresentationDefinition(ts.vcDefinitionID); err != nil {
+			ts.T().Logf("Failed to delete test presentation definition: %v", err)
+		}
+	}
+	if ts.vcConfigID != "" {
+		if err := testutils.DeleteCredentialConfiguration(ts.vcConfigID); err != nil {
+			ts.T().Logf("Failed to delete test credential configuration: %v", err)
+		}
+	}
 	if ts.ouID != "" {
 		if err := testutils.DeleteOrganizationUnit(ts.ouID); err != nil {
 			ts.T().Logf("Failed to delete test organization unit: %v", err)
@@ -537,9 +583,107 @@ func (ts *ExportAPITestSuite) TestExportWithInvalidIdentityProviderID() {
 	ts.Require().Error(err)
 }
 
+// TestCredentialConfigurationExport exports a credential configuration by ID and
+// verifies the emitted document carries the fields an import would need.
+func (ts *ExportAPITestSuite) TestCredentialConfigurationExport() {
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{
+		CredentialConfigurations: []string{ts.vcConfigID},
+	})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	ts.Assert().Contains(yamlContent, "resource_type: credential_configuration")
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportConfigHandle)
+	ts.Assert().Contains(yamlContent, "vct: "+vcExportConfigVCT)
+	ts.Assert().Contains(yamlContent, "format: dc+sd-jwt")
+	ts.Assert().Contains(yamlContent, "name: given_name")
+	ts.Assert().Contains(yamlContent, "name: family_name")
+}
+
+// TestPresentationDefinitionExport exports a presentation definition by ID and
+// verifies the emitted document carries its claim sets.
+func (ts *ExportAPITestSuite) TestPresentationDefinitionExport() {
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{
+		PresentationDefinitions: []string{ts.vcDefinitionID},
+	})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	ts.Assert().Contains(yamlContent, "resource_type: presentation_definition")
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportDefinitionHandle)
+	ts.Assert().Contains(yamlContent, "vct: "+vcExportConfigVCT)
+	ts.Assert().Contains(yamlContent, "given_name")
+	ts.Assert().Contains(yamlContent, "family_name")
+}
+
+// TestVCResourcesExportYAML exports both VC resource types in a single request.
+func (ts *ExportAPITestSuite) TestVCResourcesExportYAML() {
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{
+		CredentialConfigurations: []string{ts.vcConfigID},
+		PresentationDefinitions:  []string{ts.vcDefinitionID},
+	})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	ts.Assert().Contains(yamlContent, "resource_type: credential_configuration")
+	ts.Assert().Contains(yamlContent, "resource_type: presentation_definition")
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportConfigHandle)
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportDefinitionHandle)
+}
+
+// TestCredentialConfigurationExportWithWildcard exports every runtime credential
+// configuration and verifies declarative ones are excluded: they are already
+// under configuration management and must not be re-exported.
+func (ts *ExportAPITestSuite) TestCredentialConfigurationExportWithWildcard() {
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{
+		CredentialConfigurations: []string{"*"},
+	})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportConfigHandle)
+	ts.Assert().NotContains(yamlContent, vcExportDeclarativeConfigID,
+		"declarative credential configurations must be excluded from wildcard export")
+}
+
+// TestPresentationDefinitionExportWithWildcard exports every runtime presentation
+// definition and verifies declarative ones are excluded.
+func (ts *ExportAPITestSuite) TestPresentationDefinitionExportWithWildcard() {
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{
+		PresentationDefinitions: []string{"*"},
+	})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	ts.Assert().Contains(yamlContent, "handle: "+vcExportDefinitionHandle)
+	ts.Assert().NotContains(yamlContent, vcExportDeclarativeDefinitionID,
+		"declarative presentation definitions must be excluded from wildcard export")
+}
+
+// TestExportWithInvalidCredentialConfigurationID tests export with an unknown
+// credential configuration ID.
+func (ts *ExportAPITestSuite) TestExportWithInvalidCredentialConfigurationID() {
+	_, err := ts.exportResourcesYAML(ExportRequest{
+		CredentialConfigurations: []string{"11111111-2222-3333-4444-555555555555"},
+	})
+	ts.Require().Error(err)
+}
+
+// TestExportWithInvalidPresentationDefinitionID tests export with an unknown
+// presentation definition ID.
+func (ts *ExportAPITestSuite) TestExportWithInvalidPresentationDefinitionID() {
+	_, err := ts.exportResourcesYAML(ExportRequest{
+		PresentationDefinitions: []string{"11111111-2222-3333-4444-555555555555"},
+	})
+	ts.Require().Error(err)
+}
+
 // Helper functions
 
 func (ts *ExportAPITestSuite) createApplication(app Application) (string, error) {
+	if app.Type == "" {
+		app.Type = "fullstack"
+	}
 	appJSON, err := json.Marshal(app)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal application: %w", err)
@@ -749,7 +893,6 @@ func idpToConnectionBody(idp IDP) map[string]interface{} {
 		"token_endpoint":         "tokenEndpoint",
 		"userinfo_endpoint":      "userInfoEndpoint",
 		"jwks_endpoint":          "jwksEndpoint",
-		"logout_endpoint":        "logoutEndpoint",
 		"issuer":                 "issuer",
 	}
 	body := map[string]interface{}{"name": idp.Name, "description": idp.Description}
@@ -844,4 +987,138 @@ func (ts *ExportAPITestSuite) deleteIDP(idpID string) error {
 	delete(idpVendorRegistry, idpID)
 	idpVendorRegistryMu.Unlock()
 	return nil
+}
+
+// yamlValue returns the first of names present in node. The exported nested keys are snake_case today
+// while the declarative contract calls for camelCase (G13), so navigating tolerantly keeps this a
+// round-trip check rather than a characterization of the casing bug: it passes now and keeps passing once
+// G13 is fixed. Asserting on the spelling would be a tripwire test, which this plan does not use.
+func yamlValue(node map[string]interface{}, names ...string) (interface{}, bool) {
+	for _, name := range names {
+		if value, ok := node[name]; ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+// yamlMapping is yamlValue narrowed to a nested mapping.
+func yamlMapping(node map[string]interface{}, names ...string) (map[string]interface{}, bool) {
+	value, ok := yamlValue(node, names...)
+	if !ok {
+		return nil, false
+	}
+	mapping, ok := value.(map[string]interface{})
+	return mapping, ok
+}
+
+// exportPlaceholder matches the {{.VAR}} tokens the exporter substitutes for secrets, and the
+// {{ t(...) }} expressions it preserves verbatim.
+var exportPlaceholder = regexp.MustCompile(`{{[^}]*}}`)
+
+// findExportedConnection decodes every YAML document in an export bundle and returns the one whose id
+// matches. The bundle carries "# File:" comments and separates documents with ---, so it decodes as a
+// stream; but an exported secret is rendered as a bare {{.VAR}} token, which YAML reads as the start of
+// a flow mapping and rejects. The tokens are replaced with a plain scalar first, since this test is
+// about the attribute configuration rather than the placeholder syntax.
+func (ts *ExportAPITestSuite) findExportedConnection(bundle, id string) map[string]interface{} {
+	ts.T().Helper()
+	parseable := exportPlaceholder.ReplaceAllString(bundle, "__redacted__")
+	decoder := yaml.NewDecoder(strings.NewReader(parseable))
+	for {
+		var document map[string]interface{}
+		err := decoder.Decode(&document)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		ts.Require().NoError(err, "failed to decode exported YAML: %s", parseable)
+		if document == nil {
+			continue
+		}
+		if documentID, ok := document["id"].(string); ok && documentID == id {
+			return document
+		}
+	}
+	ts.Require().Fail("exported bundle did not contain connection "+id, parseable)
+	return nil
+}
+
+// AD2 verifies an attributeConfiguration survives export intact. The exported document is what a
+// declarative deployment consumes, so a section dropped or mangled here would silently un-configure a
+// connection on re-import. The whole structure is compared after parsing, because substring checks would
+// pass on a document whose values had been reordered, truncated or emptied.
+func (ts *ExportAPITestSuite) TestIdentityProviderExportPreservesAttributeConfiguration() {
+	// Targets resolve against the bootstrapped Person user type, so no fixture is needed here.
+	idpID, err := testutils.CreateIDP(testutils.IDP{
+		Name:        "Export Attr Config IDP",
+		Description: "Identity provider carrying an attribute configuration",
+		Type:        "GOOGLE",
+		Properties: []testutils.IDPProperty{
+			{Name: "client_id", Value: "export_attr_client"},
+			{Name: "client_secret", Value: "export_attr_secret", IsSecret: true},
+			{Name: "redirect_uri", Value: "https://localhost:8095/callback"},
+		},
+		AttributeConfiguration: &testutils.AttributeConfiguration{
+			UserTypeResolution: &testutils.UserTypeResolution{Default: "Person"},
+			UserTypeAttributeMappings: []testutils.UserTypeAttributeMapping{{
+				UserType: "Person",
+				Attributes: []testutils.AttributeMapping{
+					{ExternalAttribute: "given_name", LocalAttribute: "given_name"},
+					{ExternalAttribute: "family_name", LocalAttribute: "family_name"},
+				},
+			}},
+			AccountLinking: &testutils.AccountLinking{Attributes: []string{"email"}},
+		},
+	})
+	ts.Require().NoError(err)
+	defer func() {
+		ts.Require().NoError(testutils.DeleteIDP(idpID))
+	}()
+
+	yamlContent, err := ts.exportResourcesYAML(ExportRequest{Connections: []string{idpID}})
+	ts.Require().NoError(err)
+	ts.Require().NotEmpty(yamlContent)
+
+	document := ts.findExportedConnection(yamlContent, idpID)
+	config, ok := yamlMapping(document, "attributeConfiguration")
+	ts.Require().True(ok, "exported connection should carry an attributeConfiguration: %v", document)
+
+	resolution, ok := yamlMapping(config, "user_type_resolution", "userTypeResolution")
+	ts.Require().True(ok, "exported configuration should carry a resolution section: %v", config)
+	ts.Equal("Person", resolution["default"])
+
+	linking, ok := yamlMapping(config, "accountLinking", "account_linking")
+	ts.Require().True(ok, "exported configuration should carry an account-linking section: %v", config)
+	ts.Equal([]interface{}{"email"}, linking["attributes"],
+		"the account-linking list must survive export exactly")
+
+	rawMappings, ok := yamlValue(config, "user_type_attribute_mappings", "userTypeAttributeMappings")
+	ts.Require().True(ok, "exported configuration should carry mapping entries: %v", config)
+	mappings, ok := rawMappings.([]interface{})
+	ts.Require().True(ok)
+	ts.Require().Len(mappings, 1, "exactly the one configured mapping entry should be exported")
+
+	entry, ok := mappings[0].(map[string]interface{})
+	ts.Require().True(ok)
+	entryUserType, ok := yamlValue(entry, "user_type", "userType")
+	ts.Require().True(ok, "mapping entry should name its user type: %v", entry)
+	ts.Equal("Person", entryUserType)
+
+	rawAttributes, ok := entry["attributes"]
+	ts.Require().True(ok, "mapping entry should carry its attributes: %v", entry)
+	attributes, ok := rawAttributes.([]interface{})
+	ts.Require().True(ok)
+	ts.Require().Len(attributes, 2, "both configured pairs should be exported, in order")
+
+	expectedPairs := [][2]string{{"given_name", "given_name"}, {"family_name", "family_name"}}
+	for i, expected := range expectedPairs {
+		pair, ok := attributes[i].(map[string]interface{})
+		ts.Require().True(ok)
+		external, ok := yamlValue(pair, "external_attribute", "externalAttribute")
+		ts.Require().True(ok, "pair %d should name its external attribute: %v", i, pair)
+		local, ok := yamlValue(pair, "local_attribute", "localAttribute")
+		ts.Require().True(ok, "pair %d should name its local attribute: %v", i, pair)
+		ts.Equal(expected[0], external)
+		ts.Equal(expected[1], local)
+	}
 }

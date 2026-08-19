@@ -24,11 +24,12 @@ are unchanged.
 
 ```bash
 npm install
-npm run seed
 npm start
 ```
 
 The backend runs on `http://localhost:8787`.
+
+Sample flights, hotels, and trips live in memory (`src/data.js`) and are reloaded on every start, so there is no database to set up. Bookings and upgrade requests are in memory too, so they reset whenever the server restarts, including on a `npm run dev` reload.
 
 ## Endpoints
 

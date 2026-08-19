@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {screen, fireEvent, waitFor, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import type {ReactNode} from 'react';
@@ -72,20 +57,28 @@ vi.mock('@/api/useGetOrganizationUnit', () => ({
 
 // Mock update hook
 const mockMutateAsync = vi.fn();
+const mockUpdateReset = vi.fn();
+const mockUpdateHook: {
+  mutateAsync: typeof mockMutateAsync;
+  isPending: boolean;
+  error: Error | null;
+  reset: typeof mockUpdateReset;
+} = {mutateAsync: mockMutateAsync, isPending: false, error: null, reset: mockUpdateReset};
 vi.mock('@/api/useUpdateOrganizationUnit', () => ({
-  default: () => ({
-    mutateAsync: mockMutateAsync,
-    isPending: false,
-  }),
+  default: () => mockUpdateHook,
 }));
 
 // Mock delete hook
 const mockDeleteMutate = vi.fn();
+const mockDeleteReset = vi.fn();
+const mockDeleteHook: {
+  mutate: typeof mockDeleteMutate;
+  isPending: boolean;
+  error: Error | null;
+  reset: typeof mockDeleteReset;
+} = {mutate: mockDeleteMutate, isPending: false, error: null, reset: mockDeleteReset};
 vi.mock('@/api/useDeleteOrganizationUnit', () => ({
-  default: () => ({
-    mutate: mockDeleteMutate,
-    isPending: false,
-  }),
+  default: () => mockDeleteHook,
 }));
 
 // Mock child hooks
@@ -124,22 +117,12 @@ vi.mock('@thunderid/hooks', async (importOriginal) => {
 });
 
 // Mock EmojiPicker
-vi.mock('@thunderid/components', async () => {
+vi.mock('@thunderid/components', async (importOriginal) => {
   const React = await import('react');
+  const actual = await importOriginal<typeof import('@thunderid/components')>();
   return {
+    ...actual,
     EmojiPicker: vi.fn(() => null),
-    ResourceLogoDialog: vi.fn(
-      ({open, onClose, onSelect}: {open: boolean; onClose: () => void; onSelect: (value: string) => void}) => (
-        <div data-testid="resource-logo-dialog" style={{display: open ? 'block' : 'none'}}>
-          <button type="button" onClick={() => onSelect('emoji:🚀')}>
-            Select Icon
-          </button>
-          <button type="button" onClick={onClose}>
-            Close
-          </button>
-        </div>
-      ),
-    ),
     UnsavedChangesBar: vi.fn(
       ({
         message,
@@ -147,6 +130,7 @@ vi.mock('@thunderid/components', async () => {
         saveLabel,
         savingLabel,
         isSaving,
+        error = undefined,
         onReset,
         onSave,
       }: {
@@ -155,11 +139,13 @@ vi.mock('@thunderid/components', async () => {
         saveLabel: string;
         savingLabel: string;
         isSaving: boolean;
+        error?: string;
         onReset: () => void;
         onSave: () => void;
       }) => (
         <div data-testid="unsaved-changes-bar">
           <span>{message}</span>
+          {error && <span>{error}</span>}
           <button type="button" onClick={onReset}>
             {resetLabel}
           </button>
@@ -246,6 +232,12 @@ describe('OrganizationUnitEditPage', () => {
     mockMutateAsync.mockReset();
     mockRefetch.mockReset();
     mockDeleteMutate.mockReset();
+    mockUpdateReset.mockReset();
+    mockDeleteReset.mockReset();
+    mockUpdateHook.error = null;
+    mockUpdateHook.isPending = false;
+    mockDeleteHook.error = null;
+    mockDeleteHook.isPending = false;
     mockUseLocation.mockReturnValue({
       state: null,
       pathname: '/organization-units/ou-123',
@@ -331,8 +323,26 @@ describe('OrganizationUnitEditPage', () => {
     renderWithProviders(<OrganizationUnitEditPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:edit.page.errorTitle'))).toBeInTheDocument();
+      expect(screen.getByText('Failed to load organization unit information')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  it('should retry the query when Refresh is clicked on the read error state', async () => {
+    mockUseGetOrganizationUnit.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetch,
+    });
+
+    renderWithProviders(<OrganizationUnitEditPage />);
+
+    const refreshButton = await screen.findByRole('button', {name: /refresh/i});
+    fireEvent.click(refreshButton);
+
+    expect(mockRefetch).toHaveBeenCalled();
   });
 
   it('should show not found state when OU is undefined', async () => {
@@ -479,6 +489,39 @@ describe('OrganizationUnitEditPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(t('organizationUnits:edit.actions.unsavedChanges.label'))).toBeInTheDocument();
+    });
+  });
+
+  it('hides the action bar when the description is retyped back to its original value', async () => {
+    renderWithProviders(<OrganizationUnitEditPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('A test description')).toBeInTheDocument();
+    });
+
+    const openDescriptionEditor = (matchText: string): void => {
+      const editButton = screen
+        .getAllByRole('button')
+        .find((btn) => btn.querySelector('svg') && btn.closest('div')?.textContent?.includes(matchText));
+      fireEvent.click(editButton!);
+    };
+
+    openDescriptionEditor('A test description');
+    let textbox = screen.getByDisplayValue('A test description');
+    fireEvent.change(textbox, {target: {value: 'Changed description'}});
+    fireEvent.blur(textbox);
+
+    await waitFor(() => {
+      expect(screen.getByText(t('organizationUnits:edit.actions.unsavedChanges.label'))).toBeInTheDocument();
+    });
+
+    openDescriptionEditor('Changed description');
+    textbox = screen.getByDisplayValue('Changed description');
+    fireEvent.change(textbox, {target: {value: 'A test description'}});
+    fireEvent.blur(textbox);
+
+    await waitFor(() => {
+      expect(screen.queryByText(t('organizationUnits:edit.actions.unsavedChanges.label'))).not.toBeInTheDocument();
     });
   });
 
@@ -699,7 +742,7 @@ describe('OrganizationUnitEditPage', () => {
     renderWithProviders(<OrganizationUnitEditPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:edit.page.errorTitle'))).toBeInTheDocument();
     });
 
     // Click back button
@@ -801,7 +844,7 @@ describe('OrganizationUnitEditPage', () => {
     });
 
     // Back button should show the parent OU name - find by partial text
-    const backButton = screen.getByText(t('organizationUnits:edit.page.backToOU'));
+    const backButton = screen.getByText(t('organizationUnits:edit.page.backToOU', {name: 'Parent OU'}));
     fireEvent.click(backButton);
 
     await waitFor(() => {
@@ -821,7 +864,7 @@ describe('OrganizationUnitEditPage', () => {
     renderWithProviders(<OrganizationUnitEditPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      expect(screen.getByText(t('organizationUnits:edit.page.errorTitle'))).toBeInTheDocument();
     });
 
     // Click back button - should not throw
@@ -880,12 +923,18 @@ describe('OrganizationUnitEditPage', () => {
 
     renderWithProviders(<OrganizationUnitEditPage />);
 
+    fireEvent.click(screen.getByRole('tab', {name: t('organizationUnits:edit.page.tabs.advanced')}));
+
     // Open delete dialog
     await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label'))).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label')));
+    fireEvent.click(
+      screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
+    );
 
     await waitFor(() => {
       expect(screen.getByText(t('organizationUnits:delete.dialog.message'))).toBeInTheDocument();
@@ -911,12 +960,18 @@ describe('OrganizationUnitEditPage', () => {
 
     renderWithProviders(<OrganizationUnitEditPage />);
 
+    fireEvent.click(screen.getByRole('tab', {name: t('organizationUnits:edit.page.tabs.advanced')}));
+
     await waitFor(() => {
-      expect(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label'))).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
+      ).toBeInTheDocument();
     });
 
     // Open delete dialog
-    fireEvent.click(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label')));
+    fireEvent.click(
+      screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
+    );
 
     await waitFor(() => {
       expect(screen.getByText(t('organizationUnits:delete.dialog.message'))).toBeInTheDocument();
@@ -1049,10 +1104,11 @@ describe('OrganizationUnitEditPage', () => {
     });
 
     it('should update logo and close modal when logo is updated', async () => {
+      // Original logo differs from the one the picker selects ('emoji:🚀'), so this is a real change.
       mockUseGetOrganizationUnit.mockReturnValue({
         data: {
           ...mockOrganizationUnit,
-          logoUrl: 'emoji:🚀',
+          logoUrl: 'emoji:🌟',
         },
         isLoading: false,
         error: null,
@@ -1082,23 +1138,28 @@ describe('OrganizationUnitEditPage', () => {
     });
   });
 
-  describe('Delete Error and Snackbar', () => {
-    it('should show error snackbar when delete fails', async () => {
-      // Mock delete to trigger onError
-      mockDeleteMutate.mockImplementation((_id: string, options: {onError?: (err: Error) => void}) => {
-        options.onError?.(new Error('Delete failed'));
+  describe('Delete Error', () => {
+    it('should keep the dialog open and show the resolved error inline when delete fails', async () => {
+      // The dialog owns the delete mutation itself and reads its `error` state directly,
+      // rather than a parent-forwarded onError callback.
+      mockDeleteMutate.mockImplementation(() => {
+        mockDeleteHook.error = Object.assign(new Error('Delete failed'), {response: {data: {code: 'ERR'}}});
       });
 
-      renderWithProviders(<OrganizationUnitEditPage />);
+      const {rerender} = renderWithProviders(<OrganizationUnitEditPage />);
+
+      fireEvent.click(screen.getByRole('tab', {name: t('organizationUnits:edit.page.tabs.advanced')}));
 
       await waitFor(() => {
         expect(
-          screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label')),
+          screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
         ).toBeInTheDocument();
       });
 
       // Open delete dialog
-      fireEvent.click(screen.getByText(t('organizationUnits:edit.general.dangerZone.delete.button.label')));
+      fireEvent.click(
+        screen.getByRole('button', {name: t('organizationUnits:edit.general.dangerZone.delete.button.label')}),
+      );
 
       await waitFor(() => {
         expect(screen.getByText(t('organizationUnits:delete.dialog.message'))).toBeInTheDocument();
@@ -1109,10 +1170,12 @@ describe('OrganizationUnitEditPage', () => {
       const confirmDeleteButton = deleteButtons.find((btn) => btn.closest('.MuiDialog-root'));
       expect(confirmDeleteButton).toBeDefined();
       fireEvent.click(confirmDeleteButton!);
+      rerender(<OrganizationUnitEditPage />);
 
-      // Snackbar should appear with error
+      // The dialog stays open and shows the resolved error inline
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        expect(screen.getByText(t('organizationUnits:delete.dialog.message'))).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete organization unit. Please try again.')).toBeInTheDocument();
       });
     });
   });

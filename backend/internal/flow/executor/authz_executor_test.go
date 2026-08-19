@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -29,19 +14,39 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/thunder-id/thunderid/internal/entityprovider"
+	"github.com/thunder-id/thunderid/internal/flow/common"
 	"github.com/thunder-id/thunderid/tests/mocks/authnprovider/managermock"
 	"github.com/thunder-id/thunderid/tests/mocks/authzmock"
 	"github.com/thunder-id/thunderid/tests/mocks/entityprovidermock"
 	"github.com/thunder-id/thunderid/tests/mocks/flow/coremock"
+	"github.com/thunder-id/thunderid/tests/mocks/resourcemock"
 )
 
 const testExistingUser123ID = "existing-user-123"
 
-// createTestAuthzExecutor creates an authorization executor with mocks for testing
+// createTestAuthzExecutor creates an authorization executor with a permissive resource provider that
+// resolves any identifier to a resource server whose ID equals the identifier, so tests can pass a
+// readable identifier and assert on the resolved ID directly.
 func createTestAuthzExecutor(t *testing.T,
 	mockAuthzService *authzmock.AuthorizationProviderMock,
 	mockEntityProvider *entityprovidermock.EntityProviderInterfaceMock,
 	mockAuthnProvider *managermock.AuthnProviderManagerMock) *authorizationExecutor {
+	mockResource := resourcemock.NewResourceServiceInterfaceMock(t)
+	mockResource.On("GetResourceServerByIdentifier", mock.Anything, mock.Anything).
+		Return(func(_ context.Context, identifier string) *providers.ResourceServer {
+			return &providers.ResourceServer{ID: identifier, Identifier: identifier}
+		}, func(_ context.Context, _ string) *tidcommon.ServiceError { return nil }).Maybe()
+	return createTestAuthzExecutorWithResource(t, mockAuthzService, mockEntityProvider, mockAuthnProvider, mockResource)
+}
+
+// createTestAuthzExecutorWithResource creates an authorization executor with a caller-supplied resource
+// provider, used by tests that exercise default resource server resolution (an empty identifier
+// resolved by a default-aware provider).
+func createTestAuthzExecutorWithResource(t *testing.T,
+	mockAuthzService *authzmock.AuthorizationProviderMock,
+	mockEntityProvider *entityprovidermock.EntityProviderInterfaceMock,
+	mockAuthnProvider *managermock.AuthnProviderManagerMock,
+	resourceService providers.ResourceServerProvider) *authorizationExecutor {
 	mockFlowFactory := coremock.NewFlowFactoryInterfaceMock(t)
 
 	// Mock the CreateExecutor method to return a base executor
@@ -49,13 +54,14 @@ func createTestAuthzExecutor(t *testing.T,
 		[]providers.Input{}, []providers.Input{}, mock.Anything).
 		Return(createMockExecutor(t, "AuthorizationExecutor", providers.ExecutorTypeUtility))
 
-	return newAuthorizationExecutor(mockFlowFactory, mockAuthzService, mockEntityProvider, mockAuthnProvider)
+	return newAuthorizationExecutor(mockFlowFactory, mockAuthzService, mockEntityProvider, mockAuthnProvider,
+		resourceService)
 }
 
 // newAuthzAuthenticatedAuthUser creates an AuthUser that returns true for IsAuthenticated().
 func newAuthzAuthenticatedAuthUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -94,8 +100,9 @@ func TestAuthorizationExecutor_Execute_Success(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents delete:documents",
-			"groups":                `["group1", "group2"]`,
+			requestedPermissionsKey:                   "read:documents write:documents delete:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
+			"groups": `["group1", "group2"]`,
 		},
 	}
 
@@ -110,7 +117,7 @@ func TestAuthorizationExecutor_Execute_Success(t *testing.T) {
 				len(req.Evaluations[0].Subject.GroupIDs) == 2 &&
 				req.Evaluations[0].Subject.GroupIDs[0] == "group1" &&
 				req.Evaluations[0].Subject.GroupIDs[1] == "group2" &&
-				req.Evaluations[0].ResourceServer.ID == "" &&
+				req.Evaluations[0].ResourceServer.ID == "rs-1" &&
 				req.Evaluations[0].Permission.Name == "read:documents" &&
 				req.Evaluations[1].Permission.Name == "write:documents" &&
 				req.Evaluations[2].Permission.Name == "delete:documents"
@@ -134,6 +141,199 @@ func TestAuthorizationExecutor_Execute_Success(t *testing.T) {
 	mockAuthzService.AssertExpectations(t)
 }
 
+func TestAuthorizationExecutor_Execute_ScopesEvaluationToResourceServer(t *testing.T) {
+	mockAuthzService := new(authzmock.AuthorizationProviderMock)
+	mockEntityProvider := new(entityprovidermock.EntityProviderInterfaceMock)
+	mockAuthnProvider := managermock.NewAuthnProviderManagerMock(t)
+	executor := createTestAuthzExecutor(t, mockAuthzService, mockEntityProvider, mockAuthnProvider)
+
+	authUser := newAuthzAuthenticatedAuthUser()
+	ctx := &providers.NodeContext{
+		ExecutionID: "test-flow",
+		FlowType:    providers.FlowTypeAuthentication,
+		AuthUser:    authUser,
+		RuntimeData: map[string]string{
+			requestedPermissionsKey:                   "read",
+			common.RuntimeKeyResourceServerIdentifier: "rs-B",
+		},
+	}
+
+	mockAuthnProvider.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "user123"}, nil)
+	mockEntityProvider.On("GetTransitiveEntityGroups", "user123").Return(
+		[]providers.EntityGroup{}, nil)
+
+	// The evaluation must be scoped to the requested resource server.
+	mockAuthzService.On("EvaluateAccessBatch",
+		mock.Anything,
+		mock.MatchedBy(func(req providers.AccessEvaluationsRequest) bool {
+			return len(req.Evaluations) == 1 &&
+				req.Evaluations[0].ResourceServer.ID == "rs-B" &&
+				req.Evaluations[0].Permission.Name == "read"
+		})).Return(&providers.AccessEvaluationsResponse{
+		Evaluations: []providers.AccessEvaluationResponse{{Decision: false}},
+	}, nil)
+
+	resp, err := executor.Execute(ctx)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, providers.ExecComplete, resp.Status)
+	// The user holds "read" on a different resource server, so it is dropped for rs-B.
+	assert.Empty(t, resp.RuntimeData[authorizedPermissionsKey])
+
+	mockAuthzService.AssertExpectations(t)
+}
+
+func TestAuthorizationExecutor_Execute_DropsPermissionsWhenNoResourceServerBinding(t *testing.T) {
+	mockAuthzService := new(authzmock.AuthorizationProviderMock)
+	mockEntityProvider := new(entityprovidermock.EntityProviderInterfaceMock)
+	mockAuthnProvider := managermock.NewAuthnProviderManagerMock(t)
+	// No server config service, so no default resource server fallback is possible.
+	executor := createTestAuthzExecutor(t, mockAuthzService, mockEntityProvider, mockAuthnProvider)
+
+	authUser := newAuthzAuthenticatedAuthUser()
+	ctx := &providers.NodeContext{
+		ExecutionID: "test-flow",
+		FlowType:    providers.FlowTypeAuthentication,
+		AuthUser:    authUser,
+		RuntimeData: map[string]string{
+			// Permission scopes present but no resource server binding (runtime data or input) and no
+			// configured default: the executor drops the permissions instead of evaluating unscoped.
+			requestedPermissionsKey: "read write",
+		},
+	}
+
+	mockAuthnProvider.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "user123"}, nil)
+
+	resp, err := executor.Execute(ctx)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, providers.ExecComplete, resp.Status)
+	// No permission scopes are authorized when there is no resource server binding.
+	assert.Empty(t, resp.RuntimeData[authorizedPermissionsKey])
+	// The authorization service must not be consulted with an empty resource server id.
+	mockAuthzService.AssertNotCalled(t, "EvaluateAccessBatch", mock.Anything, mock.Anything)
+}
+
+func TestAuthorizationExecutor_Execute_DropsPermissionsWhenResourceServiceUnavailable(t *testing.T) {
+	// The embedded engine may construct the executor without a resource server service. A
+	// permission-bearing request that carries a resource server identifier must fail closed (drop the
+	// permissions) rather than panic on the nil service.
+	mockAuthzService := new(authzmock.AuthorizationProviderMock)
+	mockEntityProvider := new(entityprovidermock.EntityProviderInterfaceMock)
+	mockAuthnProvider := managermock.NewAuthnProviderManagerMock(t)
+
+	mockFlowFactory := coremock.NewFlowFactoryInterfaceMock(t)
+	mockFlowFactory.On("CreateExecutor", ExecutorNameAuthorization, providers.ExecutorTypeUtility,
+		[]providers.Input{}, []providers.Input{}, mock.Anything).
+		Return(createMockExecutor(t, "AuthorizationExecutor", providers.ExecutorTypeUtility))
+	// nil resource service, mirroring an embedded engine setup with no resource provider configured.
+	executor := newAuthorizationExecutor(mockFlowFactory, mockAuthzService, mockEntityProvider,
+		mockAuthnProvider, nil)
+
+	authUser := newAuthzAuthenticatedAuthUser()
+	ctx := &providers.NodeContext{
+		ExecutionID: "test-flow",
+		FlowType:    providers.FlowTypeAuthentication,
+		AuthUser:    authUser,
+		RuntimeData: map[string]string{
+			requestedPermissionsKey:                   "read write",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
+		},
+	}
+
+	mockAuthnProvider.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "user123"}, nil)
+
+	resp, err := executor.Execute(ctx)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, providers.ExecComplete, resp.Status)
+	// No permission scopes are authorized when the resource server cannot be resolved.
+	assert.Empty(t, resp.RuntimeData[authorizedPermissionsKey])
+	// The authorization service must not be consulted with an empty resource server id.
+	mockAuthzService.AssertNotCalled(t, "EvaluateAccessBatch", mock.Anything, mock.Anything)
+}
+
+func TestAuthorizationExecutor_Execute_ResourceServerFromUserInputFallback(t *testing.T) {
+	// A direct /flow/execute request supplies the resource server binding as an input (not runtime
+	// data). The executor must honor it, mirroring how requested_permissions falls back to inputs.
+	mockAuthzService := new(authzmock.AuthorizationProviderMock)
+	mockEntityProvider := new(entityprovidermock.EntityProviderInterfaceMock)
+	mockAuthnProvider := managermock.NewAuthnProviderManagerMock(t)
+	executor := createTestAuthzExecutor(t, mockAuthzService, mockEntityProvider, mockAuthnProvider)
+
+	authUser := newAuthzAuthenticatedAuthUser()
+	ctx := &providers.NodeContext{
+		ExecutionID: "test-flow",
+		FlowType:    providers.FlowTypeAuthentication,
+		AuthUser:    authUser,
+		RuntimeData: map[string]string{requestedPermissionsKey: "read"},
+		UserInputs:  map[string]string{common.RuntimeKeyResourceServerIdentifier: "rs-input"},
+	}
+
+	mockAuthnProvider.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "user123"}, nil)
+	mockEntityProvider.On("GetTransitiveEntityGroups", "user123").Return([]providers.EntityGroup{}, nil)
+	mockAuthzService.On("EvaluateAccessBatch", mock.Anything,
+		mock.MatchedBy(func(req providers.AccessEvaluationsRequest) bool {
+			return len(req.Evaluations) == 1 && req.Evaluations[0].ResourceServer.ID == "rs-input"
+		})).Return(&providers.AccessEvaluationsResponse{
+		Evaluations: []providers.AccessEvaluationResponse{{Decision: true}},
+	}, nil)
+
+	resp, err := executor.Execute(ctx)
+
+	assert.NoError(t, err)
+	assert.Equal(t, providers.ExecComplete, resp.Status)
+	assert.Equal(t, "read", resp.RuntimeData[authorizedPermissionsKey])
+	mockAuthzService.AssertExpectations(t)
+}
+
+func TestAuthorizationExecutor_Execute_DefaultResourceServerFallback(t *testing.T) {
+	// No explicit binding in runtime data or inputs: the executor falls back to the configured default
+	// resource server and scopes the evaluation to it.
+	mockAuthzService := new(authzmock.AuthorizationProviderMock)
+	mockEntityProvider := new(entityprovidermock.EntityProviderInterfaceMock)
+	mockAuthnProvider := managermock.NewAuthnProviderManagerMock(t)
+	// A default-aware provider resolves the empty identifier to the configured default resource server.
+	mockResource := resourcemock.NewResourceServiceInterfaceMock(t)
+	mockResource.On("GetResourceServerByIdentifier", mock.Anything, "").
+		Return(&providers.ResourceServer{ID: "rs-default", Identifier: "rs-default"}, nil)
+
+	executor := createTestAuthzExecutorWithResource(
+		t, mockAuthzService, mockEntityProvider, mockAuthnProvider, mockResource)
+
+	authUser := newAuthzAuthenticatedAuthUser()
+	ctx := &providers.NodeContext{
+		ExecutionID: "test-flow",
+		FlowType:    providers.FlowTypeAuthentication,
+		AuthUser:    authUser,
+		RuntimeData: map[string]string{requestedPermissionsKey: "read"},
+	}
+
+	mockAuthnProvider.On("GetEntityReference", mock.Anything, mock.Anything).
+		Return(authUser, &providers.EntityReference{EntityID: "user123"}, nil)
+	mockEntityProvider.On("GetTransitiveEntityGroups", "user123").Return([]providers.EntityGroup{}, nil)
+	mockAuthzService.On("EvaluateAccessBatch", mock.Anything,
+		mock.MatchedBy(func(req providers.AccessEvaluationsRequest) bool {
+			return len(req.Evaluations) == 1 && req.Evaluations[0].ResourceServer.ID == "rs-default"
+		})).Return(&providers.AccessEvaluationsResponse{
+		Evaluations: []providers.AccessEvaluationResponse{{Decision: true}},
+	}, nil)
+
+	resp, err := executor.Execute(ctx)
+
+	assert.NoError(t, err)
+	assert.Equal(t, providers.ExecComplete, resp.Status)
+	assert.Equal(t, "read", resp.RuntimeData[authorizedPermissionsKey])
+	mockAuthzService.AssertExpectations(t)
+}
+
 func TestAuthorizationExecutor_Execute_PartialPermissions(t *testing.T) {
 	// Setup - user requests multiple permissions but only gets some
 	mockAuthzService := new(authzmock.AuthorizationProviderMock)
@@ -147,7 +347,8 @@ func TestAuthorizationExecutor_Execute_PartialPermissions(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents delete:documents",
+			requestedPermissionsKey:                   "read:documents write:documents delete:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
 		},
 	}
 
@@ -192,7 +393,8 @@ func TestAuthorizationExecutor_Execute_NoPermissions(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents",
+			requestedPermissionsKey:                   "read:documents write:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
 		},
 	}
 
@@ -260,7 +462,8 @@ func TestAuthorizationExecutor_Execute_ServiceError(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents",
+			requestedPermissionsKey:                   "read:documents write:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
 		},
 	}
 
@@ -299,7 +502,8 @@ func TestAuthorizationExecutor_Execute_GroupExtractionError(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents",
+			requestedPermissionsKey:                   "read:documents write:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
 		},
 	}
 
@@ -486,8 +690,9 @@ func TestAuthorizationExecutor_Execute_WithMultipleGroups(t *testing.T) {
 		FlowType:    providers.FlowTypeAuthentication,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents delete:documents",
-			"groups":                `["admin", "editor", "viewer"]`,
+			requestedPermissionsKey:                   "read:documents write:documents delete:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
+			"groups": `["admin", "editor", "viewer"]`,
 		},
 	}
 
@@ -593,7 +798,8 @@ func TestAuthorizationExecutor_Execute_RegistrationFlow_UnauthenticatedWithPermi
 		ExecutionID: "test-registration-flow",
 		FlowType:    providers.FlowTypeRegistration,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:documents write:documents",
+			requestedPermissionsKey:                   "read:documents write:documents",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
 		},
 	}
 
@@ -622,8 +828,9 @@ func TestAuthorizationExecutor_Execute_RegistrationFlow_AuthenticatedWithPermiss
 		FlowType:    providers.FlowTypeRegistration,
 		AuthUser:    authUser,
 		RuntimeData: map[string]string{
-			requestedPermissionsKey: "read:profile write:profile",
-			"groups":                `["new-users"]`,
+			requestedPermissionsKey:                   "read:profile write:profile",
+			common.RuntimeKeyResourceServerIdentifier: "rs-1",
+			"groups": `["new-users"]`,
 		},
 	}
 

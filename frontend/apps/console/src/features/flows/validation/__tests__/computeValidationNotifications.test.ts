@@ -1,27 +1,17 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import type {Node} from '@xyflow/react';
+import type {Edge, Node} from '@xyflow/react';
 import {describe, it, expect, vi} from 'vitest';
 import {NotificationType} from '../../models/notification';
 import type {StepData} from '../../models/steps';
 import {computeValidationNotifications} from '../computeValidationNotifications';
-import {VALIDATION_RULES} from '../validation-rules';
+import {
+  COMMON_GRAPH_VALIDATION_RULES,
+  GRAPH_VALIDATION_RULES,
+  SIGN_OUT_GRAPH_VALIDATION_RULES,
+  VALIDATION_RULES,
+} from '../validation-rules';
 
 // Simple mock t function that returns the key
 const t = vi.fn((key: string) => key) as unknown as import('i18next').TFunction;
@@ -518,6 +508,210 @@ describe('computeValidationNotifications', () => {
 
       const notification = result.get('btn-1_REQUIRED_FIELD_ERROR')!;
       expect(notification.hasResource('btn-1')).toBe(true);
+    });
+  });
+
+  describe('SSO pairing rule', () => {
+    function createSsoCheckNode(id: string, checkpointRef?: string): Node {
+      return createNode({
+        id,
+        type: 'TASK_EXECUTION',
+        data: {
+          action: {type: 'EXECUTOR', executor: {name: 'SSOCheckExecutor'}},
+          ...(checkpointRef !== undefined ? {properties: {checkpointRef}} : {}),
+        } as unknown as StepData,
+      });
+    }
+
+    function createSessionNode(id: string): Node {
+      return createNode({
+        id,
+        type: 'TASK_EXECUTION',
+        data: {action: {type: 'EXECUTOR', executor: {name: 'SessionExecutor'}}} as unknown as StepData,
+      });
+    }
+
+    it('should not run graph rules by default (flow-type-specific opt-in)', () => {
+      const nodes = [createSsoCheckNode('sso_check_1'), createSessionNode('session_1')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t);
+
+      expect(result.size).toBe(0);
+    });
+
+    it('should not report anything for a healthy pair', () => {
+      const nodes = [createSsoCheckNode('sso_check_1', 'session_1'), createSessionNode('session_1')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, GRAPH_VALIDATION_RULES);
+
+      expect(result.size).toBe(0);
+    });
+
+    it('should report an SSO check with a missing checkpointRef', () => {
+      const nodes = [createSsoCheckNode('sso_check_1'), createSessionNode('session_1')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, GRAPH_VALIDATION_RULES);
+
+      expect(result.has('sso_check_1_SSO_MISSING_CHECKPOINT_REF')).toBe(true);
+      expect(result.get('sso_check_1_SSO_MISSING_CHECKPOINT_REF')!.getType()).toBe(NotificationType.ERROR);
+      // The session is unreferenced as a consequence.
+      expect(result.has('session_1_SSO_ORPHAN_SESSION')).toBe(true);
+    });
+
+    it('should report an SSO check whose checkpointRef points to a deleted session', () => {
+      const nodes = [createSsoCheckNode('sso_check_1', 'session_gone')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, GRAPH_VALIDATION_RULES);
+
+      expect(result.has('sso_check_1_SSO_INVALID_CHECKPOINT_REF')).toBe(true);
+    });
+
+    it('should report a session node not referenced by any SSO check', () => {
+      const nodes = [createSessionNode('session_1')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, GRAPH_VALIDATION_RULES);
+
+      expect(result.has('session_1_SSO_ORPHAN_SESSION')).toBe(true);
+      const notification = result.get('session_1_SSO_ORPHAN_SESSION')!;
+      expect(notification.getType()).toBe(NotificationType.ERROR);
+      expect(notification.hasResource('session_1')).toBe(true);
+    });
+  });
+  describe('Sign-out confirmation action rule', () => {
+    const signOutButtonNode = (nodeId: string, buttonId: string): Node =>
+      createNode({
+        id: nodeId,
+        data: {
+          components: [
+            {
+              id: 'block_1',
+              type: 'BLOCK',
+              category: 'BLOCK',
+              components: [
+                {id: buttonId, type: 'ACTION', category: 'ACTION', eventType: 'SUBMIT', actionType: 'CONFIRM'},
+              ],
+            },
+          ],
+        } as unknown as StepData,
+      });
+
+    const signOutExecutorNode = (nodeId: string): Node =>
+      createNode({
+        id: nodeId,
+        data: {action: {executor: {name: 'SessionSignOutExecutor'}}} as unknown as StepData,
+      });
+
+    const edge = (source: string, sourceHandle: string, target: string) =>
+      ({id: `${source}-${target}`, source, sourceHandle, target}) as Edge;
+
+    it('should accept a sign-out button wired to a session sign-out step', () => {
+      const nodes = [signOutButtonNode('prompt_1', 'action_confirm'), signOutExecutorNode('session_signout')];
+      const edges = [edge('prompt_1', 'action_confirm_NEXT', 'session_signout')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, SIGN_OUT_GRAPH_VALIDATION_RULES, edges);
+
+      expect(result.has('action_confirm_SIGN_OUT_CONFIRM_INVALID_TARGET')).toBe(false);
+      expect(result.has('action_confirm_SIGN_OUT_CONFIRM_NOT_CONNECTED')).toBe(false);
+    });
+
+    it('should report a sign-out button that leads somewhere else', () => {
+      const nodes = [
+        signOutButtonNode('prompt_1', 'action_confirm'),
+        signOutExecutorNode('session_signout'),
+        createNode({id: 'some_other_step'}),
+      ];
+      const edges = [edge('prompt_1', 'action_confirm_NEXT', 'some_other_step')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, SIGN_OUT_GRAPH_VALIDATION_RULES, edges);
+
+      const notification = result.get('action_confirm_SIGN_OUT_CONFIRM_INVALID_TARGET')!;
+      expect(notification).toBeDefined();
+      // Semantically wrong rather than structurally broken: it must not block
+      // saving, and it highlights the button itself rather than the step.
+      expect(notification.getType()).toBe(NotificationType.WARNING);
+      expect(notification.hasResource('action_confirm')).toBe(true);
+    });
+
+    it('should report a sign-out button with no outgoing connection', () => {
+      const nodes = [signOutButtonNode('prompt_1', 'action_confirm'), signOutExecutorNode('session_signout')];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, SIGN_OUT_GRAPH_VALIDATION_RULES, []);
+
+      const notification = result.get('action_confirm_SIGN_OUT_CONFIRM_NOT_CONNECTED')!;
+      expect(notification).toBeDefined();
+      expect(notification.getType()).toBe(NotificationType.WARNING);
+      expect(notification.hasResource('action_confirm')).toBe(true);
+    });
+
+    it('should ignore buttons that do not raise the sign-out action', () => {
+      const nodes = [
+        createNode({
+          id: 'prompt_1',
+          data: {
+            components: [{id: 'action_next', type: 'ACTION', category: 'ACTION', eventType: 'SUBMIT'}],
+          } as unknown as StepData,
+        }),
+      ];
+
+      const result = computeValidationNotifications(nodes, VALIDATION_RULES, t, SIGN_OUT_GRAPH_VALIDATION_RULES, []);
+
+      // Element-level rules may still report on the button; only the sign-out
+      // rule must stay silent.
+      const signOutIds = [...result.keys()].filter((id) => id.includes('SIGN_OUT_CONFIRM'));
+      expect(signOutIds).toEqual([]);
+    });
+  });
+
+  describe('Rich text action wiring rule', () => {
+    const NOTIFICATION_ID = 'rt_1_RICH_TEXT_ACTION_NOT_CONNECTED';
+
+    const richText = (action: unknown): Record<string, unknown> => ({
+      id: 'rt_1',
+      type: 'RICH_TEXT',
+      category: 'DISPLAY',
+      action,
+      label: '<p><a href="#" data-action-ref="action_recovery">Reset</a></p>',
+    });
+
+    const compute = (nodes: Node[], edges: Edge[] = []) =>
+      computeValidationNotifications(nodes, VALIDATION_RULES, t, COMMON_GRAPH_VALIDATION_RULES, edges);
+
+    it('should accept a link wired to a step', () => {
+      const nodes = [createElementNode('prompt_1', [richText({ref: 'action_recovery'})]), createNode({id: 'call_1'})];
+      const edges = [{id: 'e-1', source: 'prompt_1', sourceHandle: 'rt_1_NEXT', target: 'call_1'} as Edge];
+
+      expect(compute(nodes, edges).has(NOTIFICATION_ID)).toBe(false);
+    });
+
+    it('should report a link whose target step was deleted', () => {
+      // React Flow drops the edge and leaves `action.ref` in place, so the link keeps
+      // dispatching a ref that no longer resolves to a prompt.
+      const result = compute([createElementNode('prompt_1', [richText({ref: 'action_recovery'})])]);
+
+      const notification = result.get(NOTIFICATION_ID)!;
+      expect(notification).toBeDefined();
+      // Must not block saving: saving is how the author fixes the rest of the flow.
+      expect(notification.getType()).toBe(NotificationType.WARNING);
+      expect(notification.hasResource('rt_1')).toBe(true);
+    });
+
+    it('should report a link nested inside a block', () => {
+      const nodes = [
+        createElementNode('prompt_1', [
+          {id: 'block_1', type: 'BLOCK', category: 'BLOCK', components: [richText({ref: 'action_recovery'})]},
+        ]),
+      ];
+
+      expect(compute(nodes).has(NOTIFICATION_ID)).toBe(true);
+    });
+
+    it('should ignore a rich text whose action was toggled off', () => {
+      expect(compute([createElementNode('prompt_1', [richText(null)])]).has(NOTIFICATION_ID)).toBe(false);
+    });
+
+    it('should ignore a plain rich text and one carrying an empty ref', () => {
+      expect(compute([createElementNode('prompt_1', [richText(undefined)])]).has(NOTIFICATION_ID)).toBe(false);
+      expect(compute([createElementNode('prompt_1', [richText({ref: ''})])]).has(NOTIFICATION_ID)).toBe(false);
     });
   });
 });

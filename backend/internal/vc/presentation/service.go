@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package presentation
 
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/thunder-id/thunderid/internal/ou"
@@ -347,6 +333,28 @@ func validateDefinition(dto *PresentationDefinitionDTO) *tidcommon.ServiceError 
 	}
 	if dto.Format != DefaultCredentialFormat {
 		return &ErrorDefinitionUnsupportedFormat
+	}
+	if svcErr := validateClaimNames(dto.RequestedClaims); svcErr != nil {
+		return svcErr
+	}
+	return validateClaimNames(slices.Concat(dto.MandatoryClaims, dto.OptionalClaims))
+}
+
+// validateClaimNames enforces non-empty, unique claim names within one requested list. The
+// mandatory and optional lists are checked as a single list, since a name may not appear as both:
+// the two carry contradictory disclosure requirements. RequestedClaims is checked on its own,
+// because it is the full set those two partition and so legitimately repeats their names.
+func validateClaimNames(claims []string) *tidcommon.ServiceError {
+	seen := make(map[string]bool, len(claims))
+	for _, claim := range claims {
+		name := strings.TrimSpace(claim)
+		if name == "" {
+			return &ErrorDefinitionEmptyClaimName
+		}
+		if seen[name] {
+			return ErrorDefinitionDuplicateClaim.WithParams(map[string]string{"claim": name})
+		}
+		seen[name] = true
 	}
 	return nil
 }

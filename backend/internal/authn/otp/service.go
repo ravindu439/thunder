@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package otp implements the OTP authentication service.
 package otp
@@ -40,7 +25,7 @@ const (
 // OTPAuthnServiceInterface defines the interface for OTP authentication operations.
 // Authenticate returns an error only for actual failures; a missing local user is NOT an error.
 type OTPAuthnServiceInterface interface {
-	GenerateOTP(ctx context.Context, recipient, recipientAttr string) (
+	GenerateOTP(ctx context.Context, recipient, recipientAttr string, otpCfg *notifcommon.OTPConfig) (
 		sessionToken string, otpValue string, expirySeconds int64, svcErr *tidcommon.ServiceError)
 	Authenticate(ctx context.Context, sessionToken, otp string) (*common.AuthnResult, *tidcommon.ServiceError)
 }
@@ -59,7 +44,8 @@ func newOTPAuthnService(notifOTPSvc notification.OTPServiceInterface) OTPAuthnSe
 
 // GenerateOTP validates the recipient and delegates OTP generation to the notification service.
 func (s *otpAuthnService) GenerateOTP(ctx context.Context,
-	recipient, recipientAttr string) (string, string, int64, *tidcommon.ServiceError) {
+	recipient, recipientAttr string, otpCfg *notifcommon.OTPConfig) (
+	string, string, int64, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, loggerComponentName))
 	logger.Debug(ctx, "Generating OTP", log.MaskedString("recipient", recipient))
 
@@ -71,7 +57,8 @@ func (s *otpAuthnService) GenerateOTP(ctx context.Context,
 		recipientAttr = authnprovidercm.UserAttributeUserID
 	}
 
-	sessionToken, otpValue, expirySeconds, svcErr := s.notifOTPService.GenerateOTP(ctx, recipient, recipientAttr)
+	sessionToken, otpValue, expirySeconds, svcErr :=
+		s.notifOTPService.GenerateOTP(ctx, recipient, recipientAttr, otpCfg)
 	if svcErr != nil {
 		if svcErr.Type == tidcommon.ClientErrorType {
 			return "", "", 0, &ErrorClientErrorFromOTPService

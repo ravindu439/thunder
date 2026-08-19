@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   Box,
@@ -75,6 +60,7 @@ export default function McpCapabilitiesPanel({resourceServer, onRefresh}: McpCap
 
   const isLoading = loadingActions;
   const isEmpty = serverActions.length === 0;
+  const readOnly = Boolean(resourceServer.isReadOnly);
 
   const effectiveSelectedNode = useMemo<SelectedNode | null>(() => {
     if (selectedNode) return selectedNode;
@@ -127,7 +113,7 @@ export default function McpCapabilitiesPanel({resourceServer, onRefresh}: McpCap
           >
             {t('resourceServers:mcp.panel.title', 'Capabilities')}
           </Typography>
-          {(!isEmpty || isLoading) && (
+          {!readOnly && (!isEmpty || isLoading) && (
             <>
               <IconButton
                 size="small"
@@ -241,34 +227,38 @@ export default function McpCapabilitiesPanel({resourceServer, onRefresh}: McpCap
               }}
             >
               <Typography variant="body2" color="text.disabled" sx={{mb: 3, textAlign: 'center', maxWidth: 360}}>
-                {t(
-                  'resourceServers:mcp.empty',
-                  'No capabilities have been added to this MCP server yet. Add tool permissions to control which tools can be invoked, or resource permissions to control access to data sources.',
-                )}
+                {readOnly
+                  ? t('resourceServers:mcp.emptyReadOnly', 'No capabilities are defined for this MCP server.')
+                  : t(
+                      'resourceServers:mcp.empty',
+                      'No capabilities have been added to this MCP server yet. Add tool permissions to control which tools can be invoked, or resource permissions to control access to data sources.',
+                    )}
               </Typography>
-              <Stack spacing={1.5} alignItems="center" sx={{width: '100%', maxWidth: 280}}>
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<Wrench size={16} />}
-                  onClick={() => openAdd('mcp-server-tool')}
-                >
-                  {t('resourceServers:mcp.addTool', 'Add tool permission')}
-                </Button>
-                <Divider sx={{width: '100%'}}>
-                  <Typography variant="caption" color="text.disabled">
-                    {t('common:or', 'or')}
-                  </Typography>
-                </Divider>
-                <Button
-                  variant="outlined"
-                  fullWidth
-                  startIcon={<Database size={16} />}
-                  onClick={() => openAdd('mcp-server-resource')}
-                >
-                  {t('resourceServers:mcp.addResource', 'Add resource permission')}
-                </Button>
-              </Stack>
+              {!readOnly && (
+                <Stack spacing={1.5} alignItems="center" sx={{width: '100%', maxWidth: 280}}>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    startIcon={<Wrench size={16} />}
+                    onClick={() => openAdd('mcp-server-tool')}
+                  >
+                    {t('resourceServers:mcp.addTool', 'Add tool permission')}
+                  </Button>
+                  <Divider sx={{width: '100%'}}>
+                    <Typography variant="caption" color="text.disabled">
+                      {t('common:or', 'or')}
+                    </Typography>
+                  </Divider>
+                  <Button
+                    variant="outlined"
+                    fullWidth
+                    startIcon={<Database size={16} />}
+                    onClick={() => openAdd('mcp-server-resource')}
+                  >
+                    {t('resourceServers:mcp.addResource', 'Add resource permission')}
+                  </Button>
+                </Stack>
+              )}
             </Box>
           ) : (
             filteredServerActions.map((action) => (
@@ -279,6 +269,7 @@ export default function McpCapabilitiesPanel({resourceServer, onRefresh}: McpCap
                 depth={0}
                 selectedNodeId={effectiveSelectedNode?.id ?? null}
                 onSelect={setSelectedNode}
+                readOnly={readOnly}
               />
             ))
           )}

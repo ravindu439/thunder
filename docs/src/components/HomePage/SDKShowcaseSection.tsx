@@ -1,27 +1,11 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import Link from '@docusaurus/Link';
+import {AndroidLogo, FlutterLogo} from '@thunderid/components';
 import {Box, Container, Typography} from '@wso2/oxygen-ui';
 import {JSX, useState} from 'react';
-import AndroidLogo from '../icons/AndroidLogo';
 import ExpressLogo from '../icons/ExpressLogo';
-import FlutterLogo from '../icons/FlutterLogo';
 import IOSLogo from '../icons/IOSLogo';
 import JavaScriptLogo from '../icons/JavaScriptLogo';
 import NextLogo from '../icons/NextLogo';
@@ -29,6 +13,7 @@ import NodeLogo from '../icons/NodeLogo';
 import NuxtLogo from '../icons/NuxtLogo';
 import ReactLogo from '../icons/ReactLogo';
 import VueLogo from '../icons/VueLogo';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 import useIsDarkMode from '@site/src/hooks/useIsDarkMode';
 
 const SDKS = [
@@ -36,61 +21,61 @@ const SDKS = [
     name: 'React',
     packageName: '@thunderid/react',
     icon: ReactLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/react',
+    href: '/docs/next/getting-started/connect-your-application/react',
   },
   {
     name: 'Next.js',
     packageName: '@thunderid/nextjs',
     icon: NextLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/nextjs',
+    href: '/docs/next/getting-started/connect-your-application/nextjs',
   },
   {
     name: 'Express',
     packageName: '@thunderid/express',
     icon: ExpressLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/express',
+    href: '/docs/next/getting-started/connect-your-application/express',
   },
   {
     name: 'Vue',
     packageName: '@thunderid/vue',
     icon: VueLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/vue',
+    href: '/docs/next/getting-started/connect-your-application/vue',
   },
   {
     name: 'Nuxt',
     packageName: '@thunderid/nuxt',
     icon: NuxtLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/nuxt',
+    href: '/docs/next/getting-started/connect-your-application/nuxt',
   },
   {
     name: 'Node.js',
     packageName: '@thunderid/node',
     icon: NodeLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/node',
+    href: '/docs/next/getting-started/connect-your-application/node',
   },
   {
     name: 'Vanilla JavaScript',
     packageName: '@thunderid/browser',
     icon: JavaScriptLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/browser',
+    href: '/docs/next/getting-started/connect-your-application/browser',
   },
   {
     name: 'iOS',
     packageName: 'ThunderID',
     icon: IOSLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/ios',
+    href: '/docs/next/getting-started/connect-your-application/ios',
   },
   {
     name: 'Android',
     packageName: 'dev.thunderid:compose',
     icon: AndroidLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/android',
+    href: '/docs/next/getting-started/connect-your-application/android',
   },
   {
     name: 'Flutter',
     packageName: 'thunderid_flutter',
     icon: FlutterLogo,
-    href: '/docs/next/guides/getting-started/connect-your-application/flutter',
+    href: '/docs/next/getting-started/connect-your-application/flutter',
   },
 ];
 
@@ -98,6 +83,7 @@ export default function SDKShowcaseSection(): JSX.Element {
    
   const [hoveredIndex, rawSet] = useState<number | null>(null);
   const isDark = useIsDarkMode();
+  const docsUrl = useDocsUrl();
   const setHoveredIndex = rawSet as (v: number | null) => void;
   const isHovering = hoveredIndex !== null;
   const hoveredSdk = SDKS.find((_, i) => i === hoveredIndex);
@@ -213,7 +199,7 @@ export default function SDKShowcaseSection(): JSX.Element {
                 const isActive = hoveredIndex === index;
 
                 return (
-                  <Link key={sdk.name} to={sdk.href} title={sdk.name} style={{textDecoration: 'none', display: 'block'}}>
+                  <Link key={sdk.name} to={docsUrl(sdk.href)} title={sdk.name} style={{textDecoration: 'none', display: 'block'}}>
                     <Box
                       onMouseEnter={() => {
                         setHoveredIndex(index);

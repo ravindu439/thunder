@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {ConnectionFieldDef} from '../config/connectionFormFields';
 import type {ConnectionRequest, ConnectionResponse} from '../models/connection';
@@ -26,12 +11,13 @@ export const MASKED_SECRET = '******';
 export type ConnectionFormValues = Record<string, string>;
 
 /**
- * Build empty form values for a create form (all fields blank except the derived redirect URI).
+ * Build empty form values for a create form (all fields blank except the derived redirect URI
+ * and fields carrying a default value).
  */
 export function emptyFormValues(fields: ConnectionFieldDef[], redirectUri: string): ConnectionFormValues {
   const values: ConnectionFormValues = {};
   for (const field of fields) {
-    values[field.name] = field.name === 'redirectUri' ? redirectUri : '';
+    values[field.name] = field.name === 'redirectUri' ? redirectUri : (field.defaultValue ?? '');
   }
   return values;
 }
@@ -39,7 +25,8 @@ export function emptyFormValues(fields: ConnectionFieldDef[], redirectUri: strin
 /**
  * Map a fetched connection response into editable form values. Secrets are never prefilled
  * (the masked "******" is display-only and handled by the secret field's "stored" state).
- * The redirect URI falls back to the derived value if the API didn't store one.
+ * The redirect URI falls back to the derived value if the API didn't store one; other fields
+ * fall back to their default value.
  */
 export function responseToFormValues(
   response: ConnectionResponse,
@@ -65,7 +52,7 @@ export function responseToFormValues(
       values[field.name] = raw === true ? 'true' : 'false';
       continue;
     }
-    values[field.name] = typeof raw === 'string' ? raw : '';
+    values[field.name] = typeof raw === 'string' && raw !== '' ? raw : (field.defaultValue ?? '');
   }
   return values;
 }

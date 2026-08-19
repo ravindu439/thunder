@@ -1,34 +1,15 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 
-	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/error/apierror"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
@@ -95,111 +76,6 @@ func buildCombinedResources(files []ExportFile) string {
 	}
 
 	return builder.String()
-}
-
-// HandleExportZipRequest handles the export request and returns a ZIP file containing all resources.
-func (eh *exportHandler) HandleExportZipRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "ExportHandler"))
-
-	exportRequest, err := sysutils.DecodeJSONBody[ExportRequest](r)
-	if err != nil {
-		errResp := apierror.ErrorResponse{
-			Code:        ErrorInvalidRequest.Code,
-			Message:     ErrorInvalidRequest.Error,
-			Description: ErrorInvalidRequest.ErrorDescription,
-		}
-		sysutils.WriteErrorResponse(ctx, w, http.StatusBadRequest, errResp)
-		return
-	}
-
-	// Export resources using the export service
-	exportResponse, svcErr := eh.service.ExportResources(ctx, exportRequest)
-	if svcErr != nil {
-		if svcErr.Type == tidcommon.ServerErrorType {
-			logger.Error(ctx, "Error exporting resources", log.Any("serviceError", svcErr))
-		}
-		eh.handleError(ctx, w, svcErr)
-		return
-	}
-
-	// Generate ZIP file and send response
-	if err := eh.generateAndSendZipResponse(ctx, w, logger, exportResponse); err != nil {
-		logger.Error(ctx, "Error generating ZIP response", log.Error(err))
-		errResp := apierror.ErrorResponse{
-			Code:        tidcommon.InternalServerError.Code,
-			Message:     tidcommon.InternalServerError.Error,
-			Description: tidcommon.InternalServerError.ErrorDescription,
-		}
-		sysutils.WriteErrorResponse(ctx, w, http.StatusInternalServerError, errResp)
-		return
-	}
-}
-
-// generateAndSendZipResponse creates a ZIP file from export files and sends it as HTTP response.
-func (eh *exportHandler) generateAndSendZipResponse(ctx context.Context,
-	w http.ResponseWriter, logger *log.Logger, exportResponse *ExportResponse) error {
-	// Create ZIP file in memory
-	var zipBuffer bytes.Buffer
-	zipWriter := zip.NewWriter(&zipBuffer)
-
-	// Add each file to the ZIP
-	for _, file := range exportResponse.Files {
-		// Create the full path within the ZIP
-		zipPath := file.FileName
-		if file.FolderPath != "" {
-			zipPath = file.FolderPath + "/" + file.FileName
-		}
-
-		fileWriter, err := zipWriter.Create(zipPath)
-		if err != nil {
-			logger.Error(ctx, "Error creating file in ZIP", log.String("zipPath", zipPath), log.Error(err))
-			return fmt.Errorf("failed to create file in ZIP: %w", err)
-		}
-
-		if _, err := fileWriter.Write([]byte(file.Content)); err != nil {
-			logger.Error(ctx, "Error writing file content to ZIP",
-				log.String("zipPath", zipPath), log.Error(err))
-			return fmt.Errorf("failed to write content to ZIP: %w", err)
-		}
-	}
-
-	if exportResponse.EnvFile != nil {
-		envWriter, err := zipWriter.Create(exportResponse.EnvFile.FileName)
-		if err != nil {
-			logger.Error(ctx, "Error creating env file in ZIP",
-				log.String("fileName", exportResponse.EnvFile.FileName),
-				log.Error(err))
-			return fmt.Errorf("failed to create env file in ZIP: %w", err)
-		}
-
-		if _, err = envWriter.Write([]byte(exportResponse.EnvFile.Content)); err != nil {
-			logger.Error(ctx, "Error writing env file content to ZIP",
-				log.String("fileName", exportResponse.EnvFile.FileName),
-				log.Error(err))
-			return fmt.Errorf("failed to write env file content to ZIP: %w", err)
-		}
-	}
-
-	// Close the ZIP writer
-	if err := zipWriter.Close(); err != nil {
-		logger.Error(ctx, "Error closing ZIP writer", log.Error(err))
-		return fmt.Errorf("failed to close ZIP writer: %w", err)
-	}
-
-	// Set headers for ZIP file download
-	w.Header().Set(serverconst.ContentTypeHeaderName, "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename=exported_resources.zip")
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", zipBuffer.Len()))
-	w.WriteHeader(http.StatusOK)
-
-	// Write the ZIP content
-	if _, err := w.Write(zipBuffer.Bytes()); err != nil {
-		logger.Error(ctx, "Error writing ZIP response", log.Error(err))
-		return fmt.Errorf("failed to write ZIP response: %w", err)
-	}
-
-	return nil
 }
 
 // handleError handles service errors and sends appropriate HTTP responses.

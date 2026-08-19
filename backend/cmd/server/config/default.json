@@ -33,7 +33,7 @@
       "type": "sqlite",
       "sqlite": {
         "path": "database/configdb.db",
-        "options": "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)",
+        "options": "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
         "max_open_conns": 500,
         "max_idle_conns": 100,
         "conn_max_lifetime": 3600,
@@ -46,7 +46,7 @@
       "type": "sqlite",
       "sqlite": {
         "path": "database/runtime_transient.db",
-        "options": "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)",
+        "options": "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
         "max_open_conns": 500,
         "max_idle_conns": 100,
         "conn_max_lifetime": 3600,
@@ -72,7 +72,7 @@
       "type": "sqlite",
       "sqlite": {
         "path": "database/entitydb.db",
-        "options": "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)",
+        "options": "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
         "max_open_conns": 500,
         "max_idle_conns": 100,
         "conn_max_lifetime": 3600,
@@ -85,7 +85,7 @@
       "type": "sqlite",
       "sqlite": {
         "path": "database/runtime_persistent.db",
-        "options": "_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)",
+        "options": "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)",
         "max_open_conns": 500,
         "max_idle_conns": 100,
         "conn_max_lifetime": 3600,
@@ -125,14 +125,18 @@
   },
   "oauth": {
     "refresh_token": {
-      "renew_on_grant": false,
+      "renew_on_grant": true,
       "revoke_previous_on_renew": true,
       "validity_period": 86400
     },
     "authorization_code": {
       "validity_period": 600
     },
+    "authorization_request": {
+      "validity_period": 3600
+    },
     "dcr": {
+      "enabled" : true,
       "insecure": false
     },
     "par": {
@@ -146,11 +150,29 @@
       "allowed_algs": ["ES256", "PS256", "ES384", "ES512", "EdDSA", "RS256"],
       "max_jti_length": 256
     },
-    "allow_wildcard_redirect_uri": false
+    "allow_wildcard_redirect_uri": false,
+    "send_server_errors_to_client": false,
+    "allowed_auth_methods" :["client_secret_basic", "client_secret_post", "private_key_jwt", "none"],
+    "allowed_response_types" : ["code"],
+    "allowed_grant_types" : ["client_credentials", "authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:token-exchange", "urn:openid:params:grant-type:ciba", "urn:ietf:params:oauth:grant-type:jwt-bearer"],
+    "token_revocation" : {
+      "enabled" : true
+    },
+    "logout" : {
+      "enabled" : true
+    },
+    "revocation": {
+      "token_family": {
+        "on_refresh_replay": true,
+        "on_explicit_revoke": true,
+        "on_code_replay": true
+      }
+    },
+    "token_exchange": {
+      "token_family": "none"
+    }
   },
   "flow": {
-    "default_auth_flow_handle": "default-flow",
-    "user_onboarding_flow_handle": "default-flow",
     "max_version_history": 10,
     "auto_infer_registration": false,
     "store": "composite"
@@ -253,6 +275,11 @@
       }
     ]
   },
+  "attribute_cache": {
+    "encryption": {
+      "enabled": false
+    }
+  },
   "resource": {
     "default_delimiter": ":",
     "store": "composite"
@@ -285,8 +312,9 @@
     "store": "composite"
   },
   "authn_provider": {
-    "type": "default",
     "rest": {
+      "enabled": false,
+      "credential_types": [],
       "base_url": "",
       "timeout": 10,
       "correlation_id_header": "X-Correlation-ID",
@@ -320,7 +348,8 @@
     "key_binding_max_age_seconds": 300,
     "result_token_validity_seconds": 300,
     "enforce_key_binding": true,
-    "trusted_anchors": []
+    "trusted_anchors": [],
+    "store": "composite"
   },
   "openid4vci": {
     "signing_key_id": "ecdsa-key",
@@ -328,7 +357,8 @@
     "proof_max_age_seconds": 300,
     "credential_validity_seconds": 2592000,
     "batch_size": 5,
-    "enforce_scope": false
+    "enforce_scope": false,
+    "store": "composite"
   },
   "attestation": {
     "apple": {

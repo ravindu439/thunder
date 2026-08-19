@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, userEvent, fireEvent} from '@thunderid/test-utils';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -140,6 +125,19 @@ describe('GetStartedPage', () => {
     expect(screen.getByText(/common:welcome\.getStarted\.options\.onboardApp\.description/i)).toBeInTheDocument();
   });
 
+  it('renders secure AI agent option as an available action', () => {
+    render(<GetStartedPage />);
+    expect(screen.getByText('common:welcome.getStarted.options.secureAiAgent.title')).toBeInTheDocument();
+    expect(screen.getByText('common:welcome.getStarted.options.secureAiAgent.action')).toBeInTheDocument();
+    expect(screen.queryByText('common:welcome.getStarted.options.comingSoon')).not.toBeInTheDocument();
+  });
+
+  it('renders secure MCP option as an available action', () => {
+    render(<GetStartedPage />);
+    expect(screen.getByText('common:welcome.getStarted.options.secureMcp.title')).toBeInTheDocument();
+    expect(screen.getByText('common:welcome.getStarted.options.secureMcp.action')).toBeInTheDocument();
+  });
+
   it('renders skip to console button', () => {
     render(<GetStartedPage />);
     expect(screen.getByText('common:welcome.getStarted.actions.skipToConsole')).toBeInTheDocument();
@@ -153,6 +151,24 @@ describe('GetStartedPage', () => {
     await user.click(actionButton);
 
     expect(mockNavigate).toHaveBeenCalledWith('/welcome/get-started/applications/types');
+  });
+
+  it('navigates to the welcome-scoped agent wizard on secure AI agent click', async () => {
+    const user = userEvent.setup();
+    render(<GetStartedPage />);
+
+    await user.click(screen.getByText('common:welcome.getStarted.options.secureAiAgent.action'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/welcome/get-started/agents/create');
+  });
+
+  it('navigates to the MCP client template on secure MCP click', async () => {
+    const user = userEvent.setup();
+    render(<GetStartedPage />);
+
+    await user.click(screen.getByText('common:welcome.getStarted.options.secureMcp.action'));
+
+    expect(mockNavigate).toHaveBeenCalledWith('/welcome/get-started/applications/types?type=MCP_CLIENT');
   });
 
   it('navigates to /home and sets session storage on skip', async () => {

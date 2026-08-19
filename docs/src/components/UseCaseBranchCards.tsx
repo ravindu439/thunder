@@ -1,26 +1,13 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {useActiveVersion} from '@docusaurus/plugin-content-docs/client';
 import {Box} from '@wso2/oxygen-ui';
 import {Bot, Building2, Fingerprint} from '@wso2/oxygen-ui-icons-react';
 import React from 'react';
 
 import UseCaseBranchCard from './UseCaseBranchCard';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 
 interface BranchCard {
   href: string;
@@ -32,6 +19,7 @@ interface BranchCard {
   title: string;
   description: string;
   bullets: string[];
+  hiddenInVersions?: string[];
 }
 
 const cards: BranchCard[] = [
@@ -66,6 +54,7 @@ const cards: BranchCard[] = [
       'You need org-scoped roles, policies, and branding',
       'Enterprise SSO or federated identity is required',
     ],
+    hiddenInVersions: ['v1.0.x'],
   },
   {
     href: '/docs/next/use-cases/ai-agents/overview',
@@ -86,21 +75,24 @@ const cards: BranchCard[] = [
 ];
 
 export default function UseCaseBranchCards() {
+  const docsUrl = useDocsUrl();
+  const activeVersion = useActiveVersion(undefined);
+  const visibleCards = cards.filter((card) => !card.hiddenInVersions?.includes(activeVersion?.name ?? ''));
   return (
     <Box
       sx={{
         display: 'flex',
         flexWrap: 'wrap',
         gap: '1.25rem',
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
         maxWidth: '900px',
         width: '100%',
       }}
     >
-      {cards.map((card) => (
+      {visibleCards.map((card) => (
         <UseCaseBranchCard
           key={card.href}
-          href={card.href}
+          href={docsUrl(card.href)}
           animationDelay={card.animationDelay}
           icon={card.icon}
           accentColor={card.accentColor}

@@ -7,14 +7,13 @@
     "thunderid",
     "contexts",
     "react",
-    "shareable",
-    "wso2"
+    "shareable"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/packages/contexts#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/cjs/index.cjs",
@@ -46,6 +45,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lib.json"
   },
@@ -53,19 +53,20 @@
     "@playwright/test": "catalog:",
     "@thunderid/eslint-plugin": "workspace:^",
     "@thunderid/prettier-config": "workspace:^",
-    "@vitest/browser-playwright": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
     "@wso2/oxygen-ui": "catalog:",
     "eslint": "catalog:",
+    "playwright": "catalog:",
     "prettier": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
-    "playwright": "catalog:",
     "vitest": "catalog:"
   },
   "publishConfig": {

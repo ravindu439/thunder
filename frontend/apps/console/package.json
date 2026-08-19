@@ -6,14 +6,13 @@
   "keywords": [
     "thunderid",
     "console",
-    "app",
-    "wso2"
+    "app"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/apps/console#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -63,12 +62,19 @@
     "@thunderid/design": "workspace:^",
     "@thunderid/hooks": "workspace:^",
     "@thunderid/configure-agent-types": "workspace:^",
+    "@thunderid/configure-applications": "workspace:^",
     "@thunderid/configure-connections": "workspace:^",
+    "@thunderid/configure-design": "workspace:^",
+    "@thunderid/configure-groups": "workspace:^",
+    "@thunderid/configure-import-export": "workspace:^",
+    "@thunderid/configure-roles": "workspace:^",
     "@thunderid/configure-users": "workspace:^",
     "@thunderid/configure-user-types": "workspace:^",
     "@thunderid/configure-organization-units": "workspace:^",
     "@thunderid/configure-translations": "workspace:^",
     "@thunderid/configure-resource-servers": "workspace:^",
+    "@thunderid/configure-settings": "workspace:^",
+    "@thunderid/configure-verifiable-credentials": "workspace:^",
     "@thunderid/utils": "workspace:^",
     "@wso2/oxygen-ui": "catalog:",
     "@wso2/oxygen-ui-icons-react": "catalog:",
@@ -79,7 +85,7 @@
     "dayjs": "catalog:",
     "dompurify": "catalog:",
     "elkjs": "^0.11.0",
-    "framer-motion": "^12.35.2",
+    "framer-motion": "catalog:",
     "html-react-parser": "5.2.10",
     "i18next": "catalog:",
     "lexical": "0.38.2",
@@ -116,7 +122,6 @@
     "eslint": "catalog:",
     "jsdom": "catalog:",
     "rollup-plugin-visualizer": "catalog:",
-    "sass-embedded": "1.98.0",
     "typescript": "catalog:",
     "vite": "catalog:",
     "vite-plugin-svgr": "catalog:",

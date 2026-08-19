@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -25,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
@@ -148,6 +135,37 @@ func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_Success() {
 	suite.Equal("Test Role", response.Name)
 }
 
+func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_WithoutPermissions_ReturnsEmptyArray() {
+	request := CreateRoleRequest{
+		Name: "Test Role",
+		OUID: "ou1",
+	}
+
+	expectedRole := &RoleWithPermissionsAndAssignments{
+		ID:   "role1",
+		Name: "Test Role",
+		OUID: "ou1",
+	}
+
+	suite.mockService.On("CreateRole", mock.Anything, mock.AnythingOfType("RoleCreationDetail")).
+		Return(expectedRole, nil)
+
+	body, _ := json.Marshal(request)
+	req := httptest.NewRequest(http.MethodPost, "/roles", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	suite.handler.HandleRolePostRequest(w, req)
+
+	suite.Equal(http.StatusCreated, w.Code)
+
+	var response CreateRoleResponse
+	err := json.NewDecoder(w.Body).Decode(&response)
+	suite.NoError(err)
+	suite.NotNil(response.Permissions)
+	suite.Empty(response.Permissions)
+}
+
 func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_InvalidJSON() {
 	req := httptest.NewRequest(http.MethodPost, "/roles", bytes.NewBufferString("invalid json"))
 	req.Header.Set("Content-Type", "application/json")
@@ -178,9 +196,9 @@ func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_ServiceError() {
 	suite.Equal(http.StatusBadRequest, w.Code)
 }
 
-func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_ValidationError_NameTooShort() {
+func (suite *RoleHandlerTestSuite) TestHandleRolePostRequest_ValidationError_NameTooLong() {
 	request := CreateRoleRequest{
-		Name: "ad",
+		Name: strings.Repeat("a", 101),
 		OUID: "ou-tenancy-1",
 	}
 
@@ -756,6 +774,46 @@ func (suite *RoleHandlerTestSuite) TestSanitizeUpdateRoleRequest() {
 	suite.Equal("ou2", sanitized.OUID)
 	suite.Equal("rs2", sanitized.Permissions[0].ResourceServerID)
 	suite.Equal("perm3", sanitized.Permissions[0].Permissions[0])
+}
+
+func (suite *RoleHandlerTestSuite) TestSanitizeCreateRoleRequest_PreservesSpecialCharacters() {
+	request := &CreateRoleRequest{
+		Name:        "  Dean's Sub team  ",
+		Description: `  R&D <team> "core"  `,
+	}
+
+	sanitized := suite.handler.sanitizeCreateRoleRequest(request)
+
+	suite.Equal("Dean's Sub team", sanitized.Name)
+	suite.Equal(`R&D <team> "core"`, sanitized.Description)
+}
+
+func (suite *RoleHandlerTestSuite) TestSanitizeUpdateRoleRequest_PreservesSpecialCharacters() {
+	request := &UpdateRoleRequest{
+		Name:        "  Dean's Sub team  ",
+		Description: `  R&D <team> "core"  `,
+	}
+
+	sanitized := suite.handler.sanitizeUpdateRoleRequest(request)
+
+	suite.Equal("Dean's Sub team", sanitized.Name)
+	suite.Equal(`R&D <team> "core"`, sanitized.Description)
+}
+
+// The Console echoes the stored name back on every save. Replaying that loop must not drift the name.
+func (suite *RoleHandlerTestSuite) TestSanitizeUpdateRoleRequestIsIdempotentAcrossSaves() {
+	name := suite.handler.sanitizeCreateRoleRequest(&CreateRoleRequest{
+		Name: "Dean's Sub team",
+	}).Name
+
+	for i := 0; i < 5; i++ {
+		sanitized := suite.handler.sanitizeUpdateRoleRequest(&UpdateRoleRequest{
+			Name:        name,
+			Description: "save " + strconv.Itoa(i),
+		})
+		suite.Equal("Dean's Sub team", sanitized.Name)
+		name = sanitized.Name
+	}
 }
 
 func (suite *RoleHandlerTestSuite) TestSanitizeAssignmentsRequest() {

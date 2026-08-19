@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   Box,
@@ -81,6 +66,7 @@ function GenericResourceTree({resourceServer, onRefresh}: ResourceTreeProps): JS
 
   const isLoading = loadingResources || loadingActions;
   const isEmpty = resources.length === 0 && serverActions.length === 0;
+  const readOnly = Boolean(resourceServer.isReadOnly);
 
   const effectiveSelectedNode = useMemo<SelectedNode | null>(() => {
     if (selectedNode) return selectedNode;
@@ -121,37 +107,41 @@ function GenericResourceTree({resourceServer, onRefresh}: ResourceTreeProps): JS
           >
             {t('resourceServers:tree.title', 'Resource Hierarchy')}
           </Typography>
-          <IconButton
-            size="small"
-            onClick={(e) => setAddMenuAnchor(e.currentTarget)}
-            aria-label={t('resourceServers:tree.add', 'Add')}
-          >
-            <Plus size={16} />
-          </IconButton>
-          <Menu anchorEl={addMenuAnchor} open={Boolean(addMenuAnchor)} onClose={() => setAddMenuAnchor(null)}>
-            <MenuItem
-              onClick={() => {
-                openAdd('resource');
-                setAddMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <Layers size={16} />
-              </ListItemIcon>
-              <ListItemText>{t('resourceServers:tree.addResource', 'Add resource')}</ListItemText>
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                openAdd('server-action');
-                setAddMenuAnchor(null);
-              }}
-            >
-              <ListItemIcon>
-                <Zap size={16} />
-              </ListItemIcon>
-              <ListItemText>{t('resourceServers:tree.addAction', 'Add action')}</ListItemText>
-            </MenuItem>
-          </Menu>
+          {!readOnly && (
+            <>
+              <IconButton
+                size="small"
+                onClick={(e) => setAddMenuAnchor(e.currentTarget)}
+                aria-label={t('resourceServers:tree.add', 'Add')}
+              >
+                <Plus size={16} />
+              </IconButton>
+              <Menu anchorEl={addMenuAnchor} open={Boolean(addMenuAnchor)} onClose={() => setAddMenuAnchor(null)}>
+                <MenuItem
+                  onClick={() => {
+                    openAdd('resource');
+                    setAddMenuAnchor(null);
+                  }}
+                >
+                  <ListItemIcon>
+                    <Layers size={16} />
+                  </ListItemIcon>
+                  <ListItemText>{t('resourceServers:tree.addResource', 'Add resource')}</ListItemText>
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    openAdd('server-action');
+                    setAddMenuAnchor(null);
+                  }}
+                >
+                  <ListItemIcon>
+                    <Zap size={16} />
+                  </ListItemIcon>
+                  <ListItemText>{t('resourceServers:tree.addAction', 'Add action')}</ListItemText>
+                </MenuItem>
+              </Menu>
+            </>
+          )}
         </Box>
 
         <Box sx={{flex: 1, overflowY: 'auto', p: 0.5, height: '100%'}}>
@@ -170,6 +160,7 @@ function GenericResourceTree({resourceServer, onRefresh}: ResourceTreeProps): JS
                   depth={0}
                   selectedNodeId={effectiveSelectedNode?.id ?? null}
                   onSelect={setSelectedNode}
+                  readOnly={readOnly}
                 />
               ))}
 
@@ -186,6 +177,7 @@ function GenericResourceTree({resourceServer, onRefresh}: ResourceTreeProps): JS
                   onAddChild={(mode, parentResourceId, parentPermission) =>
                     openAdd(mode, parentResourceId, parentPermission)
                   }
+                  readOnly={readOnly}
                 />
               ))}
 
@@ -201,7 +193,9 @@ function GenericResourceTree({resourceServer, onRefresh}: ResourceTreeProps): JS
                   }}
                 >
                   <Typography variant="body2" color="text.disabled">
-                    {t('resourceServers:tree.empty', 'No resources yet — add a resource or action to get started.')}
+                    {readOnly
+                      ? t('resourceServers:tree.emptyReadOnly', 'No resources are defined for this resource server.')
+                      : t('resourceServers:tree.empty', 'No resources yet. Add a resource or action to get started.')}
                   </Typography>
                 </Box>
               )}

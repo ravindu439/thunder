@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -85,7 +70,46 @@ const googleTemplate: FlowTemplate = {
   config: {name: '', handle: '', nodes: []},
 };
 
-const mockTemplates: FlowTemplate[] = [blankTemplate, passwordTemplate, googleTemplate];
+const githubTemplate: FlowTemplate = {
+  resourceType: 'TEMPLATE',
+  category: 'SOCIAL_LOGIN',
+  type: 'GITHUB',
+  flowType: 'AUTHENTICATION',
+  display: {label: 'GitHub', description: 'Sign in with GitHub', image: 'github.svg', showOnResourcePanel: true},
+  config: {name: '', handle: '', nodes: []},
+};
+
+const compositeTemplate: FlowTemplate = {
+  resourceType: 'TEMPLATE',
+  category: 'SOCIAL_LOGIN',
+  type: 'GOOGLE_GITHUB',
+  flowType: 'AUTHENTICATION',
+  display: {
+    label: 'Google + GitHub',
+    description: 'Sign in with Google or GitHub',
+    image: 'google-github.svg',
+    showOnResourcePanel: true,
+  },
+  config: {name: '', handle: '', nodes: []},
+};
+
+const unknownIconTemplate: FlowTemplate = {
+  resourceType: 'TEMPLATE',
+  category: 'MFA',
+  type: 'SOME_UNMAPPED_TYPE',
+  flowType: 'AUTHENTICATION',
+  display: {label: 'Custom flow', description: 'A flow with no mapped icon', image: '', showOnResourcePanel: true},
+  config: {name: '', handle: '', nodes: []},
+};
+
+const mockTemplates: FlowTemplate[] = [
+  blankTemplate,
+  passwordTemplate,
+  googleTemplate,
+  githubTemplate,
+  compositeTemplate,
+  unknownIconTemplate,
+];
 
 vi.mock('../../../api/useGetFlowsMeta', () => ({
   default: () => ({
@@ -140,6 +164,66 @@ describe('SelectFlowTemplate', () => {
 
       expect(screen.getByText('Username & Password')).toBeInTheDocument();
       expect(screen.getByText('Google')).toBeInTheDocument();
+    });
+
+    it('should render a GitHub brand icon for a GitHub template', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      expect(screen.getByText('GitHub')).toBeInTheDocument();
+    });
+
+    it('should render a composite icon row for a template with multiple icons', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      expect(screen.getByText('Google + GitHub')).toBeInTheDocument();
+    });
+
+    it('should fall back to a generic icon for a template with no mapped icon', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      expect(screen.getByText('Custom flow')).toBeInTheDocument();
+      expect(screen.getAllByTestId('icon-lock').length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Search', () => {
+    it('should filter templates by label', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Search templates...'), {target: {value: 'google'}});
+
+      expect(screen.getByText('Google')).toBeInTheDocument();
+      expect(screen.queryByText('Username & Password')).not.toBeInTheDocument();
+    });
+
+    it('should filter templates by description', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Search templates...'), {target: {value: 'mapped icon'}});
+
+      expect(screen.getByText('Custom flow')).toBeInTheDocument();
+      expect(screen.queryByText('Username & Password')).not.toBeInTheDocument();
+    });
+
+    it('should show the no-results message when nothing matches the search', () => {
+      render(<SelectFlowTemplate {...defaultProps} />);
+
+      fireEvent.change(screen.getByPlaceholderText('Search templates...'), {target: {value: 'nonexistent-xyz'}});
+
+      expect(screen.getByText('No templates match your search.')).toBeInTheDocument();
+    });
+  });
+
+  describe('Flow type changes', () => {
+    it('should reset search and category filters when the flow type changes', () => {
+      const {rerender} = render(<SelectFlowTemplate {...defaultProps} />);
+
+      fireEvent.click(screen.getByText('Password'));
+      fireEvent.change(screen.getByPlaceholderText('Search templates...'), {target: {value: 'google'}});
+
+      rerender(<SelectFlowTemplate {...defaultProps} flowType="REGISTRATION" />);
+
+      expect(screen.getByPlaceholderText('Search templates...')).toHaveValue('');
     });
   });
 
@@ -198,6 +282,30 @@ describe('SelectFlowTemplate', () => {
       fireEvent.click(screen.getByText('Start from scratch'));
 
       expect(mockOnTemplateChange).toHaveBeenCalledWith(blankTemplate);
+    });
+
+    it('should call onTemplateChange when Enter is pressed on a template card', () => {
+      render(<SelectFlowTemplate {...defaultProps} selectedTemplate={blankTemplate} />);
+
+      fireEvent.keyDown(screen.getByText('Username & Password').closest('[role="button"]')!, {key: 'Enter'});
+
+      expect(mockOnTemplateChange).toHaveBeenCalledWith(passwordTemplate);
+    });
+
+    it('should call onTemplateChange when Space is pressed on a template card', () => {
+      render(<SelectFlowTemplate {...defaultProps} selectedTemplate={blankTemplate} />);
+
+      fireEvent.keyDown(screen.getByText('Username & Password').closest('[role="button"]')!, {key: ' '});
+
+      expect(mockOnTemplateChange).toHaveBeenCalledWith(passwordTemplate);
+    });
+
+    it('should ignore unrelated key presses on a template card', () => {
+      render(<SelectFlowTemplate {...defaultProps} selectedTemplate={blankTemplate} />);
+
+      fireEvent.keyDown(screen.getByText('Username & Password').closest('[role="button"]')!, {key: 'a'});
+
+      expect(mockOnTemplateChange).not.toHaveBeenCalled();
     });
   });
 });

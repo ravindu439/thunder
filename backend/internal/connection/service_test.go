@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package connection
 
@@ -50,7 +35,7 @@ func TestServiceSuite(t *testing.T) {
 }
 
 func (s *ServiceTestSuite) SetupTest() {
-	initConfigWithTestCryptoKey()
+	initConfigWithTestCryptoKey(s.T())
 	s.mockIDP = idpmock.NewIDPServiceInterfaceMock(s.T())
 	s.mockNotif = notificationmock.NewNotificationSenderMgtSvcInterfaceMock(s.T())
 	s.svc = newService(s.mockIDP, s.mockNotif)
@@ -490,4 +475,37 @@ func (s *ServiceTestSuite) TestUsagesByTypeGetFails() {
 	s.Require().NotNil(svcErr)
 	s.Nil(result)
 	s.mockIDP.AssertNotCalled(s.T(), "GetIDPUsages", mock.Anything, mock.Anything)
+}
+
+func (s *ServiceTestSuite) TestUsagesSMSByProviderDelegates() {
+	total := 1
+	usages := &resourcedependency.DependenciesResponse{
+		TotalResults: &total,
+		Count:        1,
+		Summary:      map[string]int{"flow": 1},
+		Usages: []resourcedependency.ResourceDependency{
+			{ResourceType: "flow", ID: "flow-1", DisplayName: "SMS OTP", BehaviorOnDelete: "restrict"},
+		},
+	}
+	s.mockNotif.On("GetSender", mock.Anything, "tw-1").Return(&ncommon.NotificationSenderDTO{
+		ID: "tw-1", Type: ncommon.NotificationSenderTypeMessage, Provider: ncommon.MessageProviderTypeTwilio,
+	}, (*tidcommon.ServiceError)(nil))
+	s.mockNotif.On("GetSenderUsages", mock.Anything, "tw-1").Return(usages, (*tidcommon.ServiceError)(nil))
+
+	result, svcErr := s.svc.usagesSMSByProvider(context.Background(), ncommon.MessageProviderTypeTwilio, "tw-1")
+	s.Nil(svcErr)
+	s.Equal(usages, result)
+}
+
+// TestUsagesSMSByProviderWrongProvider verifies a sender of another provider is not exposed
+// through a vendor's usages endpoint.
+func (s *ServiceTestSuite) TestUsagesSMSByProviderWrongProvider() {
+	s.mockNotif.On("GetSender", mock.Anything, "vo-1").Return(&ncommon.NotificationSenderDTO{
+		ID: "vo-1", Type: ncommon.NotificationSenderTypeMessage, Provider: ncommon.MessageProviderTypeVonage,
+	}, (*tidcommon.ServiceError)(nil))
+
+	result, svcErr := s.svc.usagesSMSByProvider(context.Background(), ncommon.MessageProviderTypeTwilio, "vo-1")
+	s.Require().NotNil(svcErr)
+	s.Nil(result)
+	s.mockNotif.AssertNotCalled(s.T(), "GetSenderUsages", mock.Anything, mock.Anything)
 }

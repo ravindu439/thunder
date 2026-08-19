@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package attributecache
 
@@ -30,12 +15,14 @@ import (
 )
 
 // AttributeCacheStoreTestSuite exercises the attributeCacheStore adapter against a real in-memory
-// runtime store, verifying the marshal/namespace/key round-trip and the not-found semantics.
+// runtime store, verifying the namespace/key/TTL round-trip and the not-found semantics. The store
+// persists opaque bytes; serialization and encryption live in the service layer.
 type AttributeCacheStoreTestSuite struct {
 	suite.Suite
-	store     attributeCacheStoreInterface
-	ctx       context.Context
-	testCache AttributeCache
+	store    attributeCacheStoreInterface
+	ctx      context.Context
+	testID   string
+	testData []byte
 }
 
 func TestAttributeCacheStoreSuite(t *testing.T) {
@@ -45,36 +32,19 @@ func TestAttributeCacheStoreSuite(t *testing.T) {
 func (suite *AttributeCacheStoreTestSuite) SetupTest() {
 	suite.store = newAttributeCacheStore(inmemory.Initialize("test-deployment"))
 	suite.ctx = context.Background()
-
-	suite.testCache = AttributeCache{
-		ID:         "test-cache-id",
-		Attributes: map[string]interface{}{"key": "value"},
-		TTLSeconds: 3600, // 1 hour
-	}
+	suite.testID = "test-cache-id"
+	suite.testData = []byte(`{"key":"value"}`)
 }
 
 // Tests for CreateAttributeCache
 
 func (suite *AttributeCacheStoreTestSuite) TestCreateAttributeCache_Success() {
-	err := suite.store.CreateAttributeCache(suite.ctx, suite.testCache)
+	err := suite.store.CreateAttributeCache(suite.ctx, suite.testID, suite.testData, 3600)
 	suite.Require().NoError(err)
 
-	got, err := suite.store.GetAttributeCache(suite.ctx, suite.testCache.ID)
+	got, err := suite.store.GetAttributeCache(suite.ctx, suite.testID)
 	suite.Require().NoError(err)
-	suite.Equal(suite.testCache.ID, got.ID)
-	suite.Equal(suite.testCache.Attributes, got.Attributes)
-}
-
-func (suite *AttributeCacheStoreTestSuite) TestCreateAttributeCache_MarshalError() {
-	cache := AttributeCache{
-		ID:         suite.testCache.ID,
-		Attributes: map[string]interface{}{"key": make(chan int)},
-		TTLSeconds: suite.testCache.TTLSeconds,
-	}
-
-	err := suite.store.CreateAttributeCache(suite.ctx, cache)
-
-	suite.Error(err)
+	suite.Equal(suite.testData, got)
 }
 
 // Tests for GetAttributeCache
@@ -83,20 +53,20 @@ func (suite *AttributeCacheStoreTestSuite) TestGetAttributeCache_NotFound() {
 	got, err := suite.store.GetAttributeCache(suite.ctx, "missing")
 
 	suite.ErrorIs(err, errAttributeCacheNotFound)
-	suite.Equal(AttributeCache{}, got)
+	suite.Nil(got)
 }
 
 // Tests for ExtendAttributeCacheTTL
 
 func (suite *AttributeCacheStoreTestSuite) TestExtendAttributeCacheTTL_Success() {
-	suite.Require().NoError(suite.store.CreateAttributeCache(suite.ctx, suite.testCache))
+	suite.Require().NoError(suite.store.CreateAttributeCache(suite.ctx, suite.testID, suite.testData, 3600))
 
-	err := suite.store.ExtendAttributeCacheTTL(suite.ctx, suite.testCache.ID, 7200)
+	err := suite.store.ExtendAttributeCacheTTL(suite.ctx, suite.testID, 7200)
 	suite.Require().NoError(err)
 
-	got, err := suite.store.GetAttributeCache(suite.ctx, suite.testCache.ID)
+	got, err := suite.store.GetAttributeCache(suite.ctx, suite.testID)
 	suite.Require().NoError(err)
-	suite.Equal(suite.testCache.Attributes, got.Attributes)
+	suite.Equal(suite.testData, got)
 }
 
 func (suite *AttributeCacheStoreTestSuite) TestExtendAttributeCacheTTL_NotFound() {
@@ -108,10 +78,10 @@ func (suite *AttributeCacheStoreTestSuite) TestExtendAttributeCacheTTL_NotFound(
 // Tests for DeleteAttributeCache
 
 func (suite *AttributeCacheStoreTestSuite) TestDeleteAttributeCache_Success() {
-	suite.Require().NoError(suite.store.CreateAttributeCache(suite.ctx, suite.testCache))
-	suite.Require().NoError(suite.store.DeleteAttributeCache(suite.ctx, suite.testCache.ID))
+	suite.Require().NoError(suite.store.CreateAttributeCache(suite.ctx, suite.testID, suite.testData, 3600))
+	suite.Require().NoError(suite.store.DeleteAttributeCache(suite.ctx, suite.testID))
 
-	_, err := suite.store.GetAttributeCache(suite.ctx, suite.testCache.ID)
+	_, err := suite.store.GetAttributeCache(suite.ctx, suite.testID)
 	suite.ErrorIs(err, errAttributeCacheNotFound)
 }
 
@@ -119,20 +89,6 @@ func (suite *AttributeCacheStoreTestSuite) TestDeleteAttributeCache_NotFound() {
 	err := suite.store.DeleteAttributeCache(suite.ctx, "missing")
 
 	suite.NoError(err)
-}
-
-// TestUnmarshalError verifies GetAttributeCache surfaces a non-not-found error when the stored
-// payload cannot be deserialized.
-func (suite *AttributeCacheStoreTestSuite) TestGetAttributeCache_UnmarshalError() {
-	store := inmemory.Initialize("test-deployment")
-	suite.Require().NoError(store.Put(suite.ctx, providers.NamespaceAttributeCache, suite.testCache.ID,
-		[]byte("not-json"), 60))
-
-	s := newAttributeCacheStore(store)
-	_, err := s.GetAttributeCache(suite.ctx, suite.testCache.ID)
-
-	suite.Error(err)
-	suite.False(errors.Is(err, errAttributeCacheNotFound))
 }
 
 // erroringRuntimeStore wraps a RuntimeStoreProvider and forces Get to fail, so that
@@ -149,7 +105,7 @@ func (e *erroringRuntimeStore) Get(_ context.Context, _ providers.RuntimeStoreNa
 func (suite *AttributeCacheStoreTestSuite) TestGetAttributeCache_StoreError() {
 	s := newAttributeCacheStore(&erroringRuntimeStore{RuntimeStoreProvider: inmemory.Initialize("test-deployment")})
 
-	_, err := s.GetAttributeCache(suite.ctx, suite.testCache.ID)
+	_, err := s.GetAttributeCache(suite.ctx, suite.testID)
 
 	suite.Error(err)
 	suite.Contains(err.Error(), "failed to get attribute cache")

@@ -1,6 +1,6 @@
 name: '📚 Deploy Documentation to GitHub Pages'
 description: 'Deploy documentation to GitHub Pages'
-author: 'WSO2'
+author: 'The ThunderID Authors'
 
 inputs:
   node-version:

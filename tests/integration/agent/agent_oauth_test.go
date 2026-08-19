@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -63,12 +48,12 @@ const (
 // duplicate clientID, and transitioning an entity-only agent to OAuth on update.
 type AgentOAuthFlowsTestSuite struct {
 	suite.Suite
-	ouID             string
-	schemaID         string
-	entityTypeID     string
-	userID           string
-	authFlowID       string
-	resourceServerID string
+	ouID              string
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
+	entityTypeID      string
+	userID            string
+	authFlowID        string
+	resourceServerID  string
 }
 
 func TestAgentOAuthFlowsTestSuite(t *testing.T) {
@@ -93,7 +78,13 @@ func (ts *AgentOAuthFlowsTestSuite) SetupSuite() {
 	ts.Require().NoError(err, "Failed to create resource server")
 	ts.resourceServerID = resourceServerID
 
-	schemaID, err := testutils.CreateAgentType(testutils.UserType{
+	// The `default` agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at this suite's OU, so teardown can put it back before that OU is deleted.
+	snapshot, err := testutils.SnapshotAgentType()
+	ts.Require().NoError(err, "Failed to snapshot the default agent type")
+	ts.agentTypeSnapshot = snapshot
+
+	_, err = testutils.CreateAgentType(testutils.UserType{
 		Name: "default",
 		OUID: ts.ouID,
 		Schema: map[string]interface{}{
@@ -101,7 +92,6 @@ func (ts *AgentOAuthFlowsTestSuite) SetupSuite() {
 		},
 	})
 	ts.Require().NoError(err, "Failed to create agent schema")
-	ts.schemaID = schemaID
 
 	entityTypeID, err := testutils.CreateUserType(testutils.UserType{
 		Name: "agent-oauth-flow-person",
@@ -139,11 +129,16 @@ func (ts *AgentOAuthFlowsTestSuite) TearDownSuite() {
 	if ts.entityTypeID != "" {
 		_ = testutils.DeleteUserType(ts.entityTypeID)
 	}
-	if ts.schemaID != "" {
-		_ = testutils.DeleteAgentType(ts.schemaID)
+	// Restore the shared agent type before deleting the OU it points at, or the singleton is left
+	// referencing a deleted OU and a later suite's restore fails.
+	if ts.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(ts.agentTypeSnapshot); err != nil {
+			ts.T().Errorf("teardown: failed to restore the default agent type: %v", err)
+		}
 	}
 	if ts.resourceServerID != "" {
-		_ = testutils.DeleteResourceServer(ts.resourceServerID)
+		ts.NoError(testutils.DeleteResourceServerWithChildren(ts.resourceServerID),
+			"teardown: delete resource server and its actions")
 	}
 	if ts.ouID != "" {
 		_ = testutils.DeleteOrganizationUnit(ts.ouID)
@@ -552,14 +547,14 @@ func (ts *AgentOAuthFlowsTestSuite) TestAgentUpdate_AddOAuthProfile() {
 // and that client_credentials tokens reflect those role-based scope grants.
 type CCAgentAuthzTestSuite struct {
 	suite.Suite
-	client           *http.Client
-	ouID             string
-	agentSchemaID    string
-	resourceServerID string
-	agentID          string
-	roleID           string
-	groupID          string
-	groupRoleID      string
+	client            *http.Client
+	ouID              string
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
+	resourceServerID  string
+	agentID           string
+	roleID            string
+	groupID           string
+	groupRoleID       string
 }
 
 func TestCCAgentAuthzTestSuite(t *testing.T) {
@@ -577,7 +572,13 @@ func (s *CCAgentAuthzTestSuite) SetupSuite() {
 	s.Require().NoError(err)
 	s.ouID = ouID
 
-	schemaID, err := testutils.CreateAgentType(testutils.UserType{
+	// The `default` agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at this suite's OU, so teardown can put it back before that OU is deleted.
+	snapshot, err := testutils.SnapshotAgentType()
+	s.Require().NoError(err)
+	s.agentTypeSnapshot = snapshot
+
+	_, err = testutils.CreateAgentType(testutils.UserType{
 		Name: "default",
 		OUID: s.ouID,
 		Schema: map[string]interface{}{
@@ -585,7 +586,6 @@ func (s *CCAgentAuthzTestSuite) SetupSuite() {
 		},
 	})
 	s.Require().NoError(err)
-	s.agentSchemaID = schemaID
 
 	rsID, err := testutils.CreateResourceServerWithActions(testutils.ResourceServer{
 		Name:        "CC Agent Authz API",
@@ -662,10 +662,15 @@ func (s *CCAgentAuthzTestSuite) TearDownSuite() {
 		_ = deleteAgent(s.agentID)
 	}
 	if s.resourceServerID != "" {
-		_ = testutils.DeleteResourceServer(s.resourceServerID)
+		s.NoError(testutils.DeleteResourceServerWithChildren(s.resourceServerID),
+			"teardown: delete resource server and its actions")
 	}
-	if s.agentSchemaID != "" {
-		_ = testutils.DeleteAgentType(s.agentSchemaID)
+	// Restore the shared agent type before deleting the OU it points at, or the singleton is left
+	// referencing a deleted OU and a later suite's restore fails.
+	if s.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(s.agentTypeSnapshot); err != nil {
+			s.T().Errorf("teardown: failed to restore the default agent type: %v", err)
+		}
 	}
 	if s.ouID != "" {
 		_ = testutils.DeleteOrganizationUnit(s.ouID)
@@ -814,14 +819,14 @@ func (s *CCAgentAuthzTestSuite) TestAgentCC_AllScopes() {
 // is a user assertion.
 type AgentTokenExchangeTestSuite struct {
 	suite.Suite
-	client           *http.Client
-	ouID             string
-	entityTypeID     string
-	agentSchemaID    string
-	agentID          string
-	userID           string
-	resourceServerID string
-	assertionToken   string
+	client            *http.Client
+	ouID              string
+	entityTypeID      string
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
+	agentID           string
+	userID            string
+	resourceServerID  string
+	assertionToken    string
 }
 
 func TestAgentTokenExchangeTestSuite(t *testing.T) {
@@ -848,7 +853,13 @@ func (s *AgentTokenExchangeTestSuite) SetupSuite() {
 	s.Require().NoError(err)
 	s.resourceServerID = resourceServerID
 
-	agentSchemaID, err := testutils.CreateAgentType(testutils.UserType{
+	// The `default` agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at this suite's OU, so teardown can put it back before that OU is deleted.
+	snapshot, err := testutils.SnapshotAgentType()
+	s.Require().NoError(err)
+	s.agentTypeSnapshot = snapshot
+
+	_, err = testutils.CreateAgentType(testutils.UserType{
 		Name: "default",
 		OUID: s.ouID,
 		Schema: map[string]interface{}{
@@ -856,7 +867,6 @@ func (s *AgentTokenExchangeTestSuite) SetupSuite() {
 		},
 	})
 	s.Require().NoError(err)
-	s.agentSchemaID = agentSchemaID
 
 	entityTypeID, err := testutils.CreateUserType(testutils.UserType{
 		Name: "agent-te-person",
@@ -898,11 +908,16 @@ func (s *AgentTokenExchangeTestSuite) TearDownSuite() {
 	if s.entityTypeID != "" {
 		_ = testutils.DeleteUserType(s.entityTypeID)
 	}
-	if s.agentSchemaID != "" {
-		_ = testutils.DeleteAgentType(s.agentSchemaID)
+	// Restore the shared agent type before deleting the OU it points at, or the singleton is left
+	// referencing a deleted OU and a later suite's restore fails.
+	if s.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(s.agentTypeSnapshot); err != nil {
+			s.T().Errorf("teardown: failed to restore the default agent type: %v", err)
+		}
 	}
 	if s.resourceServerID != "" {
-		_ = testutils.DeleteResourceServer(s.resourceServerID)
+		s.NoError(testutils.DeleteResourceServerWithChildren(s.resourceServerID),
+			"teardown: delete resource server and its actions")
 	}
 	if s.ouID != "" {
 		_ = testutils.DeleteOrganizationUnit(s.ouID)

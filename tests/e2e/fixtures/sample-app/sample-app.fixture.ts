@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Sample App Fixture
@@ -27,12 +12,39 @@ import { SampleAppLoginPage } from "../../pages/sample-app";
 
 type SampleAppFixtures = {
   sampleAppLoginPage: SampleAppLoginPage;
+  /**
+   * Client id the sample app should boot as (see constants/sample-apps.ts), overriding the real
+   * one baked into its public/runtime.json (samples/apps/react-sdk-sample/src/config.tsx fetches
+   * that file at module load). An option fixture, not a value fixture: unset by default so specs
+   * that don't need isolation (e.g. sample-app-login.spec.ts) get the real sample app untouched.
+   * Set per-suite with `test.use({ sampleAppClientId: SampleAppClientIds.MFA })`.
+   */
+  sampleAppClientId?: string;
 };
 
 /**
  * Extended test fixture with sample app page objects.
  */
 export const test = base.extend<SampleAppFixtures>({
+  sampleAppClientId: [undefined, { option: true }],
+
+  // Overrides the built-in `context` fixture (rather than `page`) so the route is registered
+  // before the first navigation and covers every page opened in this context - the social login
+  // flow bounces sample-app -> gate -> sample-app, and a route on just `page` would miss any
+  // popup or secondary page along the way.
+  context: async ({ context, sampleAppClientId }, use) => {
+    if (sampleAppClientId) {
+      await context.route("**/runtime.json", async route => {
+        // Fetch the real file and override only clientId, so a shape change to runtime.json
+        // (a new field config.tsx starts reading) can't silently go stale here.
+        const response = await route.fetch();
+        const body = await response.json();
+        await route.fulfill({ response, json: { ...body, clientId: sampleAppClientId } });
+      });
+    }
+    await use(context);
+  },
+
   /**
    * Sample App Login Page fixture
    */

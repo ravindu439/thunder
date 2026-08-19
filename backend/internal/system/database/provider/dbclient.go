@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package provider provides database client implementations for executing queries and managing transactions.
 package provider
@@ -27,6 +12,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/database/model"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
@@ -45,7 +31,7 @@ type DBClientInterface interface {
 	// BeginTx starts a new database transaction.
 	BeginTx() (model.TxInterface, error)
 	// GetTransactioner returns the transactioner for this client.
-	GetTransactioner() (transaction.Transactioner, error)
+	GetTransactioner() (providers.Transactioner, error)
 }
 
 // DBClient is the implementation of DBClientInterface.
@@ -182,7 +168,7 @@ func (client *DBClient) BeginTx() (model.TxInterface, error) {
 }
 
 // GetTransactioner returns the transactioner for this client.
-func (client *DBClient) GetTransactioner() (transaction.Transactioner, error) {
+func (client *DBClient) GetTransactioner() (providers.Transactioner, error) {
 	return transaction.NewTransactioner(client.db.GetSQLDB(), client.dbName), nil
 }
 

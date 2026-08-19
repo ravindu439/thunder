@@ -1,33 +1,21 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {ResourceAvatar} from '@thunderid/components';
+import {QueryErrorNotice, ResourceAvatar} from '@thunderid/components';
+import {useGetApplications} from '@thunderid/configure-applications';
+import type {BasicApplication} from '@thunderid/configure-applications';
 import {useConfig} from '@thunderid/contexts';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
 import {Box, Chip, IconButton, Tooltip, Typography, ListingTable, DataGrid} from '@wso2/oxygen-ui';
 import {Eye, Pencil, Trash2} from '@wso2/oxygen-ui-icons-react';
-import {useMemo, useCallback, useState, type JSX} from 'react';
+import {useCallback, useMemo, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import ApplicationDeleteDialog from './ApplicationDeleteDialog';
-import useGetApplications from '../api/useGetApplications';
-import type {BasicApplication} from '../models/application';
+import RouteConfig from '../../../configs/RouteConfig';
+import ApplicationConstants from '../constants/application-constants';
+import getApplicationErrorMessage from '../utils/getApplicationErrorMessage';
 import getTemplateMetadata from '../utils/getTemplateMetadata';
 
 export default function ApplicationsList(): JSX.Element {
@@ -36,8 +24,17 @@ export default function ApplicationsList(): JSX.Element {
   const {t} = useTranslation();
   const logger = useLogger('ApplicationsList');
   const dataGridLocaleText = useDataGridLocaleText();
-  const {data, isLoading, error} = useGetApplications();
+  const {data, isLoading, error, refetch} = useGetApplications();
   const systemConsoleClientId = (config?.client?.client_id ?? 'CONSOLE').toUpperCase();
+
+  // Resolves an error through the `applications` catalog. `t` defaults to the `common` namespace,
+  // so this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `applications:`,
+  // per getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string =>
+      t(key.includes(':') ? key : `applications:${key}`, options),
+    [t],
+  );
 
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
@@ -50,7 +47,7 @@ export default function ApplicationsList(): JSX.Element {
   const handleEditClick = useCallback(
     (appId: string): void => {
       (async (): Promise<void> => {
-        await navigate(`/applications/${appId}`);
+        await navigate(RouteConfig.applications.detail(appId));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to application', {error: _error, applicationId: appId});
       });
@@ -73,7 +70,14 @@ export default function ApplicationsList(): JSX.Element {
         renderCell: (params: DataGrid.GridRenderCellParams<BasicApplication>): JSX.Element => (
           <ListingTable.CellIcon
             sx={{width: '100%'}}
-            icon={<ResourceAvatar value={params.row.logoUrl} size={30} fallback="emoji:🖥️" />}
+            icon={
+              <ResourceAvatar
+                variant="rounded"
+                value={params.row.logoUrl}
+                size={30}
+                fallback={ApplicationConstants.DEFAULT_AVATAR}
+              />
+            }
             primary={params.row.name}
             secondary={params.row.description}
           />
@@ -168,14 +172,13 @@ export default function ApplicationsList(): JSX.Element {
 
   if (error) {
     return (
-      <Box sx={{textAlign: 'center', py: 8}}>
-        <Typography variant="h6" color="error" gutterBottom>
-          Failed to load applications
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {error.message ?? 'Unknown error'}
-        </Typography>
-      </Box>
+      <QueryErrorNotice
+        error={error}
+        t={tForErrors}
+        title={t('applications:listing.error', 'Failed to load applications')}
+        resolveErrorMessage={getApplicationErrorMessage}
+        onRetry={() => void refetch()}
+      />
     );
   }
 
@@ -197,6 +200,8 @@ export default function ApplicationsList(): JSX.Element {
             }}
             pageSizeOptions={[5, 10, 25, 50]}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             autoHeight
             sx={{

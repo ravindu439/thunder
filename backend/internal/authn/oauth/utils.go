@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package oauth
 
@@ -70,8 +55,6 @@ func parseIDPConfig(idp *providers.IDPDTO) (*OAuthClientConfig, error) {
 			oAuthClientConfig.OAuthEndpoints.UserInfoEndpoint = value
 		case idpPkg.PropUserEmailEndpoint:
 			oAuthClientConfig.OAuthEndpoints.UserEmailEndpoint = value
-		case idpPkg.PropLogoutEndpoint:
-			oAuthClientConfig.OAuthEndpoints.LogoutEndpoint = value
 		case idpPkg.PropJwksEndpoint:
 			oAuthClientConfig.OAuthEndpoints.JwksEndpoint = value
 		case idpPkg.PropIssuer, idpPkg.PropTokenExchangeEnabled:
@@ -183,7 +166,7 @@ func sendUserInfoRequest(httpReq *http.Request, httpClient httpservice.HTTPClien
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		logger.Error(ctx, "Userinfo endpoint returned an error response",
 			log.Int("statusCode", resp.StatusCode), log.String("response", string(body)))
-		return nil, &tidcommon.InternalServerError
+		return nil, &ErrorUserProfileRetrievalFailed
 	}
 
 	body, err := io.ReadAll(resp.Body)

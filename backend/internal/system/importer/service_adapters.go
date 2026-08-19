@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package importer
 
@@ -127,17 +112,23 @@ func (s *importService) importOrganizationUnit(
 	}
 
 	createReq := providers.OrganizationUnitRequestWithID{
-		ID:              req.ID,
-		Handle:          req.Handle,
-		Name:            req.Name,
-		Description:     req.Description,
-		Parent:          req.Parent,
-		ThemeID:         req.ThemeID,
-		LayoutID:        req.LayoutID,
-		LogoURL:         req.LogoURL,
-		TosURI:          req.TosURI,
-		PolicyURI:       req.PolicyURI,
-		CookiePolicyURI: req.CookiePolicyURI,
+		ID:                        req.ID,
+		Handle:                    req.Handle,
+		Name:                      req.Name,
+		Description:               req.Description,
+		Parent:                    req.Parent,
+		ThemeID:                   req.ThemeID,
+		LayoutID:                  req.LayoutID,
+		AuthFlowID:                req.AuthFlowID,
+		RegistrationFlowID:        req.RegistrationFlowID,
+		IsRegistrationFlowEnabled: req.IsRegistrationFlowEnabled,
+		RecoveryFlowID:            req.RecoveryFlowID,
+		IsRecoveryFlowEnabled:     req.IsRecoveryFlowEnabled,
+		SignOutFlowID:             req.SignOutFlowID,
+		LogoURL:                   req.LogoURL,
+		TosURI:                    req.TosURI,
+		PolicyURI:                 req.PolicyURI,
+		CookiePolicyURI:           req.CookiePolicyURI,
 	}
 	updateReq := createReq
 
@@ -217,7 +208,11 @@ func (s *importService) importEntityType(
 
 	category := req.Category
 	if category == "" {
-		category = entitytype.TypeCategoryUser
+		if doc.ResourceType == resourceTypeAgentType {
+			category = entitytype.TypeCategoryAgent
+		} else {
+			category = entitytype.TypeCategoryUser
+		}
 	}
 	if !category.IsValid() {
 		return ImportItemOutcome{
@@ -617,35 +612,59 @@ func (s *importService) importLayout(
 		}
 	}
 
-	createReq := layoutmgt.CreateLayoutRequest{
+	createReq := layoutmgt.CreateLayoutRequestWithID{
+		ID:          req.ID,
 		Handle:      req.Handle,
 		DisplayName: req.DisplayName,
 		Description: req.Description,
 		Layout:      layoutBytes,
 	}
-	updateReq := layoutmgt.UpdateLayoutRequest(createReq)
+	updateReq := layoutmgt.UpdateLayoutRequest{
+		Handle:      req.Handle,
+		DisplayName: req.DisplayName,
+		Description: req.Description,
+		Layout:      layoutBytes,
+	}
 
-	return importDesignResource(options.IsUpsertEnabled(), dryRun, req.ID, req.DisplayName,
-		func() *tidcommon.ServiceError {
+	if dryRun {
+		if options.IsUpsertEnabled() && req.ID != "" {
 			_, svcErr := s.layoutService.GetLayout(ctx, req.ID)
-			return svcErr
-		},
-		func() (string, string, *tidcommon.ServiceError) {
-			updated, svcErr := s.layoutService.UpdateLayout(ctx, req.ID, updateReq)
-			if svcErr != nil {
-				return "", "", svcErr
+			if svcErr == nil {
+				return successOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationUpdate)
 			}
-			return updated.ID, updated.DisplayName, nil
-		},
-		func() (string, string, *tidcommon.ServiceError) {
-			created, svcErr := s.layoutService.CreateLayout(ctx, createReq)
-			if svcErr != nil {
-				return "", "", svcErr
+
+			if !isNotFoundServiceError(svcErr) {
+				return serviceErrorOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationUpdate, svcErr)
 			}
-			return created.ID, created.DisplayName, nil
-		},
-		resourceTypeLayout,
-	)
+		}
+
+		return successOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationCreate)
+	}
+
+	if options.IsUpsertEnabled() && req.ID != "" {
+		updated, svcErr := s.layoutService.UpdateLayout(ctx, req.ID, updateReq)
+		if svcErr == nil {
+			return successOutcome(resourceTypeLayout, updated.ID, updated.DisplayName, operationUpdate)
+		}
+
+		if !isNotFoundServiceError(svcErr) {
+			return serviceErrorOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationUpdate, svcErr)
+		}
+
+		created, createErr := s.layoutService.CreateLayout(ctx, createReq)
+		if createErr != nil {
+			return serviceErrorOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationCreate, createErr)
+		}
+
+		return successOutcome(resourceTypeLayout, created.ID, created.DisplayName, operationCreate)
+	}
+
+	created, svcErr := s.layoutService.CreateLayout(ctx, createReq)
+	if svcErr != nil {
+		return serviceErrorOutcome(resourceTypeLayout, req.ID, req.DisplayName, operationCreate, svcErr)
+	}
+
+	return successOutcome(resourceTypeLayout, created.ID, created.DisplayName, operationCreate)
 }
 
 func (s *importService) importUser(
@@ -917,27 +936,47 @@ func (s *importService) importAgent(
 	normalizeAgentOAuthConfigForImport(ctx, &req)
 
 	createReq := &agentmodel.Agent{
-		ID:                 req.ID,
-		OUID:               req.OUID,
-		OUHandle:           req.OUHandle,
-		Type:               req.Type,
-		Name:               req.Name,
-		Description:        req.Description,
-		Owner:              req.Owner,
-		Attributes:         attributesJSON,
-		InboundAuthProfile: req.InboundAuthProfile,
-		InboundAuthConfig:  req.InboundAuthConfig,
+		ID:          req.ID,
+		OUID:        req.OUID,
+		OUHandle:    req.OUHandle,
+		Type:        req.Type,
+		Name:        req.Name,
+		Description: req.Description,
+		LogoURL:     req.LogoURL,
+		Owner:       req.Owner,
+		Attributes:  attributesJSON,
+		InboundAuthProfile: providers.InboundAuthProfile{
+			AuthFlowID:                req.AuthFlowID,
+			AuthFlowHandle:            req.AuthFlowHandle,
+			RegistrationFlowID:        req.RegistrationFlowID,
+			RegistrationFlowHandle:    req.RegistrationFlowHandle,
+			IsRegistrationFlowEnabled: req.IsRegistrationFlowEnabled,
+			RecoveryFlowID:            req.RecoveryFlowID,
+			RecoveryFlowHandle:        req.RecoveryFlowHandle,
+			IsRecoveryFlowEnabled:     req.IsRecoveryFlowEnabled,
+			SignOutFlowID:             req.SignOutFlowID,
+			SignOutFlowHandle:         req.SignOutFlowHandle,
+			ThemeID:                   req.ThemeID,
+			LayoutID:                  req.LayoutID,
+			Assertion:                 req.Assertion,
+			LoginConsent:              req.LoginConsent,
+			AllowedUserTypes:          req.AllowedUserTypes,
+			PasskeyAllowedOrigins:     req.PasskeyAllowedOrigins,
+			Attestation:               req.Attestation,
+		},
+		InboundAuthConfig: req.InboundAuthConfig,
 	}
 	updateReq := &agentmodel.UpdateAgentRequest{
-		OUID:               req.OUID,
-		OUHandle:           req.OUHandle,
-		Type:               req.Type,
-		Name:               req.Name,
-		Description:        req.Description,
-		Owner:              req.Owner,
-		Attributes:         attributesJSON,
-		InboundAuthProfile: req.InboundAuthProfile,
-		InboundAuthConfig:  req.InboundAuthConfig,
+		OUID:                  req.OUID,
+		OUHandle:              req.OUHandle,
+		Type:                  req.Type,
+		Name:                  req.Name,
+		Description:           req.Description,
+		LogoURL:               req.LogoURL,
+		Owner:                 req.Owner,
+		Attributes:            attributesJSON,
+		InboundAuthProfileReq: req.InboundAuthProfileReq,
+		InboundAuthConfig:     req.InboundAuthConfig,
 	}
 
 	if dryRun {
@@ -1052,74 +1091,6 @@ func successOutcome(resourceType, id, name, operation string) ImportItemOutcome 
 		Operation:    operation,
 		Status:       statusSuccess,
 	}
-}
-
-func importDesignResource(
-	upsert bool,
-	dryRun bool,
-	resourceID string,
-	resourceName string,
-	getFn func() *tidcommon.ServiceError,
-	updateFn func() (string, string, *tidcommon.ServiceError),
-	createFn func() (string, string, *tidcommon.ServiceError),
-	resourceType string,
-) ImportItemOutcome {
-	if dryRun {
-		if upsert && resourceID != "" {
-			svcErr := getFn()
-			if svcErr == nil {
-				return successOutcome(resourceType, resourceID, resourceName, operationUpdate)
-			}
-
-			if !isNotFoundServiceError(svcErr) {
-				return serviceErrorOutcome(
-					resourceType,
-					resourceID,
-					resourceName,
-					operationUpdate,
-					svcErr,
-				)
-			}
-		}
-
-		return successOutcome(resourceType, resourceID, resourceName, operationCreate)
-	}
-
-	if upsert && resourceID != "" {
-		updatedID, updatedName, svcErr := updateFn()
-		if svcErr == nil {
-			return successOutcome(resourceType, updatedID, updatedName, operationUpdate)
-		}
-
-		if !isNotFoundServiceError(svcErr) {
-			return serviceErrorOutcome(
-				resourceType,
-				resourceID,
-				resourceName,
-				operationUpdate,
-				svcErr,
-			)
-		}
-
-		// ID-preserving create is not supported; return a clear failure when ID is set but not found.
-		return ImportItemOutcome{
-			ResourceType: resourceType,
-			ResourceID:   resourceID,
-			ResourceName: resourceName,
-			Operation:    operationCreate,
-			Status:       statusFailed,
-			Code:         ErrorInvalidImportRequest.Code,
-			Message: fmt.Sprintf("%s with given ID not found; ID-preserving create not supported",
-				resourceType),
-		}
-	}
-
-	createdID, createdName, svcErr := createFn()
-	if svcErr != nil {
-		return serviceErrorOutcome(resourceType, resourceID, resourceName, operationCreate, svcErr)
-	}
-
-	return successOutcome(resourceType, createdID, createdName, operationCreate)
 }
 
 //nolint:dupl // parallel to importCredentialConfiguration; kept separate per resource type.

@@ -1,27 +1,14 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowmgt
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
+	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,8 +23,12 @@ import (
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 )
+
+// serverConfigProvider is the minimal subset of serverconfig.ServerConfigService consumed by flowmgt.
+type serverConfigProvider interface {
+	GetMergedConfig(ctx context.Context, name string) (any, *tidcommon.ServiceError)
+}
 
 // Initialize initializes the flow management service and registers HTTP routes.
 func Initialize(
@@ -48,6 +39,9 @@ func Initialize(
 	executorRegistry executor.ExecutorRegistryInterface,
 	interceptorRegistry interceptor.InterceptorRegistryInterface,
 	graphBuilder graphbuilder.GraphBuilderInterface,
+	serverConfigSvc serverConfigProvider,
+	ouSvc ouProvider,
+	configHandler *FlowConfigHandler,
 ) (FlowMgtServiceInterface, declarativeresource.ResourceExporter, error) {
 	flowValidator := newFlowValidator(executorRegistry, interceptorRegistry, graphBuilder)
 	store, compositeStore, transactioner, err := initializeStore(cacheManager, flowValidator)
@@ -58,8 +52,16 @@ func Initialize(
 	inferenceService := newFlowInferenceService()
 	service := newFlowMgtService(
 		store, inferenceService, graphBuilder, executorRegistry,
-		interceptorRegistry, flowValidator, compositeStore, transactioner,
+		interceptorRegistry, flowValidator, compositeStore, transactioner, serverConfigSvc, ouSvc,
 	)
+
+	// TODO: Check whether this can be improved to avoid injecting configHandler to flow mgt service
+	if configHandler != nil {
+		configHandler.SetHandleValidator(func(ctx context.Context, handle string, flowType providers.FlowType) bool {
+			_, svcErr := service.GetFlowByHandle(ctx, handle, flowType)
+			return svcErr == nil
+		})
+	}
 
 	handler := newFlowMgtHandler(service)
 	registerRoutes(mux, handler)
@@ -95,7 +97,7 @@ func Initialize(
 //   - Declarative flows cannot be updated or deleted
 func initializeStore(
 	cacheManager cache.CacheManagerInterface,
-	flowValidator FlowValidatorInterface) (flowStoreInterface, *compositeFlowStore, transaction.Transactioner, error) {
+	flowValidator FlowValidatorInterface) (flowStoreInterface, *compositeFlowStore, providers.Transactioner, error) {
 	var compositeStore *compositeFlowStore
 
 	storeMode := getFlowStoreMode()

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package utils
 
@@ -24,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"net/http"
 	"net/url"
 	"path"
@@ -404,7 +388,7 @@ func IsValidURI(uri string) bool {
 }
 
 // IsValidLogoURI checks if the provided URI is valid for use as a logo URL.
-// It enforces a scheme allowlist: http/https require a non-empty host, data/blob/emoji
+// It enforces a scheme allowlist: http/https require a non-empty host, data/blob/emoji/avatar
 // schemes are always accepted, and relative paths (no scheme, non-empty path) are accepted.
 // All other schemes (e.g. javascript, file) are rejected.
 func IsValidLogoURI(uri string) bool {
@@ -418,7 +402,7 @@ func IsValidLogoURI(uri string) bool {
 	switch parsed.Scheme {
 	case "http", "https":
 		return parsed.Host != ""
-	case "data", "blob", "emoji":
+	case "data", "blob", "emoji", "avatar":
 		return true
 	case "":
 		// Accept relative paths (no scheme, but path must start with /)
@@ -465,7 +449,9 @@ func DecodeJSONResponse[T any](resp *http.Response) (*T, error) {
 	return &data, nil
 }
 
-// SanitizeString trims whitespace, removes control characters, and escapes HTML.
+// SanitizeString trims whitespace and removes control characters (except newline and tab).
+// It does NOT HTML-escape: escaping is an output-context concern and is applied at the
+// rendering sinks, so applying it here would corrupt the stored value.
 func SanitizeString(input string) string {
 	if input == "" {
 		return input
@@ -475,21 +461,16 @@ func SanitizeString(input string) string {
 	trimmed := strings.TrimSpace(input)
 
 	// Remove non-printable/control characters (except newline and tab)
-	cleaned := strings.Map(func(r rune) rune {
+	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) && r != '\n' && r != '\t' {
 			return -1
 		}
 		return r
 	}, trimmed)
-
-	// Escape HTML to prevent XSS
-	safe := html.EscapeString(cleaned)
-
-	return safe
 }
 
 // SanitizeStringMap sanitizes a map of strings.
-// This function trim whitespace, removes control characters, and escapes HTML in each map entry.
+// This function trims whitespace and removes control characters in each map entry.
 func SanitizeStringMap(inputs map[string]string) map[string]string {
 	if len(inputs) == 0 {
 		return inputs
@@ -500,6 +481,69 @@ func SanitizeStringMap(inputs map[string]string) map[string]string {
 		sanitized[key] = SanitizeString(value)
 	}
 	return sanitized
+}
+
+// sanitizeRaw trims whitespace and removes control characters but does NOT HTML-escape.
+// Use this for values that must remain structurally intact (e.g. JSON, URIs, JWTs)
+// and are not rendered in an HTML context.
+func sanitizeRaw(input string) string {
+	if input == "" {
+		return input
+	}
+
+	trimmed := strings.TrimSpace(input)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, trimmed)
+}
+
+// SanitizeRawMultiValueStringMap sanitizes a map[string][]string by trimming whitespace and
+// removing control characters from values but does NOT HTML-escape and does NOT modify keys.
+// Keys are preserved verbatim to prevent normalization collisions (e.g. " X " and "X" trimming
+// to the same key). Use this for structured HTTP values such as JSON, URIs, and JWTs.
+func SanitizeRawMultiValueStringMap(inputs map[string][]string) map[string][]string {
+	if len(inputs) == 0 {
+		return inputs
+	}
+
+	sanitized := make(map[string][]string, len(inputs))
+	for key, values := range inputs {
+		sanitizedValues := make([]string, len(values))
+		for i, v := range values {
+			sanitizedValues[i] = sanitizeRaw(v)
+		}
+		sanitized[key] = sanitizedValues
+	}
+
+	return sanitized
+}
+
+// sensitiveHeaders is the deny-list of header names (lowercase) that must not be forwarded
+// beyond the HTTP boundary into provider metadata or initiator requests.
+var sensitiveHeaders = map[string]bool{
+	strings.ToLower(constants.AuthorizationHeaderName):      true,
+	strings.ToLower(constants.CookieHeaderName):             true,
+	strings.ToLower(constants.SetCookieHeaderName):          true,
+	strings.ToLower(constants.ProxyAuthorizationHeaderName): true,
+}
+
+// FilterSensitiveHeaders returns a copy of the header map with credential-bearing headers removed.
+func FilterSensitiveHeaders(h map[string][]string) map[string][]string {
+	if len(h) == 0 {
+		return h
+	}
+
+	filtered := make(map[string][]string, len(h))
+	for name, values := range h {
+		if !sensitiveHeaders[strings.ToLower(name)] {
+			filtered[name] = values
+		}
+	}
+
+	return filtered
 }
 
 // IsBearerAuth checks if the Authorization header uses the Bearer scheme (case-insensitive).

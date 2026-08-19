@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package entitytype
 
@@ -104,19 +89,6 @@ var (
 			DefaultValue: "The offset parameter must be a non-negative integer",
 		},
 	}
-	// ErrorUserValidationFailed is the error returned when user attributes do not conform to the schema.
-	ErrorUserValidationFailed = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "USRS-1007",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.entitytypeservice.user_validation_failed",
-			DefaultValue: "User validation failed",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.entitytypeservice.user_validation_failed_description",
-			DefaultValue: "User attributes do not conform to the required schema",
-		},
-	}
 	// ErrorCannotModifyDeclarativeResource is the error returned when trying to modify a declarative resource.
 	ErrorCannotModifyDeclarativeResource = tidcommon.ServiceError{
 		Type: tidcommon.ClientErrorType,
@@ -128,22 +100,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.entitytypeservice.cannot_modify_declarative_resource_description",
 			DefaultValue: "The user type is declarative and cannot be modified or deleted",
-		},
-	}
-	// ErrorResultLimitExceededInCompositeMode is the error returned when
-	// the result limit is exceeded in composite mode.
-	ErrorResultLimitExceededInCompositeMode = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "USRS-1009",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.entitytypeservice.result_limit_exceeded",
-			DefaultValue: "Result limit exceeded",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key: "error.entitytypeservice.result_limit_exceeded_description",
-			DefaultValue: "The combined result set from both file-based and database " +
-				"stores exceeds the maximum limit. Please refine your query to return " +
-				"fewer results.",
 		},
 	}
 	// ErrorInvalidDisplayAttribute is the error returned when the display attribute

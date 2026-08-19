@@ -3,6 +3,7 @@ id: decl-app-confidential-1
 name: Declarative Test Confidential Application
 description: A declarative confidential test application for integration testing
 ouId: decl-ou-1
+type: fullstack
 template: web
 authFlowId: decl-flow-1
 registrationFlowId: decl-reg-flow-1

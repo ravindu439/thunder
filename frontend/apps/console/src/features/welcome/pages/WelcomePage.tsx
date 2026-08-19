@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useConfig} from '@thunderid/contexts';
 import {Box, Card, IconButton, Stack, Typography, useTheme} from '@wso2/oxygen-ui';
@@ -33,6 +18,7 @@ import {motion} from 'framer-motion';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
+import RouteConfig from '../../../configs/RouteConfig';
 import useWelcomeClose from '../hooks/useWelcomeClose';
 import getWelcomeDismissedStorageKey from '../utils/getWelcomeDismissedStorageKey';
 
@@ -44,12 +30,12 @@ export default function WelcomePage(): JSX.Element {
   const theme = useTheme();
   const {config} = useConfig();
   const productName = config.brand.product_name;
-  const docsBaseUrl = (config.brand.documentation?.baseUrl ?? '').replace(/\/$/, '');
+  const docsBaseUrl = (config.documentation?.baseUrl ?? '').replace(/\/$/, '');
   const handleClose = useWelcomeClose();
 
   const handleCreateNewProject = (): void => {
     sessionStorage.setItem(getWelcomeDismissedStorageKey(productName), 'true');
-    void navigate('/welcome/create-project');
+    void navigate(RouteConfig.welcome.createProject());
   };
 
   const startActions = [
@@ -67,7 +53,7 @@ export default function WelcomePage(): JSX.Element {
       description: t('common:welcome.start.openImportDesc', {productName}),
       action: () => {
         sessionStorage.setItem(getWelcomeDismissedStorageKey(productName), 'true');
-        void navigate('/welcome/import-configuration');
+        void navigate(RouteConfig.welcome.importConfigurationUpload());
       },
     },
   ];
@@ -80,7 +66,7 @@ export default function WelcomePage(): JSX.Element {
       description: t('common:welcome.tryoutProduct.securingApplicationDesc'),
       action: () => {
         sessionStorage.setItem(getWelcomeDismissedStorageKey(productName), 'true');
-        void navigate('/welcome/tryout/securing-application');
+        void navigate(RouteConfig.welcome.tryoutSecuringApplication());
       },
     },
     {
@@ -90,7 +76,7 @@ export default function WelcomePage(): JSX.Element {
       description: t('common:welcome.tryoutProduct.aiAgentsDesc'),
       action: () => {
         sessionStorage.setItem(getWelcomeDismissedStorageKey(productName), 'true');
-        void navigate('/welcome/tryout/ai-agents');
+        void navigate(RouteConfig.welcome.tryoutAiAgents());
       },
     },
     {
@@ -100,7 +86,7 @@ export default function WelcomePage(): JSX.Element {
       description: t('common:welcome.tryoutProduct.mcpDesc'),
       action: () => {
         sessionStorage.setItem(getWelcomeDismissedStorageKey(productName), 'true');
-        void navigate('/welcome/tryout/mcp');
+        void navigate(RouteConfig.welcome.tryoutMcp());
       },
     },
   ];

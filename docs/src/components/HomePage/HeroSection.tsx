@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import Link from '@docusaurus/Link';
 import {useBaseUrlUtils} from '@docusaurus/useBaseUrl';
@@ -32,6 +17,7 @@ import IOSLogo from '../icons/IOSLogo';
 import LinuxLogo from '../icons/LinuxLogo';
 import SkillsLogo from '../icons/SkillsLogo';
 import WindowsLogo from '../icons/WindowsLogo';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 
 const INSTALL_TABS = [
   {id: 'cli', label: 'npx', icon: CliLogo, command: 'npx thunderid', brandColor: null, enabled: true},
@@ -112,6 +98,7 @@ export default function HeroSection(): JSX.Element {
   const theme = useTheme();
   const isLight = !useIsDarkMode();
   const {withBaseUrl} = useBaseUrlUtils();
+  const docsUrl = useDocsUrl();
 
   const [activeTab, setActiveTabRaw] = useState('cli');
   const setActiveTab = setActiveTabRaw as (v: string) => void;
@@ -248,7 +235,7 @@ export default function HeroSection(): JSX.Element {
                 animation: 'fadeInUp 0.7s cubic-bezier(0.16,1,0.3,1) 0.2s both',
               }}
             >
-              Authentication, authorization, and identity for humans, AI agents, and workloads.
+              Authentication, authorization, and identity for humans, AI agents, and machines.
             </Typography>
 
             <Stack
@@ -259,7 +246,7 @@ export default function HeroSection(): JSX.Element {
             >
               <Button
                 component={Link}
-                href="/docs/next"
+                href={docsUrl('/docs/next')}
                 variant="contained"
                 color="primary"
                 size="large"
@@ -284,7 +271,7 @@ export default function HeroSection(): JSX.Element {
               </Button>
               <Button
                 component={Link}
-                href="/docs/next/guides/getting-started/get-thunderid"
+                href={docsUrl('/docs/next/getting-started/get-thunderid')}
                 variant="text"
                 size="large"
                 sx={{
@@ -697,7 +684,7 @@ export default function HeroSection(): JSX.Element {
               ) : null}
               <Typography
                 component={Link}
-                href="/docs/next/guides/getting-started/get-thunderid"
+                href={docsUrl('/docs/next/getting-started/get-thunderid')}
                 sx={{
                   fontSize: '0.82rem',
                   color: dimColor,

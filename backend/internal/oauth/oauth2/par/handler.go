@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package par
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/clientauth"
@@ -97,8 +83,18 @@ func (h *parHandler) HandlePARRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := make(map[string]string)
+	// Only the resource parameter is permitted to be repeated (RFC 8707 §2). Any other parameter
+	// appearing more than once is rejected with invalid_request per RFC 6749 §3.1.
+	params := make(map[string]string, len(r.PostForm))
 	for key, values := range r.PostForm {
+		if key == oauth2const.RequestParamResource {
+			continue
+		}
+		if len(values) > 1 {
+			utils.WriteJSONError(ctx, w, oauth2const.ErrorInvalidRequest,
+				fmt.Sprintf("Parameter %q must not be repeated", key), http.StatusBadRequest, nil)
+			return
+		}
 		if len(values) > 0 {
 			params[key] = values[0]
 		}

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {Node, Edge} from '@xyflow/react';
 import {describe, it, expect, vi} from 'vitest';
@@ -254,6 +239,51 @@ describe('reactFlowTransformer', () => {
           ref: 'button-1',
           nextNode: 'next-node',
         });
+      });
+
+      it("should carry a button's action type into the prompt action", () => {
+        const components: Element[] = [
+          {
+            id: 'button-1',
+            type: ElementTypes.Action,
+            category: ElementCategories.Action,
+            eventType: 'SUBMIT',
+            actionType: 'CONFIRM',
+          } as Element & {eventType: string},
+        ];
+
+        const canvasData: ReactFlowCanvasData = {
+          nodes: [createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components})],
+          edges: [createEdge('edge-1', 'view-1', 'session_signout', 'button-1_NEXT')],
+        };
+
+        const result = transformReactFlow(canvasData);
+
+        expect(result.nodes[0].prompts?.[0].action).toEqual({
+          ref: 'button-1',
+          nextNode: 'session_signout',
+          type: 'CONFIRM',
+        });
+      });
+
+      it('should omit the action type when the button does not declare one', () => {
+        const components: Element[] = [
+          {
+            id: 'button-1',
+            type: ElementTypes.Action,
+            category: ElementCategories.Action,
+            eventType: 'SUBMIT',
+          } as Element & {eventType: string},
+        ];
+
+        const canvasData: ReactFlowCanvasData = {
+          nodes: [createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components})],
+          edges: [createEdge('edge-1', 'view-1', 'next-node', 'button-1_NEXT')],
+        };
+
+        const result = transformReactFlow(canvasData);
+
+        expect(result.nodes[0].prompts?.[0].action).not.toHaveProperty('type');
       });
 
       it('should handle nested components in forms', () => {
@@ -1108,6 +1138,53 @@ describe('reactFlowTransformer', () => {
         expect(actionButton?.eventType).toBe(ActionEventTypes.Submit);
       });
 
+      it('should serialize a SELECT field as an input and promote the single button to SUBMIT', () => {
+        const components: Element[] = [
+          {
+            id: 'block-1',
+            type: 'BLOCK',
+            category: ElementCategories.Block,
+            components: [
+              {
+                id: 'select-1',
+                type: ElementTypes.Select,
+                category: ElementCategories.Field,
+                name: 'country',
+                required: true,
+              },
+              {
+                id: 'button-1',
+                type: ElementTypes.Action,
+                category: ElementCategories.Action,
+                eventType: ActionEventTypes.Trigger,
+                action: {onSuccess: 'next-node'},
+              },
+            ],
+          } as unknown as Element,
+        ];
+
+        const canvasData: ReactFlowCanvasData = {
+          nodes: [createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components})],
+          edges: [createEdge('edge-1', 'view-1', 'next-node', 'button-1_NEXT')],
+        };
+
+        const result = transformReactFlow(canvasData);
+
+        expect(result.nodes[0].prompts?.[0].inputs).toEqual([
+          {
+            ref: 'select-1',
+            type: ElementTypes.Select,
+            identifier: 'country',
+            required: true,
+          },
+        ]);
+
+        const block = result.nodes[0].meta?.components?.[0] ?? {};
+        const blockChildren = block.components as Record<string, unknown>[];
+        expect(blockChildren.find((c) => c.type === ElementTypes.Select)?.ref).toBe('country');
+        expect(blockChildren.find((c) => c.type === ElementTypes.Action)?.eventType).toBe(ActionEventTypes.Submit);
+      });
+
       it('should keep TRIGGER eventType for buttons inside a block without input fields', () => {
         const components: Element[] = [
           {
@@ -1596,6 +1673,86 @@ describe('reactFlowTransformer', () => {
       expect(errors).toHaveLength(0);
     });
 
+    describe('SSO pairing', () => {
+      const layout = {size: {width: 100, height: 50}, position: {x: 0, y: 0}};
+
+      const baseNodes = [
+        {id: 'start-1', type: 'START', layout, onSuccess: 'end-1'},
+        {id: 'end-1', type: 'END', layout},
+      ];
+
+      it('should accept a valid SSO check and session pair', () => {
+        const flowGraph: FlowGraph = {
+          nodes: [
+            ...baseNodes,
+            {
+              id: 'sso_check_1',
+              type: 'TASK_EXECUTION',
+              layout,
+              executor: {name: 'SSOCheckExecutor'},
+              properties: {checkpointRef: 'session_1'},
+              onSuccess: 'session_1',
+            },
+            {id: 'session_1', type: 'TASK_EXECUTION', layout, executor: {name: 'SessionExecutor'}, onSuccess: 'end-1'},
+          ],
+        };
+
+        expect(validateFlowGraph(flowGraph)).toHaveLength(0);
+      });
+
+      it('should detect an SSO check without a checkpointRef', () => {
+        const flowGraph: FlowGraph = {
+          nodes: [
+            ...baseNodes,
+            {
+              id: 'sso_check_1',
+              type: 'TASK_EXECUTION',
+              layout,
+              executor: {name: 'SSOCheckExecutor'},
+              onSuccess: 'end-1',
+            },
+          ],
+        };
+
+        expect(validateFlowGraph(flowGraph)).toContain(
+          'Node sso_check_1: SSO check must reference a session checkpoint via checkpointRef',
+        );
+      });
+
+      it('should detect a checkpointRef pointing to a missing session node', () => {
+        const flowGraph: FlowGraph = {
+          nodes: [
+            ...baseNodes,
+            {
+              id: 'sso_check_1',
+              type: 'TASK_EXECUTION',
+              layout,
+              executor: {name: 'SSOCheckExecutor'},
+              properties: {checkpointRef: 'session_gone'},
+              onSuccess: 'end-1',
+            },
+          ],
+        };
+
+        expect(validateFlowGraph(flowGraph)).toContain(
+          'Node sso_check_1: checkpointRef references non-existent session node session_gone',
+        );
+      });
+
+      it('should detect a session node not referenced by any SSO check', () => {
+        const flowGraph: FlowGraph = {
+          nodes: [
+            ...baseNodes,
+            {id: 'session_1', type: 'TASK_EXECUTION', layout, executor: {name: 'SessionExecutor'}, onSuccess: 'end-1'},
+          ],
+        };
+
+        expect(validateFlowGraph(flowGraph)).toContain(
+          'Node session_1: session node is not referenced by any SSO check',
+        );
+      });
+    });
+
     it('should detect duplicate node IDs', () => {
       const flowGraph: FlowGraph = {
         nodes: [
@@ -1944,6 +2101,177 @@ describe('reactFlowTransformer', () => {
       expect(callNode.flow).toEqual({ref: 'ref-1'});
       expect(callNode.onSuccess).toBe('success-1');
       expect(callNode.onFailure).toBe('failure-1');
+    });
+
+    describe('Rich Text Action Serialization', () => {
+      const richText = (action: unknown): Element =>
+        ({
+          id: 'rt-1',
+          type: ElementTypes.RichText,
+          category: ElementCategories.Display,
+          action,
+          label: '<p><a href="#" data-action-ref="action_recovery">Reset</a></p>',
+        }) as unknown as Element;
+
+      it('serialises a rich text whose action was toggled off', () => {
+        // The panel writes an explicit `null` when the toggle goes off. Reading `ref` off it
+        // threw and took the whole save down with it.
+        const canvasData = {
+          nodes: [createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components: [richText(null)]} as StepData)],
+          edges: [],
+        };
+
+        const result = transformReactFlow(canvasData);
+        const viewNode = result.nodes.find((n) => n.id === 'view-1') as unknown as {
+          meta?: {components?: Record<string, unknown>[]};
+          prompts?: unknown[];
+        };
+
+        expect(viewNode.meta?.components?.[0].action).toBeUndefined();
+        expect(viewNode.prompts ?? []).toEqual([]);
+      });
+
+      it('serialises an empty ref as the label sentinel, on both the component and the prompt', () => {
+        // The runtime matches the clicked anchor's sentinel against the component's `action.ref`
+        // and looks the prompt up by the same value, so all three must agree.
+        const canvasData = {
+          nodes: [
+            createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components: [richText({ref: ''})]} as StepData),
+            createNode('call-1', StepTypes.Call),
+          ],
+          edges: [createEdge('e-1', 'view-1', 'call-1', `rt-1${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`)],
+        };
+
+        const result = transformReactFlow(canvasData);
+        const viewNode = result.nodes.find((n) => n.id === 'view-1') as unknown as {
+          meta?: {components?: Record<string, unknown>[]};
+          prompts?: {action: {ref: string; nextNode: string}}[];
+        };
+
+        expect(viewNode.meta?.components?.[0].action).toEqual({ref: 'action_recovery'});
+        expect(viewNode.prompts?.[0].action).toEqual({ref: 'action_recovery', nextNode: 'call-1'});
+        expect(viewNode.meta?.components?.[0].label).toContain('data-action-ref="action_recovery"');
+      });
+
+      it('falls back to the component id when the label carries no sentinel', () => {
+        const withoutSentinel = {...richText({ref: ''}), label: '<p><a href="#">Reset</a></p>'} as unknown as Element;
+        const canvasData = {
+          nodes: [
+            createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components: [withoutSentinel]} as StepData),
+            createNode('call-1', StepTypes.Call),
+          ],
+          edges: [createEdge('e-1', 'view-1', 'call-1', `rt-1${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`)],
+        };
+
+        const result = transformReactFlow(canvasData);
+        const viewNode = result.nodes.find((n) => n.id === 'view-1') as unknown as {
+          meta?: {components?: Record<string, unknown>[]};
+          prompts?: {action: {ref: string; nextNode: string}}[];
+        };
+
+        expect(viewNode.meta?.components?.[0].action).toEqual({ref: 'rt-1'});
+        expect(viewNode.prompts?.[0].action).toEqual({ref: 'rt-1', nextNode: 'call-1'});
+      });
+
+      it('serialises an action object that carries no ref of its own', () => {
+        // A prompt is emitted for any present action, so the component has to be given the
+        // same resolved ref, otherwise the prompt is unreachable at runtime.
+        const canvasData = {
+          nodes: [
+            createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components: [richText({})]} as StepData),
+            createNode('call-1', StepTypes.Call),
+          ],
+          edges: [createEdge('e-1', 'view-1', 'call-1', `rt-1${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`)],
+        };
+
+        const result = transformReactFlow(canvasData);
+        const viewNode = result.nodes.find((n) => n.id === 'view-1') as unknown as {
+          meta?: {components?: Record<string, unknown>[]};
+          prompts?: {action: {ref: string; nextNode: string}}[];
+        };
+
+        expect(viewNode.meta?.components?.[0].action).toEqual({ref: 'action_recovery'});
+        expect(viewNode.prompts?.[0].action).toEqual({ref: 'action_recovery', nextNode: 'call-1'});
+      });
+    });
+
+    describe('Resend Action Serialization', () => {
+      const otpInput = {
+        id: 'otp-1',
+        type: ElementTypes.OtpInput,
+        category: ElementCategories.Field,
+        ref: 'otp',
+        required: true,
+      } as unknown as Element;
+
+      const verifyAction = {
+        id: 'verify-1',
+        type: ElementTypes.Action,
+        category: ElementCategories.Action,
+        eventType: ActionEventTypes.Submit,
+      } as unknown as Element;
+
+      const resendAction = {
+        id: 'resend-1',
+        type: ElementTypes.Resend,
+        category: ElementCategories.Action,
+        eventType: ActionEventTypes.Submit,
+      } as unknown as Element;
+
+      const otpBlock = {
+        id: 'block-1',
+        type: 'BLOCK',
+        category: ElementCategories.Block,
+        components: [otpInput, verifyAction, resendAction],
+      } as unknown as Element;
+
+      const buildCanvas = () => ({
+        nodes: [
+          createNode('view-1', StepTypes.View, {x: 0, y: 0}, {components: [otpBlock]} as StepData),
+          createNode('verify-node', StepTypes.Execution),
+          createNode('generate-node', StepTypes.Execution),
+        ],
+        edges: [
+          createEdge(
+            'e-verify',
+            'view-1',
+            'verify-node',
+            `verify-1${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`,
+          ),
+          createEdge(
+            'e-resend',
+            'view-1',
+            'generate-node',
+            `resend-1${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`,
+          ),
+        ],
+      });
+
+      const promptsOf = (result: ReturnType<typeof transformReactFlow>) =>
+        (
+          result.nodes.find((n) => n.id === 'view-1') as unknown as {
+            prompts?: {action: {ref: string; nextNode: string}; inputs?: {identifier: string}[]}[];
+          }
+        ).prompts;
+
+      it('emits no inputs for a resend action sharing a block with a required OTP input', () => {
+        // A resend re-issues the code the OTP input is waiting for. Inheriting that required
+        // input makes the engine reject the resend for a missing `otp` and re-prompt instead.
+        const prompts = promptsOf(transformReactFlow(buildCanvas()));
+        const resendPrompt = prompts?.find((p) => p.action.ref === 'resend-1');
+
+        expect(resendPrompt).toBeDefined();
+        expect(resendPrompt?.inputs).toBeUndefined();
+        expect(resendPrompt?.action.nextNode).toBe('generate-node');
+      });
+
+      it('still gives the sibling submit action the block inputs', () => {
+        const prompts = promptsOf(transformReactFlow(buildCanvas()));
+        const verifyPrompt = prompts?.find((p) => p.action.ref === 'verify-1');
+
+        expect(verifyPrompt?.inputs).toHaveLength(1);
+        expect(verifyPrompt?.inputs?.[0].identifier).toBe('otp');
+      });
     });
   });
 });

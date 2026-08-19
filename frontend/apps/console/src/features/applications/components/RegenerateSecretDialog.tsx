@@ -1,26 +1,14 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useLogger} from '@thunderid/logger';
+import {getErrorMessage} from '@thunderid/utils';
 import {Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button, Alert} from '@wso2/oxygen-ui';
 import {useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import useRegenerateClientSecret from '../api/useRegenerateClientSecret';
+
+const DEFAULT_REGENERATE_SECRET_ERROR = 'Failed to regenerate client secret. Please try again.';
 
 /**
  * Props for the {@link RegenerateSecretDialog} component.
@@ -64,7 +52,7 @@ export default function RegenerateSecretDialog({
   onSuccess = undefined,
   onError = undefined,
 }: RegenerateSecretDialogProps): JSX.Element {
-  const {t} = useTranslation();
+  const {t} = useTranslation('applications');
   const logger = useLogger('RegenerateSecretDialog');
   const [error, setError] = useState<string | null>(null);
   const regenerateClientSecret = useRegenerateClientSecret();
@@ -76,7 +64,7 @@ export default function RegenerateSecretDialog({
 
   const handleConfirm = (): void => {
     if (!applicationId) {
-      setError(t('applications:regenerateSecret.dialog.error'));
+      setError(t('regenerateSecret.dialog.error', DEFAULT_REGENERATE_SECRET_ERROR));
       return;
     }
 
@@ -94,7 +82,12 @@ export default function RegenerateSecretDialog({
           onSuccess?.(clientSecret);
         },
         onError: (err) => {
-          const errorMessage = err instanceof Error ? err.message : t('applications:regenerateSecret.dialog.error');
+          const errorMessage = getErrorMessage(
+            err,
+            t,
+            'regenerateSecret.dialog.error',
+            DEFAULT_REGENERATE_SECRET_ERROR,
+          );
           logger.error('Failed to regenerate client secret', {
             applicationId,
             errorMessage,
@@ -109,11 +102,19 @@ export default function RegenerateSecretDialog({
 
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>{t('applications:regenerateSecret.dialog.title')}</DialogTitle>
+      <DialogTitle>{t('regenerateSecret.dialog.title', 'Regenerate Client Secret')}</DialogTitle>
       <DialogContent>
-        <DialogContentText sx={{mb: 2}}>{t('applications:regenerateSecret.dialog.message')}</DialogContentText>
+        <DialogContentText sx={{mb: 2}}>
+          {t(
+            'regenerateSecret.dialog.message',
+            'Are you sure you want to regenerate the client secret for this application? This will immediately invalidate the current client secret and generate a new one.',
+          )}
+        </DialogContentText>
         <Alert severity="warning" sx={{mb: 2}}>
-          {t('applications:regenerateSecret.dialog.disclaimer')}
+          {t(
+            'regenerateSecret.dialog.disclaimer',
+            'Warning: Regenerating the client secret will invalidate the current secret and the application may stop working until the new client secret is updated in its configuration.',
+          )}
         </Alert>
         {error && (
           <Alert severity="error" sx={{mt: 2}}>
@@ -132,8 +133,8 @@ export default function RegenerateSecretDialog({
           disabled={regenerateClientSecret.isPending || !applicationId}
         >
           {regenerateClientSecret.isPending
-            ? t('applications:regenerateSecret.dialog.regenerating')
-            : t('applications:regenerateSecret.dialog.confirmButton')}
+            ? t('regenerateSecret.dialog.regenerating', 'Regenerating...')
+            : t('regenerateSecret.dialog.confirmButton', 'Regenerate')}
         </Button>
       </DialogActions>
     </Dialog>

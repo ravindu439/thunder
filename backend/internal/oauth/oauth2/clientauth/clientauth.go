@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package clientauth provides shared client authentication logic for OAuth2 endpoints.
 package clientauth
@@ -27,20 +12,25 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	authnprovidercm "github.com/thunder-id/thunderid/internal/authnprovider/common"
 	"github.com/thunder-id/thunderid/internal/cert"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/jti"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
-	"github.com/thunder-id/thunderid/internal/system/jose/jws"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
+// jtiNamespace identifies private_key_jwt client assertions in the shared JTI replay store.
+const jtiNamespace = "client_assertion"
+
 // authenticate authenticates the OAuth2 client from the request.
 // It extracts credentials, validates them, and returns OAuthClientInfo on success.
-// The endpointURL is used as the expected audience when validating client assertion JWTs.
+// The issuer is the audience value accepted when validating client assertion JWTs.
 // Returns an authError on failure.
 func authenticate(
 	ctx context.Context,
@@ -48,7 +38,9 @@ func authenticate(
 	actorProvider providers.ActorProvider,
 	authnProvider providers.AuthnProviderManager,
 	jwtService jwt.JWTServiceInterface,
-	endpointURL string,
+	jtiStore jti.JTIStoreInterface,
+	issuer string,
+	leeway int64,
 ) (*OAuthClientInfo, *authError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "ClientAuthMiddleware"))
 
@@ -139,6 +131,10 @@ func authenticate(
 	}
 
 	if oauthApp.TokenEndpointAuthMethod != detectedMethod {
+		// No credentials presented for a client that requires authentication.
+		if detectedMethod == providers.TokenEndpointAuthMethodNone {
+			return nil, errClientAuthRequired
+		}
 		return nil, errUnauthorizedAuthMethod
 	}
 
@@ -146,8 +142,8 @@ func authenticate(
 	switch detectedMethod {
 	// TODO: Move this to authnProvider.Authenticate
 	case providers.TokenEndpointAuthMethodPrivateKeyJWT:
-		if err := validateClientAssertion(ctx, oauthApp, jwtService, endpointURL, clientID,
-			clientAssertion); err != nil {
+		if err := validateClientAssertion(ctx, oauthApp, jwtService, jtiStore, issuer, clientID,
+			clientAssertion, leeway); err != nil {
 			logger.Debug(ctx, "Invalid client assertion: "+err.Error())
 			return nil, errInvalidClientAssertion
 		}
@@ -155,7 +151,7 @@ func authenticate(
 		providers.TokenEndpointAuthMethodClientSecretPost:
 		_, _, authnErr := authnProvider.AuthenticateUser(ctx,
 			map[string]interface{}{"clientId": clientID},
-			map[string]interface{}{"clientSecret": clientSecret},
+			map[string]interface{}{authnprovidercm.CredentialTypeClientSecret: clientSecret},
 			nil, nil, providers.AuthUser{})
 		if authnErr != nil {
 			logger.Debug(ctx, "Client secret authentication failed",
@@ -230,18 +226,49 @@ func extractClientIDFromAssertion(ctx context.Context, assertion string) (string
 }
 
 // validateClientAssertion validates the provided client assertion JWT using the configured certificate and JWT service.
-// The endpointURL is used as the expected audience for JWT validation.
+// Per FAPI 2.0 Security Profile Section 5.3.2.1, the assertion's 'aud' claim must be the authorization server's
+// issuer identifier.
 func validateClientAssertion(ctx context.Context,
 	oauthApp *providers.OAuthClient,
 	jwtService jwt.JWTServiceInterface,
-	endpointURL string,
-	clientID, clientAssertion string) error {
+	jtiStore jti.JTIStoreInterface,
+	issuer string,
+	clientID, clientAssertion string,
+	leeway int64) error {
 	if oauthApp.Certificate == nil {
 		return fmt.Errorf("no certificate configured for client assertion validation")
 	}
 
+	// FAPI 2.0 Security Profile Section 5.3.2.1: the client assertion's 'aud' claim must be the
+	// authorization server's issuer identifier as a single string.
+	payload, err := jwt.DecodeJWTPayload(clientAssertion)
+	if err != nil {
+		return fmt.Errorf("failed to decode client assertion payload: %w", err)
+	}
+	aud, ok := payload[constants.ClaimAud].(string)
+	if !ok {
+		return fmt.Errorf("client assertion 'aud' claim must be a single string")
+	}
+	if aud != issuer {
+		return fmt.Errorf("client assertion 'aud' claim %q does not match the issuer", aud)
+	}
+
+	if err := verifyAssertionSignature(ctx, oauthApp, jwtService, issuer, clientID, clientAssertion); err != nil {
+		return err
+	}
+
+	// Replay protection: record the assertion's jti so it cannot be reused within its validity window.
+	return recordAssertionJTI(ctx, jtiStore, payload, leeway)
+}
+
+// verifyAssertionSignature verifies the client assertion's signature against the client's configured
+// certificate, resolving the verification key from either a JWKS URI or an inline JWKS.
+func verifyAssertionSignature(ctx context.Context,
+	oauthApp *providers.OAuthClient,
+	jwtService jwt.JWTServiceInterface,
+	issuer, clientID, clientAssertion string) error {
 	if oauthApp.Certificate.Type == cert.CertificateTypeJWKSURI {
-		if err := jwtService.VerifyJWTWithJWKS(ctx, clientAssertion, oauthApp.Certificate.Value, endpointURL,
+		if err := jwtService.VerifyJWTWithJWKS(ctx, clientAssertion, oauthApp.Certificate.Value, issuer,
 			clientID); err != nil {
 			return fmt.Errorf("client assertion verification with JWKS URI failed: %v", err.Error)
 		}
@@ -275,13 +302,34 @@ func validateClientAssertion(ctx context.Context,
 		return fmt.Errorf("no matching key found in JWKS for kid: %v", kid)
 	}
 
-	pubKey, err := jws.JWKToPublicKey(jwk)
-	if err != nil {
-		return fmt.Errorf("failed to convert JWK to public key: %w", err)
+	if err := jwtService.VerifyJWTWithPublicKey(ctx, clientAssertion, providers.KeyRef{PublicKeyJWK: jwk},
+		issuer, clientID); err != nil {
+		return fmt.Errorf("client assertion verification failed: %v", err.Error)
 	}
 
-	if err := jwtService.VerifyJWTWithPublicKey(ctx, clientAssertion, pubKey, endpointURL, clientID); err != nil {
-		return fmt.Errorf("client assertion verification failed: %v", err.Error)
+	return nil
+}
+
+// recordAssertionJTI enforces one-time use of a verified client assertion by recording its jti in
+// the shared replay store.
+func recordAssertionJTI(ctx context.Context, jtiStore jti.JTIStoreInterface,
+	payload map[string]interface{}, leeway int64) error {
+	jtiValue, ok := payload[constants.ClaimJTI].(string)
+	if !ok || jtiValue == "" {
+		return fmt.Errorf("client assertion missing 'jti' claim or 'jti' is not a string")
+	}
+	exp, ok := payload[constants.ClaimExp].(float64)
+	if !ok {
+		return fmt.Errorf("client assertion missing 'exp' claim or 'exp' is not a number")
+	}
+
+	expiry := time.Unix(int64(exp)+leeway, 0)
+	inserted, err := jtiStore.RecordJTI(ctx, jtiNamespace, jtiValue, expiry)
+	if err != nil {
+		return fmt.Errorf("failed to record client assertion jti: %w", err)
+	}
+	if !inserted {
+		return fmt.Errorf("client assertion replay detected")
 	}
 
 	return nil

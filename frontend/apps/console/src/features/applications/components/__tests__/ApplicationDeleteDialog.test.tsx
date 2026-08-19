@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
 import {render, screen, waitFor} from '@thunderid/test-utils';
@@ -28,17 +13,22 @@ vi.mock('../../api/useDeleteApplication');
 // Mock translations
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, fallbackOrOptions?: string | {defaultValue?: string}) => {
       const translations: Record<string, string> = {
-        'applications:delete.title': 'Delete Application',
-        'applications:delete.message': 'Are you sure you want to delete this application?',
-        'applications:delete.disclaimer':
-          'This action cannot be undone. All data associated with this application will be permanently deleted.',
+        'delete.title': 'Delete Application',
+        'delete.message': 'Are you sure you want to delete this application? This action cannot be undone.',
+        'delete.disclaimer':
+          'Warning: All associated data, configurations, and access tokens will be permanently removed.',
+        'delete.error': 'Failed to delete application. Please try again.',
+        'errors.APP-1030': 'This application is managed declaratively and cannot be edited or deleted.',
         'common:actions.cancel': 'Cancel',
         'common:actions.delete': 'Delete',
         'common:status.deleting': 'Deleting...',
       };
-      return translations[key] || key;
+      if (translations[key] !== undefined) return translations[key];
+      if (typeof fallbackOrOptions === 'string') return fallbackOrOptions;
+      if (fallbackOrOptions && 'defaultValue' in fallbackOrOptions) return fallbackOrOptions.defaultValue ?? key;
+      return key;
     },
   }),
 }));
@@ -89,10 +79,12 @@ describe('ApplicationDeleteDialog', () => {
 
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(screen.getByText('Delete Application')).toBeInTheDocument();
-      expect(screen.getByText('Are you sure you want to delete this application?')).toBeInTheDocument();
+      expect(
+        screen.getByText('Are you sure you want to delete this application? This action cannot be undone.'),
+      ).toBeInTheDocument();
       expect(
         screen.getByText(
-          'This action cannot be undone. All data associated with this application will be permanently deleted.',
+          'Warning: All associated data, configurations, and access tokens will be permanently removed.',
         ),
       ).toBeInTheDocument();
     });
@@ -113,7 +105,7 @@ describe('ApplicationDeleteDialog', () => {
     it('should not render error alert initially', () => {
       renderWithProviders();
 
-      expect(screen.queryByRole('alert')).toHaveTextContent('This action cannot be undone'); // Only warning alert
+      expect(screen.queryByRole('alert')).toHaveTextContent('Warning: All associated data'); // Only warning alert
     });
   });
 
@@ -212,7 +204,7 @@ describe('ApplicationDeleteDialog', () => {
       await user.click(deleteButton);
 
       await waitFor(() => {
-        expect(screen.getByText('Delete failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete application. Please try again.')).toBeInTheDocument();
       });
 
       // Then trigger success
@@ -227,18 +219,17 @@ describe('ApplicationDeleteDialog', () => {
 
       await waitFor(() => {
         expect(mockOnClose).toHaveBeenCalled();
-        expect(screen.queryByText('Delete failed')).not.toBeInTheDocument();
+        expect(screen.queryByText('Failed to delete application. Please try again.')).not.toBeInTheDocument();
       });
     });
   });
 
   describe('Delete Error Flow', () => {
-    it('should display error message when delete fails', async () => {
+    it('should display generic error message when delete fails', async () => {
       const user = userEvent.setup();
-      const errorMessage = 'Failed to delete application';
 
       mockMutate.mockImplementation((_, options: {onError?: (error: Error) => void}) => {
-        options?.onError?.(new Error(errorMessage));
+        options?.onError?.(new Error('Some raw backend error text'));
       });
 
       renderWithProviders();
@@ -247,11 +238,34 @@ describe('ApplicationDeleteDialog', () => {
       await user.click(deleteButton);
 
       await waitFor(() => {
-        expect(screen.getByText(errorMessage)).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete application. Please try again.')).toBeInTheDocument();
       });
 
       expect(mockOnClose).not.toHaveBeenCalled();
       expect(mockOnSuccess).not.toHaveBeenCalled();
+    });
+
+    it('should display the mapped error message for a declarative application', async () => {
+      const user = userEvent.setup();
+
+      mockMutate.mockImplementation((_, options: {onError?: (error: Error) => void}) => {
+        const error = new Error('Request failed') as Error & {response?: {data?: {code: string}}};
+        error.response = {data: {code: 'APP-1030'}};
+        options?.onError?.(error);
+      });
+
+      renderWithProviders();
+
+      const deleteButton = screen.getByRole('button', {name: 'Delete'});
+      await user.click(deleteButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('This application is managed declaratively and cannot be edited or deleted.'),
+        ).toBeInTheDocument();
+      });
+
+      expect(mockOnClose).not.toHaveBeenCalled();
     });
 
     it('should clear error when Cancel is clicked after error', async () => {
@@ -267,7 +281,7 @@ describe('ApplicationDeleteDialog', () => {
       await user.click(deleteButton);
 
       await waitFor(() => {
-        expect(screen.getByText('Delete failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete application. Please try again.')).toBeInTheDocument();
       });
 
       const cancelButton = screen.getByRole('button', {name: 'Cancel'});
@@ -276,26 +290,29 @@ describe('ApplicationDeleteDialog', () => {
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
-    it('should persist error message across re-renders until cleared', async () => {
+    it('should clear a previous error before retrying delete', async () => {
       const user = userEvent.setup();
 
-      mockMutate.mockImplementation((_, options: {onError?: (error: Error) => void}) => {
+      mockMutate.mockImplementationOnce((_, options: {onError?: (error: Error) => void}) => {
         options?.onError?.(new Error('Delete failed'));
       });
 
-      const {rerender} = renderWithProviders();
+      renderWithProviders();
 
       const deleteButton = screen.getByRole('button', {name: 'Delete'});
       await user.click(deleteButton);
 
       await waitFor(() => {
-        expect(screen.getByText('Delete failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete application. Please try again.')).toBeInTheDocument();
       });
 
-      // Re-render with same props
-      rerender(<ApplicationDeleteDialog {...defaultProps} />);
+      mockMutate.mockImplementationOnce(() => {
+        // Simulate the request still being in flight; the stale error should already be gone.
+      });
 
-      expect(screen.getByText('Delete failed')).toBeInTheDocument();
+      await user.click(deleteButton);
+
+      expect(screen.queryByText('Failed to delete application. Please try again.')).not.toBeInTheDocument();
     });
   });
 

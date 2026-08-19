@@ -166,9 +166,13 @@ paths:
     post:
       summary: Authorization callback
       description: |
-        Internal endpoint invoked by the flow engine after a successful authentication ceremony.
-        The flow engine submits a signed assertion JWT; this endpoint validates it, issues an
-        authorization code, and returns the redirect URI for the client.
+        Internal endpoint invoked by the Gate after a flow terminates. It submits the flow's signed
+        assertion JWT, which this endpoint validates before acting on it. A completed flow yields an
+        authentication assertion and an authorization code is issued (or, for CIBA, the request is
+        marked authenticated). A terminally failed flow yields an error assertion instead and the
+        failure is propagated to the waiting request (authorization code: an error redirect; CIBA: the
+        request is denied or marked failed). The two are distinguished by the assertion's own claims,
+        so callers submit both in the same field.
       tags:
         - Authorization
       requestBody:
@@ -190,7 +194,7 @@ paths:
               example:
                 redirect_uri: "https://client.example.com/callback?code=SplxlOBeZQQYbYS6WxSbIA&state=xyz&iss=https%3A%2F%2Fserver.example.com"
         "400":
-          description: Bad Request — missing or invalid authId / assertion.
+          description: Bad Request, missing authId or assertion.
           content:
             application/json:
               schema:
@@ -202,9 +206,17 @@ paths:
       description: |
         Issues access tokens, refresh tokens, and ID tokens. Supports the following grant types:
         `authorization_code`, `client_credentials`, `refresh_token`, `password`,
+        `urn:openid:params:grant-type:ciba` (CIBA Core 1.0),
         `urn:ietf:params:oauth:grant-type:token-exchange` (RFC 8693), and
         `urn:ietf:params:oauth:grant-type:jwt-bearer` (draft-ietf-oauth-identity-assertion-authz-grant).
         Requires client authentication via HTTP Basic auth or `client_id`/`client_secret` form parameters.
+
+        An access token issued for a user through the `authorization_code` or
+        `urn:openid:params:grant-type:ciba` grant keeps that user in `sub` and adds an on-behalf-of
+        `act` claim naming the client that obtained it. Agent clients always receive the claim;
+        application clients receive it when `includeActClaim` is enabled on the client. The `act.sub`
+        value is the agent or application resource id rather than the client id, and the claim is
+        present on the access token only, never on the ID token.
 
         Token exchange additionally supports requesting an Identity Assertion Authorization Grant
         (ID-JAG) by setting `requested_token_type` to
@@ -632,7 +644,10 @@ components:
           description: The authorization session identifier returned by the flow engine.
         assertion:
           type: string
-          description: Signed JWT assertion from the flow engine containing authentication result.
+          description: Signed JWT assertion from the flow engine carrying the terminal flow outcome. A completed flow returns an authentication assertion (relay the flow response's assertion field); a terminally failed flow returns an error assertion carrying the flow error type and description (relay the flow response's errorAssertion field). The server validates the signature and the binding to this authorization request before acting, and tells the two apart by the assertion's own claims.
+        type:
+          type: string
+          description: OAuth grant type of the request. Defaults to the authorization code flow when absent.
 
     AuthCallbackResponse:
       type: object

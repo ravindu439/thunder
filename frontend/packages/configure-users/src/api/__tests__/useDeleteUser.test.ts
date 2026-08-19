@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {waitFor, renderHook} from '@thunderid/test-utils';
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
@@ -23,6 +8,7 @@ import useDeleteUser from '../useDeleteUser';
 
 const mockHttpRequest = vi.fn();
 const mockGetServerUrl = vi.fn().mockReturnValue('https://api.test.com');
+const mockShowToast = vi.fn();
 
 // Mock the dependencies
 vi.mock('@thunderid/react', () => ({
@@ -40,17 +26,127 @@ vi.mock('@thunderid/contexts', async (importOriginal) => {
     useConfig: () => ({
       getServerUrl: mockGetServerUrl,
     }),
+    useToast: () => ({
+      showToast: mockShowToast,
+    }),
   };
 });
+
+const FLOW_ID = '01900000-0000-7000-8000-000000000077';
+const FLOW_HANDLE = 'default-user-deletion-flow';
+
+const flowConfiguredConfig = {merged: {userDeletionFlow: {defaultHandle: FLOW_HANDLE}}};
+const noFlowConfiguredConfig = {merged: {}};
+const administrationFlows = {flows: [{flowType: 'ADMINISTRATION', handle: FLOW_HANDLE, id: FLOW_ID}]};
+
+/**
+ * The request shape the hook issues, as far as these tests inspect it.
+ */
+interface RecordedRequest {
+  url: string;
+  method: string;
+  data?: unknown;
+}
+
+/**
+ * Answers the mocked client by URL rather than by call order.
+ *
+ * A deletion issues up to three requests (read the mode, resolve the flow handle, then delete), so a
+ * positional mock would attach a response to the wrong call. A route value may be an `Error` to
+ * reject, or a function returning a promise when a test needs per-call behaviour.
+ */
+function routeHttp(routes: Record<string, unknown>): void {
+  mockHttpRequest.mockImplementation((config: unknown): Promise<{data?: unknown}> => {
+    const {url} = config as RecordedRequest;
+    const key = Object.keys(routes).find((candidate) => url.includes(candidate));
+
+    if (key === undefined) {
+      return Promise.reject(new Error(`unexpected request: ${url}`));
+    }
+
+    const value = routes[key];
+
+    if (value instanceof Error) {
+      return Promise.reject(value);
+    }
+    if (typeof value === 'function') {
+      return (value as () => Promise<{data?: unknown}>)();
+    }
+
+    return Promise.resolve({data: value});
+  });
+}
+
+/**
+ * Arranges a successful flow deletion, which is what the shipped configuration produces.
+ */
+function mockFlowDeletion(overrides: Record<string, unknown> = {}): void {
+  routeHttp({
+    '/server-config/flow': flowConfiguredConfig,
+    '/flows': administrationFlows,
+    '/flow/execute': {flowStatus: 'COMPLETE'},
+    ...overrides,
+  });
+}
+
+/**
+ * Arranges a successful native deletion, as a deployment with no deletion flow configured gets.
+ */
+function mockNativeDeletion(overrides: Record<string, unknown> = {}): void {
+  routeHttp({
+    '/server-config/flow': noFlowConfiguredConfig,
+    '/users/': {},
+    ...overrides,
+  });
+}
+
+/**
+ * The requests whose URL contains the given fragment, so assertions can ignore the lookups that
+ * precede the deletion itself.
+ */
+function requestsTo(fragment: string): RecordedRequest[] {
+  return mockHttpRequest.mock.calls
+    .map(([config]) => config as RecordedRequest)
+    .filter((config) => config.url.includes(fragment));
+}
 
 describe('useDeleteUser', () => {
   beforeEach(() => {
     mockHttpRequest.mockReset();
     mockGetServerUrl.mockReset().mockReturnValue('https://api.test.com');
+    mockShowToast.mockReset();
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('should show a success toast on successful deletion', async () => {
+    mockFlowDeletion();
+
+    const {result} = renderHook(() => useDeleteUser());
+
+    result.current.mutate('user-1');
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+
+    expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'success');
+  });
+
+  it('should not show a toast on error', async () => {
+    mockFlowDeletion({'/flow/execute': new Error('Failed to delete user')});
+
+    const {result} = renderHook(() => useDeleteUser());
+
+    result.current.mutate('user-1');
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it('should initialize with idle state', () => {
@@ -67,7 +163,7 @@ describe('useDeleteUser', () => {
   });
 
   it('should successfully delete a user', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -84,7 +180,28 @@ describe('useDeleteUser', () => {
   });
 
   it('should make correct API call with user ID', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
+
+    const userId = 'user-1';
+    const {result} = renderHook(() => useDeleteUser());
+
+    result.current.mutate(userId);
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true);
+    });
+
+    expect(mockHttpRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.test.com/flow/execute',
+        method: 'POST',
+        data: {flowId: FLOW_ID, inputs: {subject: userId}},
+      }),
+    );
+  });
+
+  it('should call the native endpoint when no deletion flow is configured', async () => {
+    mockNativeDeletion();
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -104,14 +221,16 @@ describe('useDeleteUser', () => {
         },
       }),
     );
+    expect(requestsTo('/flow/execute')).toHaveLength(0);
   });
 
   it('should set pending state during deletion', async () => {
-    mockHttpRequest.mockReturnValue(
-      new Promise((resolve) => {
-        setTimeout(() => resolve(undefined), 100);
-      }),
-    );
+    mockFlowDeletion({
+      '/flow/execute': () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve({data: {flowStatus: 'COMPLETE'}}), 100);
+        }),
+    });
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -126,7 +245,7 @@ describe('useDeleteUser', () => {
       () => {
         expect(result.current.isSuccess).toBe(true);
       },
-      {timeout: 200},
+      {timeout: 500},
     );
 
     expect(result.current.isPending).toBe(false);
@@ -134,7 +253,7 @@ describe('useDeleteUser', () => {
 
   it('should handle API error', async () => {
     const apiError = new Error('Failed to delete user');
-    mockHttpRequest.mockRejectedValueOnce(apiError);
+    mockFlowDeletion({'/flow/execute': apiError});
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -152,7 +271,7 @@ describe('useDeleteUser', () => {
 
   it('should handle network error', async () => {
     const networkError = new Error('Network request failed');
-    mockHttpRequest.mockRejectedValueOnce(networkError);
+    mockFlowDeletion({'/flow/execute': networkError});
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -167,8 +286,25 @@ describe('useDeleteUser', () => {
     expect(result.current.isPending).toBe(false);
   });
 
+  // The flow reports a refusal in its own envelope rather than as a rejected request, so the hook has
+  // to treat a non-COMPLETE terminal status as a failure.
+  it('should fail when the flow reports an error status', async () => {
+    mockFlowDeletion({'/flow/execute': {failureReason: 'user has dependencies', flowStatus: 'ERROR'}});
+
+    const {result} = renderHook(() => useDeleteUser());
+
+    result.current.mutate('user-1');
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    expect(result.current.error?.message).toBe('user has dependencies');
+    expect(mockShowToast).not.toHaveBeenCalled();
+  });
+
   it('should remove user from cache on successful deletion', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result, queryClient} = renderHook(() => useDeleteUser());
@@ -198,7 +334,7 @@ describe('useDeleteUser', () => {
   });
 
   it('should invalidate users list on successful deletion', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result, queryClient} = renderHook(() => useDeleteUser());
@@ -234,7 +370,7 @@ describe('useDeleteUser', () => {
   });
 
   it('should handle invalidateQueries rejection gracefully', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result, queryClient} = renderHook(() => useDeleteUser());
@@ -251,7 +387,7 @@ describe('useDeleteUser', () => {
   });
 
   it('should handle sequential deletions', async () => {
-    mockHttpRequest.mockResolvedValue(undefined);
+    mockFlowDeletion();
 
     const user1Id = 'user-1';
     const user2Id = 'user-2';
@@ -272,23 +408,14 @@ describe('useDeleteUser', () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockHttpRequest).toHaveBeenCalledTimes(2);
-    expect(mockHttpRequest).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        url: `https://api.test.com/users/${user1Id}`,
-      }),
-    );
-    expect(mockHttpRequest).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        url: `https://api.test.com/users/${user2Id}`,
-      }),
-    );
+    const executions = requestsTo('/flow/execute');
+    expect(executions).toHaveLength(2);
+    expect(executions[0]?.data).toEqual({flowId: FLOW_ID, inputs: {subject: user1Id}});
+    expect(executions[1]?.data).toEqual({flowId: FLOW_ID, inputs: {subject: user2Id}});
   });
 
   it('should use mutateAsync for promise-based deletion', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -304,7 +431,7 @@ describe('useDeleteUser', () => {
 
   it('should reject mutateAsync on error', async () => {
     const apiError = new Error('Deletion failed');
-    mockHttpRequest.mockRejectedValueOnce(apiError);
+    mockFlowDeletion({'/flow/execute': apiError});
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -320,7 +447,14 @@ describe('useDeleteUser', () => {
 
   it('should clear error state on successful retry', async () => {
     const apiError = new Error('Temporary error');
-    mockHttpRequest.mockRejectedValueOnce(apiError).mockResolvedValueOnce(undefined);
+    let attempt = 0;
+
+    mockFlowDeletion({
+      '/flow/execute': () => {
+        attempt += 1;
+        return attempt === 1 ? Promise.reject(apiError) : Promise.resolve({data: {flowStatus: 'COMPLETE'}});
+      },
+    });
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -342,11 +476,11 @@ describe('useDeleteUser', () => {
     });
 
     expect(result.current.error).toBeNull();
-    expect(mockHttpRequest).toHaveBeenCalledTimes(2);
+    expect(requestsTo('/flow/execute')).toHaveLength(2);
   });
 
   it('should not affect other cached users on deletion', async () => {
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const user1Id = 'user-1';
     const user2Id = 'user-2';
@@ -376,8 +510,7 @@ describe('useDeleteUser', () => {
     const customServerUrl = 'https://custom-server.com:9090';
 
     mockGetServerUrl.mockReturnValue(customServerUrl);
-
-    mockHttpRequest.mockResolvedValueOnce(undefined);
+    mockFlowDeletion();
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());
@@ -388,20 +521,13 @@ describe('useDeleteUser', () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(mockHttpRequest).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: `${customServerUrl}/users/${userId}`,
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }),
-    );
+    expect(requestsTo('/server-config/flow')[0]?.url).toBe(`${customServerUrl}/server-config/flow`);
+    expect(requestsTo('/flow/execute')[0]?.url).toBe(`${customServerUrl}/flow/execute`);
   });
 
   it('should pass through server error messages', async () => {
     const serverError = new Error('User has active sessions and cannot be deleted');
-    mockHttpRequest.mockRejectedValueOnce(serverError);
+    mockFlowDeletion({'/flow/execute': serverError});
 
     const userId = 'user-1';
     const {result} = renderHook(() => useDeleteUser());

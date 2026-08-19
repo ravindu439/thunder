@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Accessibility Testing Utilities
@@ -210,7 +195,7 @@ const DEFAULT_OPTIONS: Required<A11yOptions> = {
  */
 async function createAxeBuilder(
   page: Page,
-  options: Required<A11yOptions>,
+  options: Required<A11yOptions>
 ): Promise<{ builder: AxeBuilder; skipped: boolean }> {
   let builder = new AxeBuilder({ page });
 
@@ -271,9 +256,9 @@ async function createAxeBuilder(
  */
 function mapViolations(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  rawViolations: any[],
+  rawViolations: any[]
 ): A11yViolationSummary[] {
-  return rawViolations.map((violation) => ({
+  return rawViolations.map(violation => ({
     ruleId: violation.id,
     description: violation.description,
     impact: violation.impact as A11ySeverity,
@@ -283,9 +268,7 @@ function mapViolations(
       .slice(0, 5)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .map((node: any) => node.target?.join(", ") ?? "unknown"),
-    wcagTags: (violation.tags ?? []).filter(
-      (tag: string) => tag.startsWith("wcag") || tag.startsWith("best-practice"),
-    ),
+    wcagTags: (violation.tags ?? []).filter((tag: string) => tag.startsWith("wcag") || tag.startsWith("best-practice")),
   }));
 }
 
@@ -294,7 +277,7 @@ function mapViolations(
  */
 function partitionViolations(
   violations: A11yViolationSummary[],
-  failOnSeverity: A11ySeverity,
+  failOnSeverity: A11ySeverity
 ): { failing: A11yViolationSummary[]; warnings: A11yViolationSummary[] } {
   const threshold = SEVERITY_ORDER[failOnSeverity];
 
@@ -308,7 +291,7 @@ function partitionViolations(
 
       return acc;
     },
-    { failing: [] as A11yViolationSummary[], warnings: [] as A11yViolationSummary[] },
+    { failing: [] as A11yViolationSummary[], warnings: [] as A11yViolationSummary[] }
   );
 }
 
@@ -337,16 +320,13 @@ export function formatViolation(violation: A11yViolationSummary): string {
 /**
  * Generates a complete report string from a list of violations.
  */
-function generateReportString(
-  violations: A11yViolationSummary[],
-  pageUrl: string,
-  label: string,
-): string {
+function generateReportString(violations: A11yViolationSummary[], pageUrl: string, label: string): string {
   if (violations.length === 0) {
     return `✅ No ${label} accessibility violations found on: ${pageUrl}`;
   }
 
-  const header = `\n🔍 Accessibility Audit Report — ${label}\n` +
+  const header =
+    `\n🔍 Accessibility Audit Report: ${label}\n` +
     `   Page: ${pageUrl}\n` +
     `   Violations: ${violations.length}\n` +
     `   Total affected nodes: ${violations.reduce((sum, v) => sum + v.nodeCount, 0)}\n` +
@@ -374,16 +354,12 @@ function generateReportString(
  * console.log(`Found ${result.violations.length} violations`);
  * if (!result.passes) { /* handle failures *\/ }
  */
-export async function checkA11yWithReport(
-  page: Page,
-  options: A11yOptions = {},
-): Promise<A11yAuditResult> {
+export async function checkA11yWithReport(page: Page, options: A11yOptions = {}): Promise<A11yAuditResult> {
   const mergedOptions: Required<A11yOptions> = {
     ...DEFAULT_OPTIONS,
     ...options,
     // If tags were explicitly passed, keep audit tag-scoped unless caller explicitly opts into all rules.
-    runAllRules:
-      options.runAllRules ?? (options.tags !== undefined ? false : DEFAULT_OPTIONS.runAllRules),
+    runAllRules: options.runAllRules ?? (options.tags !== undefined ? false : DEFAULT_OPTIONS.runAllRules),
   };
   const { builder, skipped } = await createAxeBuilder(page, mergedOptions);
 
@@ -448,16 +424,13 @@ export async function checkA11yWithReport(
 export async function expectNoA11yViolations(
   page: Page,
   options: A11yOptions = {},
-  testInfo?: TestInfo,
+  testInfo?: TestInfo
 ): Promise<void> {
   const result = await checkA11yWithReport(page, options);
   const pageUrl = page.url();
 
-  const runAllRules =
-    options.runAllRules ?? (options.tags !== undefined ? false : DEFAULT_OPTIONS.runAllRules);
-  const auditScope = runAllRules
-    ? "all enabled axe-core rules"
-    : (options.tags ?? DEFAULT_OPTIONS.tags).join(", ");
+  const runAllRules = options.runAllRules ?? (options.tags !== undefined ? false : DEFAULT_OPTIONS.runAllRules);
+  const auditScope = runAllRules ? "all enabled axe-core rules" : (options.tags ?? DEFAULT_OPTIONS.tags).join(", ");
 
   // Log warnings (below threshold)
   if (result.warningViolations.length > 0) {
@@ -481,7 +454,7 @@ export async function expectNoA11yViolations(
         warningViolations: result.warningViolations,
       },
       null,
-      2,
+      2
     );
 
     await testInfo.attach("a11y-audit-report", {
@@ -492,20 +465,11 @@ export async function expectNoA11yViolations(
 
   // Fail on violations above threshold
   if (!result.passes) {
-    const failureReport = generateReportString(
-      result.failingViolations,
-      pageUrl,
-      "FAILURES",
-    );
+    const failureReport = generateReportString(result.failingViolations, pageUrl, "FAILURES");
 
-    const summary = result.failingViolations
-      .map((v) => `${v.impact}: ${v.ruleId} (${v.nodeCount} nodes)`)
-      .join(", ");
+    const summary = result.failingViolations.map(v => `${v.impact}: ${v.ruleId} (${v.nodeCount} nodes)`).join(", ");
 
-    throw new Error(
-      `Accessibility violations found on ${pageUrl}:\n` +
-        `${summary}\n\n${failureReport}`,
-    );
+    throw new Error(`Accessibility violations found on ${pageUrl}:\n` + `${summary}\n\n${failureReport}`);
   }
 
   // Success
@@ -513,24 +477,31 @@ export async function expectNoA11yViolations(
 }
 
 /**
- * Check keyboard navigation accessibility.
+ * Walk the tab sequence and report which elements actually received focus.
  *
- * Verifies that interactive elements receive focus via Tab key
- * and that focused elements have visible focus indicators.
+ * `expectedFocusableCount` only bounds how many times Tab is pressed and produces a log line when
+ * fewer elements are reached; it is not a guarantee, because the tabbable set is browser and OS
+ * dependent (on macOS, Firefox and WebKit leave links out of the tab order by default). Assert on the
+ * returned `focusedElements`, not on a count derived from a CSS selector.
+ *
+ * `focusStopped` records that the walk ended because focus stopped advancing. That marks the end of
+ * the tab sequence and is not evidence of a keyboard trap: browsers differ on end-of-sequence
+ * behaviour, so proving a trap needs a dedicated test of a specific container.
  *
  * @param page - Playwright Page to check
- * @param expectedFocusableCount - Minimum number of focusable elements to verify
+ * @param expectedFocusableCount - How many elements are expected to be reachable, for logging
  */
 export async function checkKeyboardNavigation(
   page: Page,
-  expectedFocusableCount: number = 1,
+  expectedFocusableCount: number = 1
 ): Promise<{
   focusedElements: Array<{ tagName: string; role: string | null; ariaLabel: string | null }>;
-  tabTrapDetected: boolean;
+  focusStopped: boolean;
 }> {
   const focusedElements: Array<{ tagName: string; role: string | null; ariaLabel: string | null }> = [];
   const seenSelectors = new Set<string>();
-  let tabTrapDetected = false;
+  let previousSelector: string | null = null;
+  let focusStopped = false;
   const maxTabs = expectedFocusableCount + 10;
 
   for (let i = 0; i < maxTabs; i++) {
@@ -543,31 +514,40 @@ export async function checkKeyboardNavigation(
         return null;
       }
 
+      // Identify the element by its position in the DOM tree. A tag name plus a class name is not
+      // unique: sibling controls rendered by a component library share generated class names, so
+      // every sibling would look like the same element and be misreported as a tab trap.
+      const path: string[] = [];
+      let node: Element | null = el;
+      while (node && node !== document.documentElement) {
+        const parent: Element | null = node.parentElement;
+        const index = parent ? Array.prototype.indexOf.call(parent.children, node) : 0;
+        path.unshift(`${node.tagName.toLowerCase()}:${index}`);
+        node = parent;
+      }
+
       return {
         tagName: el.tagName.toLowerCase(),
         role: el.getAttribute("role"),
         ariaLabel: el.getAttribute("aria-label"),
-        // Unique identifier for tab-trap detection
-        selector: el.id
-          ? `#${el.id}`
-          : `${el.tagName.toLowerCase()}${el.className ? "." + el.className.split(" ")[0] : ""}`,
+        selector: path.join(">"),
       };
     });
 
     if (focusedElement) {
       const { selector, ...elementInfo } = focusedElement;
 
-      // Tab-trap detection: as soon as a selector repeats we stop the loop
-      // and mark a trap; do not add the duplicate to focusedElements.
-      if (seenSelectors.has(selector)) {
-        tabTrapDetected = true;
-        console.warn(
-          `🔄 Tab-trap detected! selector ${selector} reappeared after ${
-            focusedElements.length
-          } focusable element(s).`,
-        );
+      // Focus stopped advancing, or came back to an element already visited: either way the tab
+      // sequence is exhausted, so stop. Neither condition proves a keyboard trap. Browsers disagree
+      // about what happens at the end of the sequence - Chromium wraps around to the first element,
+      // while on macOS Firefox and WebKit hand focus to the browser chrome, leaving activeElement
+      // unchanged - and they also disagree about what is tabbable, since those two leave links out of
+      // the tab order by default.
+      if (selector === previousSelector || seenSelectors.has(selector)) {
+        focusStopped = true;
         break;
       }
+      previousSelector = selector;
 
       seenSelectors.add(selector);
       focusedElements.push(elementInfo);
@@ -583,14 +563,13 @@ export async function checkKeyboardNavigation(
 
   if (focusedElements.length < expectedFocusableCount) {
     console.warn(
-      `⚠️ Expected at least ${expectedFocusableCount} focusable elements, ` +
-        `but only found ${focusedElements.length}`,
+      `⚠️ Expected at least ${expectedFocusableCount} focusable elements, ` + `but only found ${focusedElements.length}`
     );
   } else {
     console.log(`✅ Keyboard navigation: ${focusedElements.length} focusable elements found`);
   }
 
-  return { focusedElements, tabTrapDetected };
+  return { focusedElements, focusStopped };
 }
 
 /**
@@ -599,9 +578,7 @@ export async function checkKeyboardNavigation(
  * @param page - Playwright Page to check
  * @returns Array of live region details
  */
-export async function checkAriaLiveRegions(
-  page: Page,
-): Promise<Array<{ politeness: string; text: string }>> {
+export async function checkAriaLiveRegions(page: Page): Promise<Array<{ politeness: string; text: string }>> {
   const liveRegions = await page.locator("[aria-live]").all();
   const results: Array<{ politeness: string; text: string }> = [];
 

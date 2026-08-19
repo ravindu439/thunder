@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ciba
 
@@ -27,7 +12,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/clientauth"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/discovery"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/jti"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
@@ -44,14 +29,15 @@ func Initialize(
 	flowExecService flowexec.FlowExecServiceInterface,
 	discoveryService discovery.DiscoveryServiceInterface,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
+	runtimeStore providers.RuntimeStoreProvider,
+	jtiStore jti.JTIStoreInterface,
 	cfg oauthconfig.Config,
 ) CIBAServiceInterface {
-	store := newCIBAStore(cfg)
-	cibaSvc := newCIBAService(store, flowExecService, jwtService, actorProvider, resourceService,
-		serverConfigService, cfg)
+	store := newCIBAStore(runtimeStore)
+	cibaSvc := newCIBAService(store, flowExecService, jwtService, actorProvider, resourceService, cfg)
 	cibaHandler := newCIBAHandler(cibaSvc)
-	registerRoutes(mux, cibaHandler, actorProvider, authnProvider, jwtService, discoveryService)
+	registerRoutes(mux, cibaHandler, actorProvider, authnProvider, jwtService, discoveryService,
+		jtiStore, cfg.JWT.Leeway)
 	return cibaSvc
 }
 
@@ -64,6 +50,8 @@ func registerRoutes(
 	authnProvider providers.AuthnProviderManager,
 	jwtService jwt.JWTServiceInterface,
 	discoveryService discovery.DiscoveryServiceInterface,
+	jtiStore jti.JTIStoreInterface,
+	leeway int64,
 ) {
 	corsOpts := middleware.CORSOptions{
 		AllowedMethods:   []string{"POST"},
@@ -72,9 +60,9 @@ func registerRoutes(
 		MaxAge:           600,
 	}
 
-	endpointURL := discoveryService.GetOAuth2AuthorizationServerMetadata(
-		context.Background()).BackchannelAuthenticationEndpoint
-	clientAuthMiddleware := clientauth.ClientAuthMiddleware(actorProvider, authnProvider, jwtService, endpointURL)
+	issuer := discoveryService.GetOAuth2AuthorizationServerMetadata(context.Background()).Issuer
+	clientAuthMiddleware := clientauth.ClientAuthMiddleware(actorProvider, authnProvider, jwtService,
+		jtiStore, issuer, leeway)
 	authHandler := clientAuthMiddleware(http.HandlerFunc(cibaHandler.HandleBackchannelAuthRequest))
 
 	authPattern, wrappedAuthHandler := middleware.WithCORS(

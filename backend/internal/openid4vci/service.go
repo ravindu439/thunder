@@ -1,27 +1,10 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package openid4vci
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/asn1"
 	"encoding/base64"
@@ -29,17 +12,18 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/thunder-id/thunderid/internal/system/cryptolib"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
 	"github.com/thunder-id/thunderid/internal/system/jose/jws"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/jose/sdjwt"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/user"
 	"github.com/thunder-id/thunderid/internal/vc/credential"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // OpenID4VCIServiceInterface is the contract for the OpenID4VCI issuer service,
@@ -54,33 +38,43 @@ type OpenID4VCIServiceInterface interface {
 
 var _ OpenID4VCIServiceInterface = (*openid4vciService)(nil)
 
+// templateProperty is the inbound-client property holding the application template identifier.
+// It mirrors the key the application service persists (application.propTemplate).
+const templateProperty = "template"
+
+// walletTemplates are the application template identifiers assigned to OpenID4VCI wallet
+// applications. Credential issuance is restricted to clients registered under one of these.
+var walletTemplates = []string{"wallet", "wallet-embedded"}
+
 // openid4vciService drives the OpenID4VCI issuer: it advertises issuer metadata, issues
 // c_nonces, and issues SD-JWT VCs bound to the holder key after validating the
 // access token and holder proof.
 type openid4vciService struct {
 	cfg            serviceConfig
-	cryptoProvider kmprovider.RuntimeCryptoProvider
-	signingKeyRef  kmprovider.KeyRef
+	cryptoProvider providers.RuntimeCryptoProvider
+	signingKeyRef  providers.KeyRef
 	signingAlg     string
 	kid            string
 	x5c            []string
 	store          openID4VCIStoreInterface
-	jwtService     jwt.JWTServiceInterface
+	tokenValidator tokenservice.TokenValidatorInterface
 	userService    user.UserServiceInterface
 	creds          credential.CredentialConfigurationServiceInterface
+	actors         providers.ActorProvider
 }
 
 // newOpenID4VCIService creates an OpenID4VCI issuer engine.
 func newOpenID4VCIService(
 	cfg serviceConfig,
-	cryptoProvider kmprovider.RuntimeCryptoProvider, signingKeyRef kmprovider.KeyRef,
+	cryptoProvider providers.RuntimeCryptoProvider, signingKeyRef providers.KeyRef,
 	signingAlg, kid string, x5c []string,
 	store openID4VCIStoreInterface,
-	jwtService jwt.JWTServiceInterface, userService user.UserServiceInterface,
+	tokenValidator tokenservice.TokenValidatorInterface, userService user.UserServiceInterface,
 	creds credential.CredentialConfigurationServiceInterface,
+	actors providers.ActorProvider,
 ) (OpenID4VCIServiceInterface, error) {
 	if cryptoProvider == nil || store == nil ||
-		jwtService == nil || userService == nil || creds == nil {
+		tokenValidator == nil || userService == nil || creds == nil || actors == nil {
 		return nil, fmt.Errorf("%w: required issuer dependencies are missing", ErrPolicy)
 	}
 	if cfg.CredentialIssuer == "" {
@@ -94,9 +88,10 @@ func newOpenID4VCIService(
 		kid:            kid,
 		x5c:            x5c,
 		store:          store,
-		jwtService:     jwtService,
+		tokenValidator: tokenValidator,
 		userService:    userService,
 		creds:          creds,
+		actors:         actors,
 	}, nil
 }
 
@@ -185,18 +180,17 @@ func (s *openid4vciService) IssueCredential(
 	if accessToken == "" {
 		return nil, fmt.Errorf("%w: missing access token", ErrInvalidToken)
 	}
-	if svcErr := s.jwtService.VerifyJWT(ctx, accessToken, "", ""); svcErr != nil {
-		return nil, fmt.Errorf("%w: access token verification failed", ErrInvalidToken)
-	}
-	payload, err := jwt.DecodeJWTPayload(accessToken)
+	// Validated as an OAuth 2.0 access token (RFC 9068 typ, issuer, required claims, revocation),
+	// so other server-signed JWTs such as authentication assertions cannot be used for issuance.
+	claims, err := s.tokenValidator.ValidateAccessToken(ctx, accessToken)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	subject, _ := payload["sub"].(string)
-	if subject == "" {
-		return nil, fmt.Errorf("%w: access token missing subject", ErrInvalidToken)
+	subject := claims.Sub
+	if err := s.verifyWalletClient(ctx, claims.ClientID); err != nil {
+		return nil, err
 	}
-	scopes := strings.Fields(scopeString(payload))
+	scopes := claims.Scopes
 
 	var req CredentialRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -221,7 +215,7 @@ func (s *openid4vciService) IssueCredential(
 		return nil, err
 	}
 
-	claims, err := s.resolveClaims(ctx, subject, cred.SDClaims)
+	sdClaims, err := s.resolveClaims(ctx, subject, cred.SDClaims)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +243,7 @@ func (s *openid4vciService) IssueCredential(
 			VCT:             cred.VCT,
 			IssuedAt:        now,
 			ExpiresAt:       now.Add(validity),
-			SelectiveClaims: claims,
+			SelectiveClaims: sdClaims,
 			AlwaysVisible:   map[string]interface{}{"sub": subject},
 			ConfirmationJWK: holderJWK,
 		}, func(signingInput string) ([]byte, error) {
@@ -355,6 +349,25 @@ func credentialDisplay(name, description string, d *credential.CredentialDisplay
 		return nil
 	}
 	return []interface{}{entry}
+}
+
+// verifyWalletClient resolves the application registered behind the access token's client_id and
+// requires it to be a wallet application. Credential issuance is reserved for wallets, so a token
+// minted for an unrelated application cannot be replayed against the credential endpoint.
+func (s *openid4vciService) verifyWalletClient(ctx context.Context, clientID string) error {
+	oauthClient, svcErr := s.actors.GetOAuthClientByClientID(ctx, clientID)
+	if svcErr != nil || oauthClient == nil {
+		return fmt.Errorf("%w: unknown client", ErrInvalidToken)
+	}
+	inbound, svcErr := s.actors.GetInboundClientByID(ctx, oauthClient.ID)
+	if svcErr != nil || inbound == nil {
+		return fmt.Errorf("%w: unknown application for client", ErrInvalidToken)
+	}
+	template, _ := inbound.Properties[templateProperty].(string)
+	if !slices.Contains(walletTemplates, template) {
+		return fmt.Errorf("%w: client is not a wallet application", ErrInvalidToken)
+	}
+	return nil
 }
 
 // authorizedCredential resolves the credential configuration the request is
@@ -466,7 +479,7 @@ func (s *openid4vciService) verifyProofs(ctx context.Context, proofs []Proof) ([
 	jwks := make([]map[string]interface{}, 0, len(proofs))
 	nonces := make([]string, 0, len(proofs))
 	for _, proof := range proofs {
-		jwk, nonce, err := s.checkProof(proof)
+		jwk, nonce, err := s.checkProof(ctx, proof)
 		if err != nil {
 			return nil, err
 		}
@@ -491,7 +504,7 @@ func (s *openid4vciService) verifyProofs(ctx context.Context, proofs []Proof) ([
 // checkProof validates a single holder proof JWT — proof typ, signature (against
 // the embedded jwk), audience, and iat freshness — and returns the holder's
 // confirmation JWK and the proof's c_nonce.
-func (s *openid4vciService) checkProof(proof Proof) (map[string]interface{}, string, error) {
+func (s *openid4vciService) checkProof(ctx context.Context, proof Proof) (map[string]interface{}, string, error) {
 	if proof.ProofType != "jwt" || proof.JWT == "" {
 		return nil, "", fmt.Errorf("%w: proof must be a jwt proof", ErrInvalidProof)
 	}
@@ -508,7 +521,7 @@ func (s *openid4vciService) checkProof(proof Proof) (map[string]interface{}, str
 		return nil, "", fmt.Errorf("%w: proof header missing jwk", ErrInvalidProof)
 	}
 
-	if err := verifyJWSWithJWK(proof.JWT, jwk); err != nil {
+	if err := s.verifyJWSWithJWK(ctx, proof.JWT, jwk); err != nil {
 		return nil, "", fmt.Errorf("%w: %w", ErrInvalidProof, err)
 	}
 
@@ -565,7 +578,7 @@ func (s *openid4vciService) consumeNonce(ctx context.Context, nonce string) erro
 }
 
 // verifyJWSWithJWK verifies a compact JWS against the public key in jwk.
-func verifyJWSWithJWK(token string, jwk map[string]interface{}) error {
+func (s *openid4vciService) verifyJWSWithJWK(ctx context.Context, token string, jwk map[string]interface{}) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return fmt.Errorf("invalid JWS format")
@@ -575,76 +588,13 @@ func verifyJWSWithJWK(token string, jwk map[string]interface{}) error {
 		return err
 	}
 	algStr, _ := header["alg"].(string)
-	alg, err := jws.MapAlgorithmToSignAlg(jws.Algorithm(algStr))
-	if err != nil {
-		return err
-	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
 		return fmt.Errorf("invalid signature encoding: %w", err)
 	}
 	signingInput := []byte(parts[0] + "." + parts[1])
 
-	switch alg {
-	case cryptolib.ECDSASHA256, cryptolib.ECDSASHA384, cryptolib.ECDSASHA512:
-		pub, err := ecJWKToECDSAPublicKey(jwk)
-		if err != nil {
-			return err
-		}
-		return cryptolib.Verify(signingInput, sig, alg, pub)
-	default:
-		pub, err := jws.JWKToPublicKey(jwk)
-		if err != nil {
-			return err
-		}
-		return cryptolib.Verify(signingInput, sig, alg, pub)
-	}
-}
-
-// ecJWKToECDSAPublicKey builds an *ecdsa.PublicKey from an EC JWK.
-func ecJWKToECDSAPublicKey(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
-	crv, _ := jwk["crv"].(string)
-	xStr, _ := jwk["x"].(string)
-	yStr, _ := jwk["y"].(string)
-	if crv == "" || xStr == "" || yStr == "" {
-		return nil, fmt.Errorf("EC JWK missing crv/x/y")
-	}
-
-	var curve elliptic.Curve
-	var coordLen int
-	switch crv {
-	case "P-256":
-		curve, coordLen = elliptic.P256(), 32
-	case "P-384":
-		curve, coordLen = elliptic.P384(), 48
-	case "P-521":
-		curve, coordLen = elliptic.P521(), 66
-	default:
-		return nil, fmt.Errorf("unsupported EC curve: %s", crv)
-	}
-
-	xBytes, err := base64.RawURLEncoding.DecodeString(xStr)
-	if err != nil {
-		return nil, fmt.Errorf("decode EC x: %w", err)
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(yStr)
-	if err != nil {
-		return nil, fmt.Errorf("decode EC y: %w", err)
-	}
-	if len(xBytes) > coordLen || len(yBytes) > coordLen {
-		return nil, fmt.Errorf("EC coordinate exceeds curve size for %s", crv)
-	}
-
-	uncompressed := make([]byte, 1+2*coordLen)
-	uncompressed[0] = 0x04
-	copy(uncompressed[1+coordLen-len(xBytes):1+coordLen], xBytes)
-	copy(uncompressed[1+2*coordLen-len(yBytes):], yBytes)
-
-	pub, err := ecdsa.ParseUncompressedPublicKey(curve, uncompressed)
-	if err != nil {
-		return nil, fmt.Errorf("invalid EC public key: %w", err)
-	}
-	return pub, nil
+	return s.cryptoProvider.Verify(ctx, providers.KeyRef{PublicKeyJWK: jwk}, algStr, signingInput, sig)
 }
 
 // randomToken returns 32 cryptographically random bytes, base64url-encoded.

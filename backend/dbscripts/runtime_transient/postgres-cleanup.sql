@@ -1,19 +1,5 @@
--- ----------------------------------------------------------------------------
--- Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
---
--- WSO2 LLC. licenses this file to you under the Apache License,
--- Version 2.0 (the "License"); you may not use this file except
--- in compliance with the License. You may obtain a copy of the License at
---
--- http://www.apache.org/licenses/LICENSE-2.0
---
--- Unless required by applicable law or agreed to in writing,
--- software distributed under the License is distributed on an
--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
--- KIND, either express or implied. See the License for the
--- specific language governing permissions and limitations
--- under the License.
--- ----------------------------------------------------------------------------
+-- Copyright 2026 The ThunderID Authors
+-- SPDX-License-Identifier: Apache-2.0
 
 -- ============================================================
 -- Stored procedure: purge expired runtime_transient rows in bounded batches.
@@ -59,39 +45,15 @@ AS $$
 DECLARE
     v_now     TIMESTAMP := NOW() AT TIME ZONE 'UTC';
     v_deleted INT;
-    v_table   TEXT;
-    -- Tables located by ctid. Safe because each is a single, non-partitioned
-    -- relation, so ctid uniquely identifies a row within it.
-    v_ctid_tables TEXT[] := ARRAY[
-        'AUTHORIZATION_CODE',
-        'AUTHORIZATION_REQUEST',
-        'CIBA_AUTH_REQUEST',
-        'WEBAUTHN_SESSION',
-        'PAR_REQUEST',
-        'JTI_RECORD'
-    ];
 BEGIN
     -- Guard against a batch size that would disable batching or make no progress.
     IF p_batch_size IS NULL OR p_batch_size <= 0 THEN
         p_batch_size := 1000;
     END IF;
 
-    FOREACH v_table IN ARRAY v_ctid_tables LOOP
-        LOOP
-            EXECUTE format(
-                'DELETE FROM %I WHERE ctid IN ' ||
-                '(SELECT ctid FROM %I WHERE EXPIRY_TIME < $1 LIMIT $2)',
-                v_table, v_table
-            ) USING v_now, p_batch_size;
-            GET DIAGNOSTICS v_deleted = ROW_COUNT;
-            COMMIT;
-            EXIT WHEN v_deleted = 0;
-        END LOOP;
-    END LOOP;
-
     -- RUNTIME_STORE is LIST-partitioned by NAMESPACE, where ctid is not unique across
-    -- partitions; match rows by primary key rather than ctid. ORDER BY EXPIRY_TIME lets
-    -- the batch be located via an index scan.
+    -- partitions; match rows by primary key. ORDER BY EXPIRY_TIME lets the batch be
+    -- located via an index scan.
     LOOP
         DELETE FROM "RUNTIME_STORE"
         WHERE (DEPLOYMENT_ID, NAMESPACE, KEY) IN (

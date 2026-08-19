@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen, waitFor, userEvent} from '@thunderid/test-utils';
+import {render, screen, waitFor, within, userEvent} from '@thunderid/test-utils';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import type {ApiAgentType} from '../../models/agent-type';
@@ -115,6 +100,79 @@ vi.mock('@/components/edit-agent-type/schema-settings/EditSchemaSettings', () =>
       >
         Update Properties
       </button>
+      <button
+        type="button"
+        onClick={() =>
+          onPropertiesChange([
+            {
+              id: '0',
+              name: 'email',
+              displayName: '',
+              type: 'string',
+              required: true,
+              unique: true,
+              credential: false,
+              enum: [],
+              regex: '',
+            },
+            {
+              id: '1',
+              name: 'age',
+              displayName: '',
+              type: 'number',
+              required: false,
+              unique: false,
+              credential: false,
+              enum: [],
+              regex: '',
+            },
+          ])
+        }
+      >
+        Revert Properties
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onPropertiesChange([
+            {
+              id: '0',
+              name: 'email',
+              displayName: '',
+              type: 'string',
+              required: true,
+              unique: true,
+              credential: false,
+              enum: [],
+              regex: '',
+            },
+            {
+              id: '1',
+              name: 'age',
+              displayName: '',
+              type: 'number',
+              required: false,
+              unique: false,
+              credential: false,
+              enum: [],
+              regex: '',
+            },
+            {
+              id: '2',
+              name: 'nickname',
+              displayName: '',
+              type: 'string',
+              required: false,
+              unique: false,
+              credential: false,
+              enum: [],
+              regex: '',
+            },
+          ])
+        }
+      >
+        Add Optional Field
+      </button>
     </div>
   ),
 }));
@@ -165,16 +223,18 @@ describe('ViewAgentTypePage', () => {
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
 
-    it('renders error message and back button on fetch error', () => {
+    it('renders a resolved error message and back button on fetch error, not raw server text', () => {
       mockUseGetAgentType.mockReturnValue({
         data: undefined,
         isLoading: false,
         error: new Error('Boom'),
+        refetch: vi.fn(),
       });
 
       render(<ViewAgentTypePage />);
 
-      expect(screen.getByText('Boom')).toBeInTheDocument();
+      expect(screen.getByText('Failed to load agent type information')).toBeInTheDocument();
+      expect(screen.queryByText('Boom')).not.toBeInTheDocument();
       expect(screen.getByRole('button', {name: /Back to Agents/i})).toBeInTheDocument();
     });
 
@@ -266,6 +326,22 @@ describe('ViewAgentTypePage', () => {
         expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
       });
     });
+
+    it('hides the unsaved-changes bar when properties are manually reverted to the server schema', async () => {
+      const user = userEvent.setup();
+      render(<ViewAgentTypePage />);
+
+      await user.click(screen.getByText('Update Properties'));
+      await waitFor(() => {
+        expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+      });
+
+      // Edit back to the exact server schema — no real change remains.
+      await user.click(screen.getByText('Revert Properties'));
+      await waitFor(() => {
+        expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+      });
+    });
   });
 
   describe('Save', () => {
@@ -277,6 +353,9 @@ describe('ViewAgentTypePage', () => {
 
       const saveButton = await screen.findByRole('button', {name: /^Save$/i});
       await user.click(saveButton);
+
+      // Editing the schema shows a warning; continue.
+      await user.click(await screen.findByRole('button', {name: /^Continue$/i}));
 
       await waitFor(() => {
         expect(mockMutateAsync).toHaveBeenCalledWith(
@@ -291,7 +370,40 @@ describe('ViewAgentTypePage', () => {
       });
     });
 
-    it('shows a toast on duplicate property names', async () => {
+    it('warns before saving a breaking schema change and can be cancelled', async () => {
+      const user = userEvent.setup();
+      render(<ViewAgentTypePage />);
+
+      // Update Properties drops email and age, removing attributes is a breaking change.
+      await user.click(screen.getByText('Update Properties'));
+      await user.click(await screen.findByRole('button', {name: /^Save$/i}));
+
+      // The confirmation dialog appears instead of saving immediately and lists the affected attributes.
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(/Confirm schema changes/i)).toBeInTheDocument();
+      expect(within(dialog).getByText('email')).toBeInTheDocument();
+      expect(within(dialog).getByText('age')).toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', {name: /Cancel/i}));
+
+      expect(mockMutateAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not warn when a schema change is not breaking', async () => {
+      const user = userEvent.setup();
+      render(<ViewAgentTypePage />);
+
+      // Adding a new optional attribute keeps existing ones intact, not a breaking change.
+      await user.click(screen.getByText('Add Optional Field'));
+      await user.click(await screen.findByRole('button', {name: /^Save$/i}));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalled();
+      });
+      expect(screen.queryByText(/Confirm schema changes/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the duplicate-property validation error inline, not as a toast', async () => {
       const user = userEvent.setup();
       render(<ViewAgentTypePage />);
 
@@ -301,38 +413,68 @@ describe('ViewAgentTypePage', () => {
       await user.click(saveButton);
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'error');
+        expect(screen.getByText('Duplicate property names found: email')).toBeInTheDocument();
       });
 
       expect(mockMutateAsync).not.toHaveBeenCalled();
+      expect(mockShowToast).not.toHaveBeenCalled();
     });
 
-    it('shows a toast on save error', async () => {
+    it('shows the mutation error inline via the unsaved changes bar, not as a toast', async () => {
       const user = userEvent.setup();
-      mockMutateAsync.mockRejectedValueOnce(new Error('Save failed'));
+      mockUseUpdateAgentType.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: new Error('Save failed'),
+        isError: true,
+        reset: mockResetUpdate,
+      });
 
       render(<ViewAgentTypePage />);
 
       await user.click(screen.getByText('Update Properties'));
-      await user.click(await screen.findByRole('button', {name: /^Save$/i}));
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith('Save failed', 'error');
+        expect(screen.getByText('Failed to update agent type. Please try again.')).toBeInTheDocument();
       });
+      expect(screen.queryByText('Save failed')).not.toBeInTheDocument();
+      expect(mockShowToast).not.toHaveBeenCalled();
     });
 
     it('falls back to a generic error message for non-Error rejections', async () => {
       const user = userEvent.setup();
-      mockMutateAsync.mockRejectedValueOnce('string error');
+      mockUseUpdateAgentType.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: 'string error' as unknown as Error,
+        isError: true,
+        reset: mockResetUpdate,
+      });
 
       render(<ViewAgentTypePage />);
 
       await user.click(screen.getByText('Update Properties'));
-      await user.click(await screen.findByRole('button', {name: /^Save$/i}));
 
       await waitFor(() => {
-        expect(mockShowToast).toHaveBeenCalledWith(expect.stringContaining('Failed to save agent type'), 'error');
+        expect(screen.getByText('Failed to update agent type. Please try again.')).toBeInTheDocument();
       });
+    });
+
+    it('resets the save error as soon as the schema changes', async () => {
+      const user = userEvent.setup();
+      mockUseUpdateAgentType.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: new Error('Save failed'),
+        isError: true,
+        reset: mockResetUpdate,
+      });
+
+      render(<ViewAgentTypePage />);
+
+      await user.click(screen.getByText('Update Properties'));
+
+      expect(mockResetUpdate).toHaveBeenCalled();
     });
 
     it('shows the saving state while the mutation is pending', async () => {

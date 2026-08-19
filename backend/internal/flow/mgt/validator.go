@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowmgt
 
@@ -159,12 +144,55 @@ var requiredExecutorsByFlowType = map[providers.FlowType][]string{
 	providers.FlowTypeUserOnboarding: {executor.ExecutorNameProvisioning, executor.ExecutorNameUserTypeResolver},
 }
 
+// companionExecutors maps an executor to executors that must appear alongside it in the same flow,
+// independent of flow type.
+//
+// SessionRevocationExecutor terminates a subject's SSO sessions but records no revocation itself. The
+// tokens those sessions hold are covered by the subject criterion that CriteriaRevocationExecutor
+// persists, which is why session termination does not enumerate token families per application. A
+// flow that terminates without it would therefore delete sessions while their tokens stay live, so
+// the pairing is required rather than conventional.
+var companionExecutors = map[string][]string{
+	executor.ExecutorNameSessionRevocation: {executor.ExecutorNameCriteriaRevocation},
+}
+
 // validateFlowTypeBasedConstraints checks forbidden and required executor rules for the flow type.
 // Uses static maps only — no registry access required.
 func (v *flowValidator) validateFlowTypeBasedConstraints(
 	flowType providers.FlowType, nodes []providers.NodeDefinition,
 ) *tidcommon.ServiceError {
-	return v.validateRequiredExecutors(flowType, nodes)
+	if svcErr := v.validateRequiredExecutors(flowType, nodes); svcErr != nil {
+		return svcErr
+	}
+	return v.validateCompanionExecutors(nodes)
+}
+
+// validateCompanionExecutors returns an error when an executor is present without an executor it
+// depends on.
+func (v *flowValidator) validateCompanionExecutors(
+	nodes []providers.NodeDefinition,
+) *tidcommon.ServiceError {
+	presentExecutors := collectPresentExecutors(nodes)
+	for name, companions := range companionExecutors {
+		if !presentExecutors[name] {
+			continue
+		}
+		for _, companion := range companions {
+			if presentExecutors[companion] {
+				continue
+			}
+			return tidcommon.CustomServiceError(ErrorInvalidExecutorConfig, tidcommon.I18nMessage{
+				Key: "error.flowmgtservice.companion_executor_missing_description",
+				DefaultValue: "Executor '{{param(executorName)}}' requires executor " +
+					"'{{param(companionExecutorName)}}' in the same flow",
+				Params: map[string]string{
+					"executorName":          name,
+					"companionExecutorName": companion,
+				},
+			})
+		}
+	}
+	return nil
 }
 
 // validateRequiredExecutors returns an error if a TASK_EXECUTION node with a required executor

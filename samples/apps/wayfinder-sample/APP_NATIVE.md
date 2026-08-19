@@ -60,7 +60,7 @@ VITE_AUTH_IS_VERBOSE=false
 ## Run
 
 ```bash
-cd backend     && npm install && npm run seed && npm start  # http://localhost:8787
+cd backend     && npm install && npm start                 # http://localhost:8787
 cd smtp-server && npm install && npm run dev                # SMTP :2525 | Inbox http://localhost:8788
 cd frontend    && npm install && npm run dev                # http://localhost:5173
 ```

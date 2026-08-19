@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   Box,
@@ -29,23 +14,28 @@ import {
   Tooltip,
   Typography,
 } from '@wso2/oxygen-ui';
-import {CogIcon, ExternalLink as ExternalLinkIcon, TrashIcon} from '@wso2/oxygen-ui-icons-react';
+import {
+  CogIcon,
+  ExternalLink as ExternalLinkIcon,
+  TrashIcon,
+  Workflow as WorkflowIcon,
+} from '@wso2/oxygen-ui-icons-react';
 import {Handle, Position, useNodeId, useReactFlow} from '@xyflow/react';
 import {memo, useMemo, useState, type ReactElement} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
+import useFlowRoutes from '../../../../hooks/useFlowRoutes';
 import ValidationErrorBoundary from '../../../validation-panel/ValidationErrorBoundary';
 import type {CommonStepFactoryPropsInterface} from '../CommonStepFactory';
+import OutcomeHandleWrapper, {callSurfaceMixin, nodeShadowMixin} from '../flowNodeStyles';
 import StepTitle from '../StepTitle';
 import useGetFlows from '@/features/flows/api/useGetFlows';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
 import useInteractionState from '@/features/flows/hooks/useInteractionState';
 import useUIPanelState from '@/features/flows/hooks/useUIPanelState';
-import {FlowType} from '@/features/flows/models/flows';
 import {ResourceTypes} from '@/features/flows/models/resources';
 import type {BasicFlowDefinition} from '@/features/flows/models/responses';
 import {StepCategories, StepTypes, type Step, type StepData} from '@/features/flows/models/steps';
-import '../execution/ExecutionMinimal.scss';
 
 export type CallPropsInterface = CommonStepFactoryPropsInterface;
 
@@ -53,24 +43,19 @@ type CallStepData = StepData & {flow?: {ref?: string}};
 
 const CALL_NODE_WIDTH = 260;
 
-// Sign-out flows are intentionally absent: they cannot be selected as call targets, so a Call node
-// never references one and there is nothing to open.
-const FLOW_TYPE_TO_ROUTE_SEGMENT: Record<string, string> = {
-  [FlowType.AUTHENTICATION]: 'signin',
-  [FlowType.REGISTRATION]: 'registration',
-  [FlowType.RECOVERY]: 'recovery',
-};
-
 /**
- * Call Node component for cross-flow invocation. Visually mirrors ExecutionMinimal but
- * exposes a flow reference instead of an executor and exposes both `onSuccess` (right) and
- * `onFailure` (bottom) handles. The node card also carries an "open referenced flow"
- * shortcut that jumps the builder to the callee flow (with an unsaved-changes confirm).
+ * Call Node component for cross-flow invocation. It shares the executor card's header but
+ * its body carries a distinct "reference" treatment (dashed primary-tinted outline, primary
+ * wash, and a workflow glyph) so it does not read as an executor, and it exposes a flow
+ * reference instead of an executor along with both `onSuccess` (right) and `onFailure`
+ * (bottom) handles. The node card also carries an "open referenced flow" shortcut that jumps
+ * the builder to the callee flow (with an unsaved-changes confirm).
  */
 function Call({resources, data}: CallPropsInterface): ReactElement {
   const stepId: string | null = useNodeId();
   const {t} = useTranslation();
   const navigate = useNavigate();
+  const flowRoutes = useFlowRoutes();
   const {setLastInteractedResource, setLastInteractedStepId} = useInteractionState();
   const {setIsOpenResourcePropertiesPanel} = useUIPanelState();
   const {deleteElements} = useReactFlow();
@@ -87,7 +72,7 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
     [flowsData, flowRef],
   );
 
-  const canOpen = Boolean(referencedFlow && FLOW_TYPE_TO_ROUTE_SEGMENT[referencedFlow.flowType]);
+  const canOpen = Boolean(referencedFlow);
 
   const resource: Step = {
     ...(paletteEntry ?? ({} as Step)),
@@ -130,9 +115,6 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
     if (!referencedFlow) {
       return;
     }
-    if (!FLOW_TYPE_TO_ROUTE_SEGMENT[referencedFlow.flowType]) {
-      return;
-    }
     setIsOpenConfirmDialog(true);
   };
 
@@ -141,12 +123,8 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
     if (!referencedFlow) {
       return;
     }
-    const segment: string | undefined = FLOW_TYPE_TO_ROUTE_SEGMENT[referencedFlow.flowType];
-    if (!segment) {
-      return;
-    }
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-    navigate(`/flows/${segment}/${referencedFlow.id}`);
+    navigate(flowRoutes.flows.detail(referencedFlow.id));
   };
 
   const bodyLabel: string = referencedFlow
@@ -155,17 +133,28 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
 
   return (
     <ValidationErrorBoundary resource={resource}>
+      {/* The dashed outline wraps the whole node (header included). It cannot be
+          paired with `overflow: hidden` to clip the children to it, because the
+          outcome handles are positioned outside the card. */}
       <Box
-        className="execution-minimal-step has-branching call-step"
+        data-flow-node-surface
         data-testid="call-node"
-        sx={{width: CALL_NODE_WIDTH}}
+        sx={[
+          {
+            border: '1.5px dashed',
+            borderColor: 'rgba(var(--oxygen-palette-primary-mainChannel) / 0.45)',
+            borderRadius: 1,
+            position: 'relative',
+            width: CALL_NODE_WIDTH,
+          },
+          nodeShadowMixin,
+        ]}
       >
         <Box
           display="flex"
           justifyContent="space-between"
           alignItems="center"
-          className="execution-minimal-step-action-panel"
-          sx={{backgroundColor: '#151515', height: 44, px: 2, py: 1.25, gap: 1.5}}
+          sx={{backgroundColor: '#151515', borderRadius: '8px 8px 0 0', height: 44, px: 2, py: 1.25, gap: 1.5}}
         >
           <StepTitle label={displayLabel} />
           <Box display="flex" alignItems="center" gap={0.5}>
@@ -183,14 +172,37 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
         </Box>
         <Handle type="target" position={Position.Left} />
         <Card
-          className="execution-minimal-step-content"
           onClick={handleCardClick}
-          sx={{p: 2}}
+          sx={[callSurfaceMixin, {border: 'none', borderRadius: '0 0 8px 8px', cursor: 'pointer', p: 2}]}
           data-testid="call-node-content"
         >
           <Box display="flex" alignItems="center" justifyContent="space-between" gap={1}>
+            <Box
+              sx={{
+                alignItems: 'center',
+                backgroundColor: 'rgba(var(--oxygen-palette-primary-mainChannel) / 0.12)',
+                borderRadius: 1,
+                color: 'primary.main',
+                display: 'inline-flex',
+                flexShrink: 0,
+                height: 32,
+                justifyContent: 'center',
+                width: 32,
+              }}
+            >
+              <WorkflowIcon size={18} />
+            </Box>
             <Box sx={{minWidth: 0, flex: 1}}>
-              <Typography variant="caption" sx={{display: 'block', opacity: 0.7}}>
+              <Typography
+                variant="caption"
+                sx={{
+                  color: 'primary.main',
+                  display: 'block',
+                  fontWeight: 600,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
                 {t('flows:core.call.referencedFlow', 'Referenced flow')}
               </Typography>
               <Typography
@@ -228,19 +240,19 @@ function Call({resources, data}: CallPropsInterface): ReactElement {
           </Box>
         </Card>
         <Tooltip title={t('flows:core.call.handles.success', 'On success')} placement="right">
-          <Box className="handle-wrapper success-wrapper">
+          <OutcomeHandleWrapper kind="success" handleSize={12}>
             <Handle
               type="source"
               position={Position.Right}
               id={`${stepId ?? ''}${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`}
-              className="execution-handle-success"
+              data-handle="execution-handle-success"
             />
-          </Box>
+          </OutcomeHandleWrapper>
         </Tooltip>
         <Tooltip title={t('flows:core.call.handles.failure', 'On failure')} placement="bottom">
-          <Box className="handle-wrapper failure-wrapper">
-            <Handle type="source" position={Position.Bottom} id="failure" className="execution-handle-failure" />
-          </Box>
+          <OutcomeHandleWrapper kind="failure" handleSize={12}>
+            <Handle type="source" position={Position.Bottom} id="failure" data-handle="execution-handle-failure" />
+          </OutcomeHandleWrapper>
         </Tooltip>
       </Box>
       <Dialog

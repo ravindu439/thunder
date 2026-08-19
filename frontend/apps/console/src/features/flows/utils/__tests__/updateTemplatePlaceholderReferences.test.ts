@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {describe, expect, it, vi, beforeEach, afterEach} from 'vitest';
 import updateTemplatePlaceholderReferences from '../updateTemplatePlaceholderReferences';
@@ -63,6 +48,34 @@ describe('updateTemplatePlaceholderReferences', () => {
       const [result] = updateTemplatePlaceholderReferences(obj, replacers);
 
       expect(result.field).toBe('{{NAME}}');
+    });
+
+    it('should replace a placeholder embedded in a longer string', () => {
+      const obj = {label: '<p><a href="#" data-action-ref="{{RECOVERY_ACTION_REF}}">Reset</a></p>'};
+      const replacers = [{key: 'RECOVERY_ACTION_REF', value: 'action_recovery'}];
+
+      const [result] = updateTemplatePlaceholderReferences(obj, replacers);
+
+      expect(result.label).toBe('<p><a href="#" data-action-ref="action_recovery">Reset</a></p>');
+    });
+
+    it('should leave a literal that reads like a replacer key unchanged', () => {
+      const obj = {key: 'ID', title: 'Set the ID'};
+      const replacers = [{key: 'ID', value: 'generated-id'}];
+
+      const [result] = updateTemplatePlaceholderReferences(obj, replacers);
+
+      expect(result.key).toBe('ID');
+      expect(result.title).toBe('Set the ID');
+    });
+
+    it('should leave a runtime template literal unchanged', () => {
+      const obj = {placeholder: '{{ t(signin:forms.credentials.fields.username.placeholder) }}'};
+      const replacers = [{key: 'username', value: 'replaced'}];
+
+      const [result] = updateTemplatePlaceholderReferences(obj, replacers);
+
+      expect(result.placeholder).toBe('{{ t(signin:forms.credentials.fields.username.placeholder) }}');
     });
   });
 

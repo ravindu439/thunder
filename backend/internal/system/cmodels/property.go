@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package cmodels provides common data models used across server modules.
 package cmodels
@@ -22,10 +7,23 @@ package cmodels
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/thunder-id/thunderid/internal/system/kmprovider/defaultkm"
+	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 )
+
+// configCryptoProvider is injected once during application startup via
+// SetConfigCryptoProvider. cmodels cannot import the kmprovider/defaultkm package directly
+// to obtain it, since that package depends on cmodels and would create an import cycle.
+var configCryptoProvider kmprovider.ConfigCryptoProvider
+
+// SetConfigCryptoProvider sets the ConfigCryptoProvider used to encrypt and decrypt secret
+// property values. It must be called once during application startup before any secret
+// Property is created or read.
+func SetConfigCryptoProvider(provider kmprovider.ConfigCryptoProvider) {
+	configCryptoProvider = provider
+}
 
 // Property represents a generic property with name, value, and isSecret fields.
 type Property struct {
@@ -75,11 +73,10 @@ func (p *Property) GetValue() (string, error) {
 		return p.value, nil
 	}
 
-	cryptoProvider, err := defaultkm.GetConfigCryptoService()
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize encryption service: %w", err)
+	if configCryptoProvider == nil {
+		return "", errors.New("config crypto provider not initialized")
 	}
-	decryptedBytes, err := cryptoProvider.Decrypt(context.Background(), []byte(p.value))
+	decryptedBytes, err := configCryptoProvider.Decrypt(context.Background(), []byte(p.value))
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt secret property %s: %w", p.GetName(), err)
 	}
@@ -93,11 +90,10 @@ func (p *Property) Encrypt() error {
 		return nil
 	}
 
-	cryptoProvider, err := defaultkm.GetConfigCryptoService()
-	if err != nil {
-		return fmt.Errorf("failed to initialize encryption service: %w", err)
+	if configCryptoProvider == nil {
+		return errors.New("config crypto provider not initialized")
 	}
-	encryptedBytes, err := cryptoProvider.Encrypt(context.Background(), []byte(p.value))
+	encryptedBytes, err := configCryptoProvider.Encrypt(context.Background(), []byte(p.value))
 	if err != nil {
 		return fmt.Errorf("failed to encrypt secret property %s: %w", p.GetName(), err)
 	}

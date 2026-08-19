@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package notification
 
@@ -55,7 +40,7 @@ type generatedOTP struct {
 
 // OTPServiceInterface defines the interface for OTP operations.
 type OTPServiceInterface interface {
-	GenerateOTP(ctx context.Context, recipient, recipientAttr string) (
+	GenerateOTP(ctx context.Context, recipient, recipientAttr string, otpCfg *common.OTPConfig) (
 		sessionToken string, otpValue string, expirySeconds int64, svcErr *tidcommon.ServiceError)
 	VerifyOTP(ctx context.Context, request common.VerifyOTPDTO) (
 		*common.VerifyOTPResultDTO, *tidcommon.ServiceError)
@@ -76,7 +61,8 @@ func newOTPService(jwtSvc jwt.JWTServiceInterface) OTPServiceInterface {
 }
 
 // GenerateOTP generates an OTP and session token for the recipient without delivering it.
-func (s *otpService) GenerateOTP(ctx context.Context, recipient, recipientAttr string) (
+// An optional otpCfg override can override the global OTP configuration (pass nil to use defaults).
+func (s *otpService) GenerateOTP(ctx context.Context, recipient, recipientAttr string, otpCfg *common.OTPConfig) (
 	string, string, int64, *tidcommon.ServiceError) {
 	logger := s.logger
 
@@ -85,7 +71,7 @@ func (s *otpService) GenerateOTP(ctx context.Context, recipient, recipientAttr s
 		return "", "", 0, &ErrorInvalidRecipient
 	}
 
-	otp, err := s.generateOTP()
+	otp, err := s.generateOTP(otpCfg)
 	if err != nil {
 		logger.Error(ctx, "Failed to generate OTP", log.Error(err))
 		return "", "", 0, &tidcommon.InternalServerError
@@ -104,7 +90,7 @@ func (s *otpService) GenerateOTP(ctx context.Context, recipient, recipientAttr s
 		return "", "", 0, &tidcommon.InternalServerError
 	}
 
-	expirySeconds := s.getOTPValidityPeriodInMillis() / 1000
+	expirySeconds := s.getOTPValidityPeriodInMillis(otpCfg) / 1000
 	logger.Debug(ctx, "OTP generated successfully", log.MaskedString("recipient", recipient))
 	return sessionToken, otp.Value, expirySeconds, nil
 }
@@ -161,9 +147,11 @@ func (s *otpService) validateOTPVerifyRequest(request common.VerifyOTPDTO) *tidc
 }
 
 // generateOTP generates a random OTP value based on server configuration.
-func (s *otpService) generateOTP() (generatedOTP, error) {
-	charSet := s.getOTPCharset()
-	length := s.getOTPLength()
+// An optional otpCfg override can override specific fields (length, numeric-only, validity).
+func (s *otpService) generateOTP(otpCfg *common.OTPConfig) (generatedOTP, error) {
+	mergedCfg := s.resolveOTPConfig(otpCfg)
+	charSet := s.getOTPCharset(mergedCfg.UsesNumericOnly())
+	length := mergedCfg.Length
 
 	chars := []rune(charSet)
 	result := make([]rune, length)
@@ -176,7 +164,7 @@ func (s *otpService) generateOTP() (generatedOTP, error) {
 	}
 
 	now := time.Now().UnixMilli()
-	validity := s.getOTPValidityPeriodInMillis()
+	validity := int64(mergedCfg.ValidityPeriodSeconds) * 1000
 	return generatedOTP{
 		Value:              string(result),
 		ExpiryTimeInMillis: now + validity,
@@ -233,25 +221,41 @@ func (s *otpService) verifyAndDecodeSessionToken(ctx context.Context, token stri
 }
 
 // resolveOTPConfig returns the effective OTP configuration for this otpService.
-// This is the single point of config access; future callers can pass flow-level overrides here.
-func (s *otpService) resolveOTPConfig() config.OTPConfig {
-	return config.GetServerRuntime().Config.Notification.OTP
+// An optional override can override specific fields from the global config (pass nil to use defaults).
+func (s *otpService) resolveOTPConfig(otpCfg *common.OTPConfig) config.OTPConfig {
+	cfg := config.GetServerRuntime().Config.Notification.OTP
+
+	if otpCfg == nil {
+		return cfg
+	}
+
+	if otpCfg.Length != nil {
+		if *otpCfg.Length >= 4 && *otpCfg.Length <= 10 {
+			cfg.Length = *otpCfg.Length
+		}
+	}
+	if otpCfg.UseNumericOnly != nil {
+		cfg.UseNumericOnly = otpCfg.UseNumericOnly
+	}
+	if otpCfg.ValidityPeriodSeconds != nil {
+		if *otpCfg.ValidityPeriodSeconds >= 30 && *otpCfg.ValidityPeriodSeconds <= 600 {
+			cfg.ValidityPeriodSeconds = *otpCfg.ValidityPeriodSeconds
+		}
+	}
+
+	return cfg
 }
 
 // getOTPCharset returns the character set for OTP generation.
-func (s *otpService) getOTPCharset() string {
-	if s.resolveOTPConfig().UseNumericOnly {
+func (s *otpService) getOTPCharset(useNumericOnly bool) string {
+	if useNumericOnly {
 		return "9245378016"
 	}
 	return "KIGXHOYSPRWCEFMVUQLZDNABJT9245378016"
 }
 
-// getOTPLength returns the configured OTP length.
-func (s *otpService) getOTPLength() int {
-	return s.resolveOTPConfig().Length
-}
-
 // getOTPValidityPeriodInMillis returns the OTP validity period in milliseconds.
-func (s *otpService) getOTPValidityPeriodInMillis() int64 {
-	return int64(s.resolveOTPConfig().ValidityPeriodSeconds) * 1000
+func (s *otpService) getOTPValidityPeriodInMillis(otpCfg *common.OTPConfig) int64 {
+	mergedCfg := s.resolveOTPConfig(otpCfg)
+	return int64(mergedCfg.ValidityPeriodSeconds) * 1000
 }

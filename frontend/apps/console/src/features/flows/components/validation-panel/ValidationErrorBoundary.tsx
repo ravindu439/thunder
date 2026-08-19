@@ -1,28 +1,31 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {keyframes} from '@emotion/react';
+import {Box} from '@wso2/oxygen-ui';
 import {CircleAlertIcon} from '@wso2/oxygen-ui-icons-react';
-import classNames from 'classnames';
 import {useMemo, useState, type PropsWithChildren, type ReactElement} from 'react';
 import useValidationStatus from '../../hooks/useValidationStatus';
 import Notification, {NotificationType} from '../../models/notification';
 import type {Resource} from '../../models/resources';
-import './ValidationErrorBoundary.scss';
+
+const errorPulse = keyframes`
+  0% { box-shadow: 0 0 0 0 rgba(var(--oxygen-palette-error-mainChannel) / 1); }
+  70% { box-shadow: 0 0 0 15px rgba(var(--oxygen-palette-error-mainChannel) / 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--oxygen-palette-error-mainChannel) / 0); }
+`;
+
+const warningPulse = keyframes`
+  0% { box-shadow: 0 0 0 0 rgba(var(--oxygen-palette-warning-mainChannel) / 1); }
+  70% { box-shadow: 0 0 0 15px rgba(var(--oxygen-palette-warning-mainChannel) / 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--oxygen-palette-warning-mainChannel) / 0); }
+`;
+
+const SEVERITY_COLORS: Record<NotificationType, string> = {
+  [NotificationType.ERROR]: 'error.main',
+  [NotificationType.INFO]: 'info.main',
+  [NotificationType.WARNING]: 'warning.main',
+};
 
 /**
  * Props interface of {@link ValidationErrorBoundary}
@@ -36,6 +39,10 @@ export interface ValidationErrorBoundaryPropsInterface {
    * Whether to disable the error boundary on hover.
    */
   disableErrorBoundaryOnHover?: boolean;
+  /**
+   * Radius of the boundary outline, for nodes that are not rounded rectangles.
+   */
+  borderRadius?: string | number;
 }
 
 /**
@@ -49,6 +56,7 @@ function ValidationErrorBoundary({
   resource,
   children = null,
   disableErrorBoundaryOnHover = false,
+  borderRadius = undefined,
 }: PropsWithChildren<ValidationErrorBoundaryPropsInterface>): ReactElement {
   const {notifications} = useValidationStatus();
   const [active, setActive] = useState<boolean>(false);
@@ -94,24 +102,54 @@ function ValidationErrorBoundary({
    */
   const notificationType: NotificationType | null = resourceNotification?.getType() ?? null;
 
+  const isPadded: boolean = hasNotification && !disableErrorBoundaryOnHover;
+
   return (
-    <div
-      className={classNames({
-        active: hasNotification && active && disableErrorBoundaryOnHover,
-        [String(notificationType)]: hasNotification && !!notificationType,
-        padded: hasNotification && !disableErrorBoundaryOnHover,
-        'validation-error-boundary': hasNotification,
-      })}
+    <Box
+      data-testid={hasNotification ? 'validation-error-boundary' : undefined}
+      sx={{
+        border: '2px solid transparent',
+        position: 'relative',
+        ...(hasNotification && {borderRadius: borderRadius ?? (isPadded ? 1 : undefined)}),
+        ...(notificationType === NotificationType.ERROR && {
+          animation: `${errorPulse} 1s infinite`,
+          borderColor: 'error.main',
+        }),
+        ...(notificationType === NotificationType.WARNING && {
+          animation: `${warningPulse} 1s infinite`,
+          borderColor: 'warning.main',
+        }),
+        ...(notificationType === NotificationType.INFO && {
+          backgroundColor: 'info.light',
+          borderColor: 'info.main',
+        }),
+      }}
       onMouseOver={() => hasNotification && disableErrorBoundaryOnHover && setActive(true)}
       onFocus={() => hasNotification && disableErrorBoundaryOnHover && setActive(true)}
       onMouseOut={() => hasNotification && disableErrorBoundaryOnHover && setActive(false)}
       onBlur={() => hasNotification && disableErrorBoundaryOnHover && setActive(false)}
     >
       {hasNotification && !(active && disableErrorBoundaryOnHover) && (
-        <CircleAlertIcon className="circle-alert-icon" size={24} />
+        <Box
+          component="span"
+          data-testid="validation-boundary-icon"
+          sx={{
+            backgroundColor: 'background.default',
+            borderRadius: '50%',
+            color: notificationType ? SEVERITY_COLORS[notificationType] : undefined,
+            display: 'inline-flex',
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            transform: 'translate(50%, -50%)',
+            zIndex: 10,
+          }}
+        >
+          <CircleAlertIcon size={24} />
+        </Box>
       )}
       {children}
-    </div>
+    </Box>
   );
 }
 

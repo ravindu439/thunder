@@ -1,25 +1,11 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
@@ -28,7 +14,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/resourceindicators"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
 	oauth2utils "github.com/thunder-id/thunderid/internal/oauth/oauth2/utils"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
@@ -36,10 +21,9 @@ import (
 // jwtBearerGrantHandler handles the jwt-bearer grant type used to present an ID-JAG assertion
 // (draft-ietf-oauth-identity-assertion-authz-grant) issued by a trusted external IdP.
 type jwtBearerGrantHandler struct {
-	tokenBuilder        tokenservice.TokenBuilderInterface
-	tokenValidator      tokenservice.TokenValidatorInterface
-	resourceService     providers.ResourceServerProvider
-	serverConfigService serverconfig.ServerConfigService
+	tokenBuilder    tokenservice.TokenBuilderInterface
+	tokenValidator  tokenservice.TokenValidatorInterface
+	resourceService providers.ResourceServerProvider
 }
 
 // newJWTBearerGrantHandler creates a new instance of jwtBearerGrantHandler.
@@ -47,13 +31,11 @@ func newJWTBearerGrantHandler(
 	tokenBuilder tokenservice.TokenBuilderInterface,
 	tokenValidator tokenservice.TokenValidatorInterface,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
 ) GrantHandlerInterface {
 	return &jwtBearerGrantHandler{
-		tokenBuilder:        tokenBuilder,
-		tokenValidator:      tokenValidator,
-		resourceService:     resourceService,
-		serverConfigService: serverConfigService,
+		tokenBuilder:    tokenBuilder,
+		tokenValidator:  tokenValidator,
+		resourceService: resourceService,
 	}
 }
 
@@ -97,20 +79,36 @@ func (h *jwtBearerGrantHandler) HandleGrant(ctx context.Context, tokenRequest *m
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "JWTBearerGrantHandler"))
 
 	assertionClaims, err := h.tokenValidator.ValidateIDJAGAssertion(
-		ctx, tokenRequest.Assertion, tokenRequest.ClientID)
+		ctx, tokenRequest.Assertion)
 	if err != nil {
 		logger.Debug(ctx, "Failed to validate ID-JAG assertion", log.Error(err))
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorInvalidGrant,
-			ErrorDescription: "Invalid assertion",
+		switch {
+		case errors.Is(err, tokenservice.ErrTokenExpired):
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidGrant,
+				ErrorDescription: "The assertion has expired",
+			}
+		case errors.Is(err, tokenservice.ErrIssuerNotTrusted):
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidGrant,
+				ErrorDescription: "The assertion issuer is not registered as a trusted ID-JAG issuer",
+			}
+		case errors.Is(err, tokenservice.ErrAudienceNotAccepted):
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidGrant,
+				ErrorDescription: "The assertion audience must be exactly this server's issuer",
+			}
+		default:
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidGrant,
+				ErrorDescription: "Invalid assertion",
+			}
 		}
 	}
 
 	// Granted scopes start from the assertion's scope claim, narrowed by the request scope parameter
-	// when present. The app's registered scopes are intentionally NOT intersected here: no other grant
-	// enforces oauthApp.Scopes (the scope validator is a passthrough), and resource-server-scoped
-	// narrowing below (when a resource claim is present) is the correct authorization boundary. Per-app
-	// resource authorization is expected to be handled by app-resource subscription once implemented.
+	// when present. OIDC scopes are narrowed to the app's scope-to-claims mapping below; permission
+	// scopes are bounded by resource-server narrowing when a resource claim is present.
 	grantedScopes := assertionClaims.Scopes
 	if tokenRequest.Scope != "" {
 		grantedScopes = intersectScopes(grantedScopes, tokenservice.ParseScopes(tokenRequest.Scope))
@@ -142,7 +140,7 @@ func (h *jwtBearerGrantHandler) HandleGrant(ctx context.Context, tokenRequest *m
 	oidcScopes, permissionScopes := oauth2utils.SeparateOIDCAndNonOIDCScopes(
 		tokenservice.JoinScopes(grantedScopes), oauthApp.ScopeClaims)
 	targetRS, errResp := resourceindicators.ResolveAudienceBinding(
-		ctx, h.resourceService, h.serverConfigService, resources, permissionScopes)
+		ctx, h.resourceService, resources, permissionScopes)
 	if errResp != nil {
 		return nil, errResp
 	}
@@ -150,8 +148,9 @@ func (h *jwtBearerGrantHandler) HandleGrant(ctx context.Context, tokenRequest *m
 	var audiences []string
 	if targetRS == nil {
 		// OIDC-only assertion with no resource: the token is not bound to a resource server, so its
-		// audience is the client_id and it carries only the OIDC scopes.
-		audiences = []string{tokenRequest.ClientID}
+		// audience is the app's configured default audiences (falling back to the client_id) and it
+		// carries only the OIDC scopes.
+		audiences = []string{oauthApp.ResolveDefaultAudience(tokenRequest.ClientID)}
 		grantedScopes = oidcScopes
 	} else {
 		permissionScopes, errResp = resourceindicators.DownscopeToResourceServer(

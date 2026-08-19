@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {createOxygenTheme, OxygenTheme, type OxygenThemeType} from '@wso2/oxygen-ui';
 
 /**
- * DefaultTheme - The default theme for Thunder ID applications
+ * DefaultTheme - The default theme for ThunderID applications
  * Features: Electric blue primary, indigo secondary, deep purple dark backgrounds with ambient glow
  * Evokes intelligence, creativity, and cutting-edge AI aesthetics
  */
@@ -67,7 +52,7 @@ export const DefaultThemeConfig = {
           contrastText: '#ffffff',
         },
         background: {
-          default: '#ffffff5c',
+          default: '#ffffff',
           paper: '#ffffff7f',
           acrylic: '#ffffff36',
         },
@@ -167,8 +152,8 @@ export const DefaultThemeConfig = {
         "html[data-color-scheme='light'] body": {
           backgroundAttachment: 'fixed',
           backgroundImage:
-            'radial-gradient(circle at 65% 30%, rgb(0 127 242 / 18%) 10%, rgba(0, 0, 0, 0) 60% 40%), ' +
-            'radial-gradient(circle at 15% 50%, rgb(0 213 255 / 26%) 1%, rgb(0 0 0 / 0%) 40% 70%), ' +
+            'radial-gradient(circle at 65% 30%, rgb(0 127 242 / 19%) 10%, rgba(0, 0, 0, 0) 60% 40%),' +
+            'radial-gradient(circle at 15% 50%, rgb(187 187 187 / 22%) 1%, rgb(0 0 0 / 0%) 40% 70%),' +
             'radial-gradient(circle at center, rgba(255, 255, 255, 0.6) 0%, var(--oxygen-palette-background-default) 100%)',
         },
       },
@@ -204,6 +189,13 @@ export const DefaultThemeConfig = {
       styleOverrides: {
         root: {
           transition: 'all 0.3s ease-in-out',
+        },
+        sizeSmall: {
+          padding: '4px 10px',
+          gap: '4px',
+          '& .MuiButton-startIcon': {
+            marginRight: '0',
+          },
         },
         contained: ({ownerState}: {theme: OxygenThemeType; ownerState: {color?: string}}) => {
           if (ownerState.color && ownerState.color !== 'primary') {

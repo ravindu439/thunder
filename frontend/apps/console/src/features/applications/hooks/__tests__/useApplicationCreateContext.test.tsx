@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderHook} from '@testing-library/react';
 import type {ReactNode} from 'react';
@@ -31,7 +16,7 @@ describe('useApplicationCreateContext', () => {
     setRelyingPartyId: vi.fn(),
     relyingPartyName: '',
     setRelyingPartyName: vi.fn(),
-    currentStep: ApplicationCreateFlowStep.NAME,
+    currentStep: ApplicationCreateFlowStep.DETAILS,
     setCurrentStep: vi.fn(),
     appName: 'Test App',
     setAppName: vi.fn(),
@@ -41,6 +26,10 @@ describe('useApplicationCreateContext', () => {
     setThemeId: vi.fn(),
     selectedTheme: null,
     setSelectedTheme: vi.fn(),
+    layoutId: null,
+    setLayoutId: vi.fn(),
+    selectedLayout: null,
+    setSelectedLayout: vi.fn(),
     appLogo: null,
     setAppLogo: vi.fn(),
     selectedColor: '',
@@ -48,10 +37,36 @@ describe('useApplicationCreateContext', () => {
     integrations: {},
     setIntegrations: vi.fn(),
     toggleIntegration: vi.fn(),
+    isEmailOtpMfaEnabled: false,
+    setIsEmailOtpMfaEnabled: vi.fn(),
+    isSmsOtpMfaEnabled: false,
+    setIsSmsOtpMfaEnabled: vi.fn(),
+    smsOtpSenderId: '',
+    setSmsOtpSenderId: vi.fn(),
     selectedAuthFlow: null,
     setSelectedAuthFlow: vi.fn(),
-    signInApproach: ApplicationCreateFlowSignInApproach.INBUILT,
+    signInApproach: ApplicationCreateFlowSignInApproach.REDIRECT_BASED,
     setSignInApproach: vi.fn(),
+    registrationFlowId: null,
+    setRegistrationFlowId: vi.fn(),
+    isRegistrationFlowEnabled: false,
+    setIsRegistrationFlowEnabled: vi.fn(),
+    recoveryFlowId: null,
+    setRecoveryFlowId: vi.fn(),
+    isRecoveryFlowEnabled: false,
+    setIsRecoveryFlowEnabled: vi.fn(),
+    signOutFlowId: null,
+    setSignOutFlowId: vi.fn(),
+    isSignOutFlowEnabled: false,
+    setIsSignOutFlowEnabled: vi.fn(),
+    redirectUris: [],
+    setRedirectUris: vi.fn(),
+    postLogoutRedirectUris: [],
+    setPostLogoutRedirectUris: vi.fn(),
+    corsOrigins: [],
+    setCorsOrigins: vi.fn(),
+    ouDefaults: {signIn: false, signUp: false, recovery: false, signOut: false, theme: false, layout: false},
+    setOuDefaults: vi.fn(),
     selectedTechnology: null,
     setSelectedTechnology: vi.fn(),
     selectedPlatform: null,
@@ -85,10 +100,10 @@ describe('useApplicationCreateContext', () => {
       wrapper: createWrapper(mockContextValue),
     });
 
-    expect(result.current.currentStep).toBe(ApplicationCreateFlowStep.NAME);
+    expect(result.current.currentStep).toBe(ApplicationCreateFlowStep.DETAILS);
     expect(result.current.appName).toBe('Test App');
     expect(result.current.selectedTheme).toBeNull();
-    expect(result.current.signInApproach).toBe(ApplicationCreateFlowSignInApproach.INBUILT);
+    expect(result.current.signInApproach).toBe(ApplicationCreateFlowSignInApproach.REDIRECT_BASED);
   });
 
   it('should throw an error when used outside of ApplicationCreateProvider', () => {
@@ -184,11 +199,10 @@ describe('useApplicationCreateContext', () => {
 
   it('should return different flow steps', () => {
     const steps = [
-      ApplicationCreateFlowStep.NAME,
+      ApplicationCreateFlowStep.DETAILS,
       ApplicationCreateFlowStep.DESIGN,
-      ApplicationCreateFlowStep.OPTIONS,
-      ApplicationCreateFlowStep.EXPERIENCE,
-      ApplicationCreateFlowStep.STACK,
+      ApplicationCreateFlowStep.SECURITY,
+      ApplicationCreateFlowStep.ORGANIZATION_UNIT,
       ApplicationCreateFlowStep.CONFIGURE,
     ];
 
@@ -207,7 +221,10 @@ describe('useApplicationCreateContext', () => {
   });
 
   it('should return sign-in approach values', () => {
-    const approaches = [ApplicationCreateFlowSignInApproach.INBUILT, ApplicationCreateFlowSignInApproach.EMBEDDED];
+    const approaches = [
+      ApplicationCreateFlowSignInApproach.REDIRECT_BASED,
+      ApplicationCreateFlowSignInApproach.EMBEDDED,
+    ];
 
     approaches.forEach((approach) => {
       const contextWithApproach: ApplicationCreateContextType = {

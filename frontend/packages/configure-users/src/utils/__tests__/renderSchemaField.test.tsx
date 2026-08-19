@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor, userEvent} from '@thunderid/test-utils';
 import {useForm} from 'react-hook-form';
@@ -176,6 +161,14 @@ describe('renderSchemaField', () => {
     it('checkbox is unchecked when default value is false', () => {
       const fieldDef: PropertyDefinition = {type: 'boolean'};
       render(<TestForm fieldName="isActive" fieldDef={fieldDef} defaultValues={{isActive: false}} />);
+
+      const checkbox = screen.getByRole('checkbox');
+      expect(checkbox).not.toBeChecked();
+    });
+
+    it('checkbox is unchecked for a stale non-boolean value', () => {
+      const fieldDef: PropertyDefinition = {type: 'boolean'};
+      render(<TestForm fieldName="isActive" fieldDef={fieldDef} defaultValues={{isActive: 'true'}} />);
 
       const checkbox = screen.getByRole('checkbox');
       expect(checkbox).not.toBeChecked();

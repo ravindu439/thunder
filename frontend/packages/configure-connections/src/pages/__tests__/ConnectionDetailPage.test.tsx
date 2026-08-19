@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {fireEvent, render, screen, waitFor} from '@thunderid/test-utils';
 import {type ReactNode, useEffect} from 'react';
@@ -22,9 +7,11 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import ConnectionDetailPage from '../ConnectionDetailPage';
 
 const updateMock = vi.fn().mockResolvedValue({});
+const updateResetMock = vi.fn();
 const refetchMock = vi.fn().mockResolvedValue({});
 const deleteMock = vi.fn((_id: string, opts: {onSuccess: () => void}) => opts.onSuccess());
 const navigateMock = vi.fn();
+const updateMutationState = {isPending: false, isError: false};
 
 const ATTR_CONFIG = {
   userTypeResolution: {default: 'employee'},
@@ -53,6 +40,17 @@ const TWILIO_CONNECTION = {
   senderId: '+15005550006',
 };
 
+const OIDC_CONNECTION = {
+  id: 'oidc1',
+  type: 'oidc',
+  name: 'Acme Workforce OIDC',
+  clientId: 'cid',
+  clientSecret: '******',
+  authorizationEndpoint: 'https://idp.example.com/authorize',
+  tokenEndpoint: 'https://idp.example.com/token',
+  redirectUri: 'https://id.acme.io/oauth/callback/oidc',
+};
+
 const mockParams: {type: string; id: string} = {type: 'google', id: 'g1'};
 const mockConn: {data: Record<string, unknown>} = {data: CONNECTION};
 
@@ -66,7 +64,8 @@ vi.mock('@thunderid/contexts', async (importOriginal) => ({
   useConfig: () => ({getGateCallbackUrl: () => 'https://id.acme.io/gate/callback'}),
   useToast: () => ({showToast: vi.fn()}),
 }));
-vi.mock('@thunderid/components', () => ({
+vi.mock('@thunderid/components', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/components')>()),
   SettingsCard: ({title, children}: {title: string; children: ReactNode}) => (
     <section aria-label={title}>{children}</section>
   ),
@@ -81,19 +80,31 @@ vi.mock('../../api/useConnection', () => ({
   default: () => ({data: mockConn.data, isLoading: false, isError: false, refetch: refetchMock}),
 }));
 vi.mock('../../api/useConnectionInstances', () => ({default: () => ({data: [], isLoading: false})}));
-vi.mock('../../api/useUpdateConnection', () => ({default: () => ({mutateAsync: updateMock, isPending: false})}));
+vi.mock('../../api/useUpdateConnection', () => ({
+  default: () => ({mutateAsync: updateMock, reset: updateResetMock, ...updateMutationState}),
+}));
 vi.mock('../../api/useDeleteConnection', () => ({default: () => ({mutate: deleteMock, isPending: false})}));
 vi.mock('../../api/useGetConnectionUsages', () => ({
   default: () => ({data: {totalResults: 0, count: 0, summary: {}, usages: []}, isLoading: false}),
 }));
 
 vi.mock('../../components/ConnectionForm', () => ({
-  default: function StubConnectionForm({onFieldChange}: {onFieldChange: (name: string, value: string) => void}) {
+  default: function StubConnectionForm({
+    onFieldChange,
+    nameError,
+  }: {
+    onFieldChange: (name: string, value: string) => void;
+    nameError?: string | null;
+  }) {
     return (
       <div data-testid="stub-connection-form">
         <button type="button" data-testid="edit-client-id" onClick={() => onFieldChange('clientId', 'changed')}>
           edit
         </button>
+        <button type="button" data-testid="edit-name" onClick={() => onFieldChange('name', 'Renamed')}>
+          edit name
+        </button>
+        {nameError && <div data-testid="stub-name-error">{nameError}</div>}
       </div>
     );
   },
@@ -114,15 +125,30 @@ describe('ConnectionDetailPage', () => {
     mockParams.type = 'google';
     mockParams.id = 'g1';
     mockConn.data = CONNECTION;
+    updateMutationState.isPending = false;
+    updateMutationState.isError = false;
   });
 
-  it('renders the general tab with quick-copy, the credentials form, and a danger-zone delete', () => {
+  it('renders the general tab with quick-copy and the credentials form', () => {
     render(<ConnectionDetailPage />);
     expect(screen.getByTestId('connection-id-copy')).toBeInTheDocument();
     expect(screen.getByDisplayValue('g1')).toBeInTheDocument();
     expect(screen.getByText('Unique identifier for this connection.')).toBeInTheDocument();
     expect(screen.getByTestId('stub-connection-form')).toBeInTheDocument();
+  });
+
+  it('renders the danger-zone delete on the advanced tab', () => {
+    render(<ConnectionDetailPage />);
+    fireEvent.click(screen.getByTestId('connection-tab-advanced'));
     expect(screen.getByTestId('connection-delete-button')).toBeInTheDocument();
+  });
+
+  it('shows the Configured status under the name in the card style, with no redundant subtitle', () => {
+    render(<ConnectionDetailPage />);
+    expect(screen.getByText('Google')).toBeInTheDocument();
+    expect(screen.getByText('Configured')).toBeInTheDocument();
+    expect(screen.queryByText('Google connection')).not.toBeInTheDocument();
+    expect(document.querySelector('.MuiChip-root')).not.toBeInTheDocument();
   });
 
   it('hides the save bar until a field is edited', () => {
@@ -147,8 +173,44 @@ describe('ConnectionDetailPage', () => {
     await waitFor(() => expect(screen.queryByTestId('save-bar')).not.toBeInTheDocument());
   });
 
+  it('shows an inline name error on a 409 update conflict, and clears it when the name is edited', async () => {
+    mockParams.type = 'oidc';
+    mockParams.id = 'oidc1';
+    mockConn.data = OIDC_CONNECTION;
+    updateMock.mockRejectedValueOnce({response: {status: 409}});
+    render(<ConnectionDetailPage />);
+    fireEvent.click(screen.getByTestId('edit-client-id'));
+    fireEvent.click(screen.getByTestId('save-bar'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('stub-name-error')).toHaveTextContent('A connection with this name already exists.'),
+    );
+
+    fireEvent.click(screen.getByTestId('edit-name'));
+    expect(screen.queryByTestId('stub-name-error')).not.toBeInTheDocument();
+  });
+
+  it('resets a failed (settled) update mutation as soon as a field is edited', () => {
+    updateMutationState.isError = true;
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(screen.getByTestId('edit-client-id'));
+
+    expect(updateResetMock).toHaveBeenCalled();
+  });
+
+  it('does not reset a still-pending update mutation when a field is edited', () => {
+    updateMutationState.isPending = true;
+    render(<ConnectionDetailPage />);
+
+    fireEvent.click(screen.getByTestId('edit-client-id'));
+
+    expect(updateResetMock).not.toHaveBeenCalled();
+  });
+
   it('deletes the connection and returns to the list', () => {
     render(<ConnectionDetailPage />);
+    fireEvent.click(screen.getByTestId('connection-tab-advanced'));
     fireEvent.click(screen.getByTestId('connection-delete-button'));
     fireEvent.click(screen.getByTestId('connection-delete-confirm'));
     expect(deleteMock).toHaveBeenCalledWith('g1', expect.anything());

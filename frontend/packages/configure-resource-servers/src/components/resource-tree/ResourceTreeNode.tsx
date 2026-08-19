@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useToast} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
@@ -61,6 +46,7 @@ interface ResourceTreeNodeProps {
   selectedNodeId: string | null;
   onSelect: (node: SelectedNode) => void;
   onAddChild: (mode: AddNodeMode, parentResourceId: string, parentPermission: string) => void;
+  readOnly?: boolean;
 }
 
 export function ResourceNode({
@@ -71,6 +57,7 @@ export function ResourceNode({
   selectedNodeId,
   onSelect,
   onAddChild,
+  readOnly = false,
 }: ResourceTreeNodeProps): JSX.Element {
   const {t} = useTranslation();
   const {showToast} = useToast();
@@ -181,7 +168,7 @@ export function ResourceNode({
           )}
         </Box>
 
-        {(isSelected || hovered || Boolean(addMenuAnchor)) && (
+        {!readOnly && (isSelected || hovered || Boolean(addMenuAnchor)) && (
           <Box sx={{display: 'flex', gap: 0.25, flexShrink: 0}} onClick={(e) => e.stopPropagation()}>
             <Tooltip title={t('resourceServers:tree.add', 'Add')}>
               <IconButton
@@ -252,6 +239,7 @@ export function ResourceNode({
             parentResourceId={node.id}
             selectedNodeId={selectedNodeId}
             onSelect={onSelect}
+            readOnly={readOnly}
           />
         ))}
         {children.map((child) => (
@@ -264,6 +252,7 @@ export function ResourceNode({
             selectedNodeId={selectedNodeId}
             onSelect={onSelect}
             onAddChild={onAddChild}
+            readOnly={readOnly}
           />
         ))}
       </Collapse>
@@ -279,6 +268,7 @@ interface ActionNodeProps {
   selectedNodeId: string | null;
   onSelect: (node: SelectedNode) => void;
   breadcrumb?: string[];
+  readOnly?: boolean;
 }
 
 export function ActionNode({
@@ -289,6 +279,7 @@ export function ActionNode({
   selectedNodeId,
   onSelect,
   breadcrumb = [],
+  readOnly = false,
 }: ActionNodeProps): JSX.Element {
   const {t} = useTranslation();
   const {showToast} = useToast();
@@ -383,7 +374,7 @@ export function ActionNode({
         )}
       </Box>
 
-      {(isSelected || hovered) && (
+      {!readOnly && (isSelected || hovered) && (
         <Box sx={{display: 'flex', flexShrink: 0}} onClick={(e) => e.stopPropagation()}>
           <Tooltip title={t('common:delete', 'Delete')}>
             <IconButton

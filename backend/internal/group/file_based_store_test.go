@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -511,3 +496,38 @@ func (suite *GroupFileBasedStoreTestSuite) TestGetTransitiveGroupsForEntity_NoCy
 
 // Ensure the return type satisfies entity.GroupMembershipProvider.
 var _ entitypkg.GroupMembershipProvider = (*fileBasedGroupStore)(nil)
+
+// A malformed declarative entry must fail the ancestor lookup rather than being skipped. A skipped
+// entry could be a parent, and a short ancestor list understates what membership in a group confers.
+func (suite *GroupFileBasedStoreTestSuite) TestGetDirectGroupParents_MalformedEntryFailsClosed() {
+	parent := groupDeclarativeResource{
+		ID:      "parent-grp",
+		Name:    "Parent",
+		OUID:    "ou1",
+		Members: []Member{{ID: "child-grp", Type: MemberTypeGroup}},
+	}
+	suite.Require().NoError(suite.store.GenericFileBasedStore.Create(parent.ID, &parent))
+	// Bypass the typed Create so a malformed entry lands in the store.
+	suite.Require().NoError(suite.store.GenericFileBasedStore.Create("broken-grp", "not a group"))
+
+	parents, err := suite.store.GetDirectGroupParents(context.Background(), []string{"child-grp"})
+
+	suite.Error(err, "a malformed declarative group must not be silently skipped")
+	suite.Nil(parents)
+}
+
+// The happy path must still resolve parents when every entry parses.
+func (suite *GroupFileBasedStoreTestSuite) TestGetDirectGroupParents_ResolvesWhenAllEntriesParse() {
+	parent := groupDeclarativeResource{
+		ID:      "ok-parent",
+		Name:    "Parent",
+		OUID:    "ou1",
+		Members: []Member{{ID: "ok-child", Type: MemberTypeGroup}},
+	}
+	suite.Require().NoError(suite.store.GenericFileBasedStore.Create(parent.ID, &parent))
+
+	parents, err := suite.store.GetDirectGroupParents(context.Background(), []string{"ok-child"})
+
+	suite.NoError(err)
+	suite.Contains(parents, "ok-parent")
+}

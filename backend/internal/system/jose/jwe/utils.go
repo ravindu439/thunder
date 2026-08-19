@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwe
 
@@ -260,67 +245,73 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 	return data[:len(data)-padding], nil
 }
 
-// jwkToECPublicKey converts a JWK to an ECDH public key for key agreement (e.g. ECDH-ES).
-func jwkToECPublicKey(jwk map[string]interface{}) (*ecdh.PublicKey, error) {
-	crv, crvOK := jwk["crv"].(string)
-	xStr, xOK := jwk["x"].(string)
-	yStr, yOK := jwk["y"].(string)
-	if !crvOK || !xOK || !yOK {
-		return nil, errors.New("JWK missing EC parameters")
-	}
-
-	curve, expectedKeySize, err := getECCurveInfo(crv)
-	if err != nil {
-		return nil, err
-	}
-
-	xBytes, err := base64.RawURLEncoding.DecodeString(xStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode EC x: %w", err)
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(yStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode EC y: %w", err)
-	}
-
-	if len(xBytes) != expectedKeySize || len(yBytes) != expectedKeySize {
-		return nil, errors.New("invalid EC coordinate length")
-	}
-
-	uncompressed := make([]byte, 1+len(xBytes)+len(yBytes))
-	uncompressed[0] = 0x04
-	copy(uncompressed[1:], xBytes)
-	copy(uncompressed[1+len(xBytes):], yBytes)
-
-	return curve.NewPublicKey(uncompressed)
-}
-
-// getECCurveInfo returns the ECDH curve and expected coordinate byte size for a given curve name.
-func getECCurveInfo(crv string) (ecdh.Curve, int, error) {
-	switch crv {
-	case jws.P256:
-		return ecdh.P256(), 32, nil
-	case jws.P384:
-		return ecdh.P384(), 48, nil
-	case jws.P521:
-		return ecdh.P521(), 66, nil
-	default:
-		return nil, 0, fmt.Errorf("unsupported EC curve: %s", crv)
-	}
-}
-
 // extractEPKFromHeader parses the "epk" field from the JWE protected header and returns
-// the ephemeral public key as *ecdh.PublicKey required by cryptolib.
-func extractEPKFromHeader(header map[string]interface{}) (crypto.PublicKey, error) {
+// it as a JWK map. Callers resolve the map to a concrete public key as needed.
+func extractEPKFromHeader(header map[string]interface{}) (map[string]interface{}, error) {
 	epkMap, ok := header["epk"].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("missing or invalid epk in JWE header")
 	}
-	ecdhPub, err := jwkToECPublicKey(epkMap)
+	return epkMap, nil
+}
+
+// jwkToECDHPublicKey converts an EC JWK map (crv/x/y) to an *ecdh.PublicKey, per RFC 7518
+// Section 6.2.1.2. The x and y coordinates must be exactly the curve's coordinate size.
+func jwkToECDHPublicKey(jwk map[string]interface{}) (*ecdh.PublicKey, error) {
+	kty, _ := jwk["kty"].(string)
+	crv, _ := jwk["crv"].(string)
+	xStr, _ := jwk["x"].(string)
+	yStr, _ := jwk["y"].(string)
+	if kty != "EC" || crv == "" || xStr == "" || yStr == "" {
+		return nil, fmt.Errorf("EC JWK missing or invalid kty/crv/x/y")
+	}
+
+	var curve ecdh.Curve
+	var coordLen int
+	switch crv {
+	case jws.P256:
+		curve, coordLen = ecdh.P256(), 32
+	case jws.P384:
+		curve, coordLen = ecdh.P384(), 48
+	case jws.P521:
+		curve, coordLen = ecdh.P521(), 66
+	default:
+		return nil, fmt.Errorf("unsupported EC curve: %s", crv)
+	}
+
+	xBytes, err := base64.RawURLEncoding.DecodeString(xStr)
+	if err != nil {
+		return nil, fmt.Errorf("decode EC x: %w", err)
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(yStr)
+	if err != nil {
+		return nil, fmt.Errorf("decode EC y: %w", err)
+	}
+	if len(xBytes) != coordLen || len(yBytes) != coordLen {
+		return nil, fmt.Errorf("EC coordinate length mismatch for %s", crv)
+	}
+
+	uncompressed := make([]byte, 1+2*coordLen)
+	uncompressed[0] = 0x04
+	copy(uncompressed[1:1+coordLen], xBytes)
+	copy(uncompressed[1+coordLen:], yBytes)
+
+	return curve.NewPublicKey(uncompressed)
+}
+
+// extractECDHPublicKeyFromHeader parses the "epk" field from the JWE protected header and
+// resolves it to an *ecdh.PublicKey, as required for direct decryption with an explicitly
+// supplied recipient private key.
+func extractECDHPublicKeyFromHeader(header map[string]interface{}) (*ecdh.PublicKey, error) {
+	epkMap, err := extractEPKFromHeader(header)
+	if err != nil {
+		return nil, err
+	}
+	pub, err := jwkToECDHPublicKey(epkMap)
 	if err != nil {
 		return nil, fmt.Errorf("invalid epk in header: %w", err)
 	}
-	return ecdhPub, nil
+	return pub, nil
 }
 
 // decodeAPUAPV extracts and base64url-decodes the apu or apv field from the JWE

@@ -2,7 +2,7 @@
 
 Vite + React UI for the agent identity sample. Two things matter here:
 
-1. **User sign-in** via the Asgardeo JavaScript SDK pointed at Thunder. Uses Thunder's `WAYFINDER` application (a separate OAuth client from the chat agent).
+1. **User sign-in** via the ThunderID JavaScript SDK. Uses the `WAYFINDER` application (a separate OAuth client from the chat agent).
 2. **Chat widget** that talks to the agent over WebSocket. The widget also hosts the `/agent-callback` route that captures the auth code from the OBO popup and forwards it back to the agent.
 
 Configure with `.env.example` in this folder.

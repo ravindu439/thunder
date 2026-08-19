@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -68,7 +53,7 @@ func (suite *AttributeCollectorTestSuite) SetupTest() {
 // newAuthenticatedAuthUser creates an AuthUser that returns true for IsAuthenticated().
 func newAuthenticatedAuthUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -504,6 +489,29 @@ func (suite *AttributeCollectorTestSuite) TestGetInputAttributes_FromRuntimeData
 
 	assert.Len(suite.T(), result, 1)
 	assert.Equal(suite.T(), "runtime@example.com", result["email"])
+}
+
+// TestGetInputAttributes_ConvertsByInputType verifies that values collected for typed inputs are
+// converted from the engine's string representation, so a boolean or number attribute satisfies
+// schema validation when the collected profile is persisted.
+func (suite *AttributeCollectorTestSuite) TestGetInputAttributes_ConvertsByInputType() {
+	ctx := &providers.NodeContext{
+		UserInputs:  map[string]string{"active": "true", "age": "42", "email": "test@example.com"},
+		RuntimeData: map[string]string{"verified": "false"},
+		NodeInputs: []providers.Input{
+			{Identifier: "active", Type: providers.InputTypeBoolean, Required: true},
+			{Identifier: "verified", Type: providers.InputTypeBoolean, Required: true},
+			{Identifier: "age", Type: providers.InputTypeNumber, Required: true},
+			{Identifier: "email", Type: providers.InputTypeText, Required: true},
+		},
+	}
+
+	result := suite.executor.getInputAttributes(ctx)
+
+	assert.Equal(suite.T(), true, result["active"])
+	assert.Equal(suite.T(), false, result["verified"])
+	assert.Equal(suite.T(), float64(42), result["age"])
+	assert.Equal(suite.T(), "test@example.com", result["email"])
 }
 
 func (suite *AttributeCollectorTestSuite) TestGetInputAttributes_SkipUserID() {

@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {PageLoader, ResourceAvatar} from '@thunderid/components';
 import {useLogger} from '@thunderid/logger/react';
 import {
   Box,
@@ -37,7 +23,6 @@ import {Link, useLocation, useNavigate, useSearchParams} from 'react-router';
 import PlatformBasedApplicationTemplateMetadata from '../config/PlatformBasedApplicationTemplateMetadata';
 import TechnologyBasedApplicationTemplateMetadata from '../config/TechnologyBasedApplicationTemplateMetadata';
 import useApplicationCreate from '../contexts/ApplicationCreate/useApplicationCreate';
-import {ApplicationCreateFlowStep} from '../models/application-create-flow';
 import type {ApplicationTemplateMetadata, TemplateCategory} from '../models/application-templates';
 import {PlatformApplicationTemplate, TechnologyApplicationTemplate} from '../models/application-templates';
 import resolveCreationFlow from '../utils/resolveCreationFlow';
@@ -83,8 +68,14 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
 
   const isWelcomeFlow = pathname.startsWith('/welcome');
 
-  const {reset, setSelectedTechnology, setSelectedPlatform, setSelectedTemplateConfig, setCurrentStep} =
-    useApplicationCreate();
+  const {
+    reset,
+    setSelectedTechnology,
+    setSelectedPlatform,
+    setSelectedTemplateConfig,
+    setSignInApproach,
+    setCurrentStep,
+  } = useApplicationCreate();
 
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -98,7 +89,7 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
     });
   }, [selectedCategory, searchQuery, t]);
 
-  const handleTemplateSelect = (option: AnyTemplateMetadata): void => {
+  const handleTemplateSelect = (option: AnyTemplateMetadata, replace = false): void => {
     if (option.disabled) return;
 
     reset();
@@ -113,11 +104,14 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
 
     setSelectedTemplateConfig(option.template);
 
+    if (option.template.defaults?.signInApproach) {
+      setSignInApproach(option.template.defaults.signInApproach);
+    }
+
     // The wizard no longer owns the template step, so advance to the first real step of this
-    // template's creation flow before handing off.
-    const firstStep = resolveCreationFlow(option.template).steps.find(
-      (step) => step !== ApplicationCreateFlowStep.STACK,
-    );
+    // template's creation flow before handing off (the organization unit, when there's a choice
+    // of one; otherwise the Details step).
+    const firstStep = resolveCreationFlow(option.template).steps[0];
     if (firstStep) {
       setCurrentStep(firstStep);
     }
@@ -125,7 +119,7 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
     const wizardPath = isWelcomeFlow ? '/welcome/get-started/applications/create' : '/applications/create';
 
     (async () => {
-      await navigate(`${wizardPath}?type=${option.value}`);
+      await navigate(`${wizardPath}?type=${option.value}`, {replace});
     })().catch((error: unknown) => {
       logger.error('Failed to navigate to application creation wizard', {error, template: option.value});
     });
@@ -133,16 +127,28 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
 
   // Entry points elsewhere in the console (e.g. the home page's framework picker) deep-link here
   // with a preselected type, skipping the gallery straight to the wizard.
-  useEffect(() => {
+  const preselectedTemplate: AnyTemplateMetadata | undefined = useMemo(() => {
     const typeParam = searchParams.get('type');
-    if (!typeParam) return;
-
+    if (!typeParam) return undefined;
     const preselected = ALL_TEMPLATES.find((tmpl) => tmpl.value === typeParam);
-    if (preselected && !preselected.disabled) {
-      handleTemplateSelect(preselected);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return preselected && !preselected.disabled ? preselected : undefined;
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!preselectedTemplate) return;
+    // Replaces rather than pushes, so this pass-through gallery entry doesn't sit in the history
+    // between the entry point and the wizard — going back from the wizard would otherwise land
+    // here and be bounced straight forward again.
+    handleTemplateSelect(preselectedTemplate, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectedTemplate]);
+
+  // The gallery is only passed through on a deep link, so rendering it would flash the full
+  // template grid for a frame before the effect above navigates on. Hold the loader the lazy
+  // wizard chunk shows anyway, so the hand-off reads as one continuous load.
+  if (preselectedTemplate) {
+    return <PageLoader />;
+  }
 
   return (
     <PageContent>
@@ -263,9 +269,7 @@ export default function ApplicationTemplateSelectPage(): JSX.Element {
 
               <CardContent sx={{p: 2.5, '&:last-child': {pb: 2.5}}}>
                 <Stack direction="column" spacing={2}>
-                  <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center', width: 48, height: 48}}>
-                    {option.icon}
-                  </Box>
+                  <ResourceAvatar transparent variant="rounded" size={48} fallback={option.icon} />
 
                   <Stack direction="column" spacing={0.75} sx={{flex: 1}}>
                     <Typography variant="subtitle1" sx={{fontWeight: 600, lineHeight: 1.3}}>

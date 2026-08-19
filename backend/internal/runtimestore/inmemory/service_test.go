@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package inmemory
 
@@ -92,6 +77,69 @@ func (s *InMemoryStoreTestSuite) TestPut_ZeroTTL_NeverExpires() {
 	got, err := s.store.Get(s.ctx, testNamespace, testKey)
 	s.NoError(err)
 	s.Equal([]byte("forever"), got)
+}
+
+func (s *InMemoryStoreTestSuite) TestPutIfNotExists_MissingKey_Stores() {
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, []byte("value"), 60)
+	s.NoError(err)
+	s.True(ok)
+
+	got, err := s.store.Get(s.ctx, testNamespace, testKey)
+	s.NoError(err)
+	s.Equal([]byte("value"), got)
+}
+
+func (s *InMemoryStoreTestSuite) TestPutIfNotExists_ExistingUnexpiredKey_Rejected() {
+	_, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, []byte("first"), 60)
+	s.Require().NoError(err)
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, []byte("second"), 60)
+	s.NoError(err)
+	s.False(ok)
+
+	got, err := s.store.Get(s.ctx, testNamespace, testKey)
+	s.NoError(err)
+	s.Equal([]byte("first"), got, "a rejected PutIfNotExists must not overwrite the existing value")
+}
+
+func (s *InMemoryStoreTestSuite) TestPutIfNotExists_ExistingExpiredKey_Overwrites() {
+	fk := s.store.getFormattedKey(testNamespace, testKey)
+	s.store.data[fk] = &entry{
+		value:     []byte("stale"),
+		expiresAt: time.Now().Add(-time.Second),
+	}
+
+	ok, err := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, []byte("fresh"), 60)
+	s.NoError(err)
+	s.True(ok)
+
+	got, err := s.store.Get(s.ctx, testNamespace, testKey)
+	s.NoError(err)
+	s.Equal([]byte("fresh"), got)
+}
+
+func (s *InMemoryStoreTestSuite) TestConcurrentPutIfNotExists() {
+	const workers = 20
+	var wg sync.WaitGroup
+	results := make([]bool, workers)
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			ok, _ := s.store.PutIfNotExists(s.ctx, testNamespace, testKey, []byte("v"), 60)
+			results[i] = ok
+		}(i)
+	}
+	wg.Wait()
+
+	// Exactly one goroutine should win the claim.
+	wins := 0
+	for _, ok := range results {
+		if ok {
+			wins++
+		}
+	}
+	s.Equal(1, wins)
 }
 
 func (s *InMemoryStoreTestSuite) TestUpdate_UpdatesValuePreservesExpiry() {
@@ -200,6 +248,80 @@ func (s *InMemoryStoreTestSuite) TestExtendTTL_ExpiredKey_ReturnsError() {
 
 	err := s.store.ExtendTTL(s.ctx, testNamespace, testKey, 60)
 	s.ErrorIs(err, providers.ErrRuntimeStoreKeyNotFound)
+}
+
+func (s *InMemoryStoreTestSuite) TestCompareFieldAndSwap_FieldMatches_SwapsPreservingTTL() {
+	fk := s.store.getFormattedKey(testNamespace, testKey)
+	expiry := time.Now().Add(time.Minute)
+	s.store.data[fk] = &entry{value: []byte(`{"State":"PENDING","UserID":""}`), expiresAt: expiry}
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING",
+		[]byte(`{"State":"AUTHENTICATED","UserID":"u1"}`))
+	s.NoError(err)
+	s.True(swapped)
+
+	got, err := s.store.Get(s.ctx, testNamespace, testKey)
+	s.NoError(err)
+	s.Equal([]byte(`{"State":"AUTHENTICATED","UserID":"u1"}`), got)
+	s.Equal(expiry.Unix(), s.store.data[fk].expiresAt.Unix())
+}
+
+func (s *InMemoryStoreTestSuite) TestCompareFieldAndSwap_FieldDiffers_NoSwap() {
+	original := []byte(`{"State":"AUTHENTICATED"}`)
+	_ = s.store.Put(s.ctx, testNamespace, testKey, original, 60)
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING",
+		[]byte(`{"State":"CONSUMED"}`))
+	s.NoError(err)
+	s.False(swapped)
+
+	got, err := s.store.Get(s.ctx, testNamespace, testKey)
+	s.NoError(err)
+	s.Equal(original, got, "a non-matching CompareFieldAndSwap must not overwrite the value")
+}
+
+func (s *InMemoryStoreTestSuite) TestCompareFieldAndSwap_MissingKey_NoSwap() {
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, "missing", "State", "PENDING",
+		[]byte(`{"State":"AUTHENTICATED"}`))
+	s.NoError(err)
+	s.False(swapped)
+}
+
+func (s *InMemoryStoreTestSuite) TestCompareFieldAndSwap_ExpiredKey_NoSwap() {
+	fk := s.store.getFormattedKey(testNamespace, testKey)
+	s.store.data[fk] = &entry{value: []byte(`{"State":"PENDING"}`), expiresAt: time.Now().Add(-time.Second)}
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING",
+		[]byte(`{"State":"AUTHENTICATED"}`))
+	s.NoError(err)
+	s.False(swapped)
+}
+
+func (s *InMemoryStoreTestSuite) TestConcurrentCompareFieldAndSwap() {
+	const workers = 10
+	_ = s.store.Put(s.ctx, testNamespace, testKey, []byte(`{"State":"PENDING"}`), 60)
+
+	var wg sync.WaitGroup
+	results := make([]bool, workers)
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func(i int) {
+			defer wg.Done()
+			ok, _ := s.store.CompareFieldAndSwap(s.ctx, testNamespace, testKey, "State", "PENDING",
+				[]byte(`{"State":"AUTHENTICATED"}`))
+			results[i] = ok
+		}(i)
+	}
+	wg.Wait()
+
+	// Only the first transition out of PENDING should win.
+	wins := 0
+	for _, ok := range results {
+		if ok {
+			wins++
+		}
+	}
+	s.Equal(1, wins)
 }
 
 func (s *InMemoryStoreTestSuite) TestGetFormattedKey() {

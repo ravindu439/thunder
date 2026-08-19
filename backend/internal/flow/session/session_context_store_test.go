@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -141,21 +126,6 @@ func (s *SessionContextStoreTestSuite) TestGetByCheckpoint_Miss() {
 	s.Nil(got)
 }
 
-func (s *SessionContextStoreTestSuite) TestListCheckpointIDs() {
-	s.mockDBProvider.On("GetRuntimePersistentDBClient").Return(s.mockDBClient, nil)
-	s.mockDBClient.On("QueryContext", context.Background(), queryListCheckpointsBySessionID,
-		"sess-1", testDeploymentID).
-		Return([]map[string]interface{}{
-			{"checkpoint_id": "password"},
-			{"checkpoint_id": "step_up"},
-		}, nil)
-
-	ids, listErr := s.store.ListCheckpointIDs(context.Background(), "sess-1")
-
-	s.NoError(listErr)
-	s.Equal([]string{"password", "step_up"}, ids)
-}
-
 func (s *SessionContextStoreTestSuite) TestDelete() {
 	s.mockDBProvider.On("GetRuntimePersistentDBClient").Return(s.mockDBClient, nil)
 	s.mockDBClient.On("ExecuteContext", context.Background(), queryDeleteSessionContext,
@@ -234,28 +204,6 @@ func (s *SessionContextStoreTestSuite) TestGetByCheckpoint_BadPayload() {
 		Return([]map[string]interface{}{row}, nil)
 
 	got, err := s.store.GetByCheckpoint(context.Background(), "sess-1", "session")
-	s.Error(err)
-	s.Nil(got)
-}
-
-func (s *SessionContextStoreTestSuite) TestListCheckpointIDs_QueryError() {
-	s.mockDBProvider.On("GetRuntimePersistentDBClient").Return(s.mockDBClient, nil)
-	s.mockDBClient.On("QueryContext", context.Background(), queryListCheckpointsBySessionID,
-		"sess-1", testDeploymentID).
-		Return(nil, errors.New("query failed"))
-
-	got, err := s.store.ListCheckpointIDs(context.Background(), "sess-1")
-	s.Error(err)
-	s.Nil(got)
-}
-
-func (s *SessionContextStoreTestSuite) TestListCheckpointIDs_ParseError() {
-	s.mockDBProvider.On("GetRuntimePersistentDBClient").Return(s.mockDBClient, nil)
-	s.mockDBClient.On("QueryContext", context.Background(), queryListCheckpointsBySessionID,
-		"sess-1", testDeploymentID).
-		Return([]map[string]interface{}{{"checkpoint_id": 42}}, nil) // non-string fails parseString
-
-	got, err := s.store.ListCheckpointIDs(context.Background(), "sess-1")
 	s.Error(err)
 	s.Nil(got)
 }

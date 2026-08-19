@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package redisstore
 
@@ -33,6 +18,7 @@ import (
 
 // redisClient is the minimal Redis API needed by redisStore.
 type redisClient interface {
+	redis.Scripter
 	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 	Get(ctx context.Context, key string) *redis.StringCmd
 	SetArgs(ctx context.Context, key string, value any, a redis.SetArgs) *redis.StatusCmd
@@ -40,6 +26,18 @@ type redisClient interface {
 	GetDel(ctx context.Context, key string) *redis.StringCmd
 	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
 }
+
+// compareFieldAndSwapScript atomically replaces the stored value with a new one only when the
+// top-level JSON string field named ARGV[1] equals ARGV[2], preserving the existing TTL.
+// Returns 1 on swap, 0 when the key is absent or the field differs.
+var compareFieldAndSwapScript = redis.NewScript(`
+local val = redis.call('GET', KEYS[1])
+if not val then return 0 end
+local data = cjson.decode(val)
+if data[ARGV[1]] ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3], 'KEEPTTL')
+return 1
+`)
 
 // keyFormat is the format string used to build Redis store keys.
 const keyFormat = "%s:runtime:%s:%s:%s"
@@ -75,6 +73,29 @@ func (r *redisStore) Put(ctx context.Context, namespace providers.RuntimeStoreNa
 
 	r.logger.Debug(ctx, "Stored in Redis", log.String("key", key))
 	return nil
+}
+
+// PutIfNotExists atomically stores a value only if the key does not already hold a value, using
+// Redis's native SET NX.
+func (r *redisStore) PutIfNotExists(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key string, value []byte, ttlSeconds int64) (bool, error) {
+	ttl := time.Duration(0)
+	if ttlSeconds > 0 {
+		ttl = time.Duration(ttlSeconds) * time.Second
+	}
+	ok, err := r.client.SetArgs(ctx, r.getFormattedKey(namespace, key), value, redis.SetArgs{
+		Mode: "NX",
+		TTL:  ttl,
+	}).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to store in Redis: %w", err)
+	}
+
+	r.logger.Debug(ctx, "Stored in Redis", log.String("key", key))
+	return ok == "OK", nil
 }
 
 // Get retrieves a value from the Redis store by its key.
@@ -144,6 +165,21 @@ func (r *redisStore) ExtendTTL(ctx context.Context, namespace providers.RuntimeS
 		return providers.ErrRuntimeStoreKeyNotFound
 	}
 	return nil
+}
+
+// CompareFieldAndSwap replaces the stored value with newValue only when the top-level JSON string
+// field of the current value equals expected, preserving the existing TTL.
+func (r *redisStore) CompareFieldAndSwap(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key, field, expected string, newValue []byte) (bool, error) {
+	n, err := compareFieldAndSwapScript.Run(ctx, r.client,
+		[]string{r.getFormattedKey(namespace, key)}, field, expected, newValue).Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to compare-and-swap in Redis: %w", err)
+	}
+	return n == 1, nil
 }
 
 // getFormattedKey builds the Redis key.

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderHook} from '@testing-library/react';
 import {describe, it, expect, vi} from 'vitest';
@@ -108,6 +93,63 @@ describe('useGetFlowsMeta', () => {
       expect(result.current.data.widgets).toEqual(widgets);
     });
 
+    it('should include the required provisioning executor in registration blank template', () => {
+      const {result} = renderHook(() => useGetFlowsMeta({flowType: 'REGISTRATION'}));
+
+      const blankTemplate = result.current.data.templates.find((template) => template.type === 'BLANK');
+
+      expect(blankTemplate?.config.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'start',
+            onSuccess: 'user_type_resolver',
+          }),
+          expect.objectContaining({
+            id: 'user_type_resolver',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'UserTypeResolver'},
+            onSuccess: 'view_prompt',
+            onIncomplete: 'prompt_usertype',
+          }),
+          expect.objectContaining({
+            id: 'provisioning',
+            type: 'TASK_EXECUTION',
+            executor: {name: 'ProvisioningExecutor'},
+            onSuccess: 'END',
+          }),
+          expect.objectContaining({
+            id: 'prompt_usertype',
+            prompts: [
+              expect.objectContaining({
+                inputs: [
+                  expect.objectContaining({
+                    identifier: 'userType',
+                    type: 'SELECT',
+                    required: true,
+                  }),
+                ],
+                action: {
+                  ref: 'action_usertype',
+                  nextNode: 'user_type_resolver',
+                },
+              }),
+            ],
+          }),
+          expect.objectContaining({
+            id: 'view_prompt',
+            prompts: [
+              expect.objectContaining({
+                action: {
+                  ref: 'action_continue',
+                  nextNode: 'provisioning',
+                },
+              }),
+            ],
+          }),
+        ]),
+      );
+    });
+
     it('should return an empty executors array', () => {
       const {result} = renderHook(() => useGetFlowsMeta());
 
@@ -130,6 +172,20 @@ describe('useGetFlowsMeta', () => {
       const templates = result.current.data.templates;
       expect(templates.length).toBeGreaterThan(0);
       expect(templates.every((t: FlowTemplate) => t.flowType === 'REGISTRATION')).toBe(true);
+    });
+
+    it('should provide the secure user deletion flow template', () => {
+      const {result} = renderHook(() => useGetFlowsMeta({flowType: 'ADMINISTRATION'}));
+
+      const template = result.current.data.templates.find((item) => item.type === 'USER_DELETION');
+      expect(template?.display.label).toBe('User Deletion Flow');
+      expect(template?.config.nodes.map((node) => node.executor?.name).filter(Boolean)).toEqual([
+        'PermissionValidator',
+        'PreDeleteExecutor',
+        'CriteriaRevocationExecutor',
+        'SessionRevocationExecutor',
+        'UserDeleteExecutor',
+      ]);
     });
 
     it('should not affect non-template resources when filtering by flowType', () => {

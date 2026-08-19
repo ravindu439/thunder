@@ -7,14 +7,13 @@
     "thunderid",
     "logger",
     "winston",
-    "shareable",
-    "wso2"
+    "shareable"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/packages/logger#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/cjs/index.cjs",

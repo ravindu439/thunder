@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package model
 
@@ -306,7 +291,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialRequiredOnly_Re
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(false, true, true)
+	attrs := schema.GetAttributes(AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	// Only email and firstName should be returned — password is credential, age is not required.
 	s.Len(attrs, 2)
@@ -334,7 +319,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialRequiredOnly_Re
 func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialRequiredOnly_EmptySchema() {
 	schema := &Schema{properties: map[string]property{}}
 
-	attrs := schema.GetAttributes(false, true, true)
+	attrs := schema.GetAttributes(AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Empty(attrs, "empty schema should return no required attributes")
 }
@@ -346,7 +331,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialRequiredOnly_Al
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(false, true, true)
+	attrs := schema.GetAttributes(AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Empty(attrs, "all required properties are credentials, result should be empty")
 }
@@ -360,7 +345,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialAllAttrs_Includ
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(false, true, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowNonCredential: true})
 
 	// email, firstName, age — password excluded (credential).
 	s.Len(attrs, 3, "all non-credential attributes should be returned regardless of required flag")
@@ -387,7 +372,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_NonCredentialDisplayNameOnNo
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(false, true, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowNonCredential: true})
 	s.Len(attrs, 4)
 
 	attrMap := make(map[string]AttributeInfo, len(attrs))
@@ -408,7 +393,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_CredentialRequiredOnly_Retur
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(true, false, true)
+	attrs := schema.GetAttributes(AttributeFilter{AllowCredential: true, RequiredOnly: true})
 
 	s.Len(attrs, 1)
 	s.Equal("password", attrs[0].Attribute)
@@ -425,7 +410,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_CredentialAllAttrs_IncludesO
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(true, false, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowCredential: true})
 
 	s.Len(attrs, 2)
 	attrMap := make(map[string]AttributeInfo, len(attrs))
@@ -450,7 +435,7 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_AllAttrs_CredentialFieldSet(
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(true, true, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowCredential: true, AllowNonCredential: true})
 
 	s.Len(attrs, 2)
 	attrMap := make(map[string]AttributeInfo, len(attrs))
@@ -460,4 +445,41 @@ func (s *SchemaValidateTestSuite) TestGetAttributes_AllAttrs_CredentialFieldSet(
 
 	s.True(attrMap["password"].Credential, "credential attribute must have Credential=true")
 	s.False(attrMap["email"].Credential, "non-credential attribute must have Credential=false")
+}
+
+func (s *SchemaValidateTestSuite) TestGetAttributes_UniqueOnlyAndType() {
+	schema, err := CompileSchema(json.RawMessage(`{
+		"email":    {"type": "string", "required": true, "unique": true},
+		"empNo":    {"type": "number", "required": true, "unique": true},
+		"nickname": {"type": "string", "unique": false},
+		"password": {"type": "string", "required": true, "unique": true, "credential": true}
+	}`))
+	s.Require().NoError(err)
+
+	// UniqueOnly across credential + non-credential returns every unique attribute, with the Unique
+	// and Type output fields populated.
+	unique := schema.GetAttributes(AttributeFilter{
+		AllowCredential: true, AllowNonCredential: true, UniqueOnly: true,
+	})
+	byName := make(map[string]AttributeInfo, len(unique))
+	for _, a := range unique {
+		byName[a.Attribute] = a
+		s.True(a.Unique, "%s came back from a UniqueOnly filter", a.Attribute)
+	}
+	s.Len(unique, 3)
+	s.Equal(TypeString, byName["email"].Type)
+	s.Equal(TypeNumber, byName["empNo"].Type)
+	_, hasNickname := byName["nickname"]
+	s.False(hasNickname, "non-unique attribute must be excluded")
+
+	// Combining UniqueOnly + RequiredOnly + string Type + non-credential narrows to a single valid
+	// subject-attribute candidate (the same filter used by subject-mapping validation).
+	subjectCandidates := schema.GetAttributes(AttributeFilter{
+		AllowNonCredential: true, RequiredOnly: true, UniqueOnly: true, Type: TypeString,
+	})
+	s.Require().Len(subjectCandidates, 1)
+	s.Equal("email", subjectCandidates[0].Attribute)
+	s.True(subjectCandidates[0].Unique)
+	s.True(subjectCandidates[0].Required)
+	s.Equal(TypeString, subjectCandidates[0].Type)
 }

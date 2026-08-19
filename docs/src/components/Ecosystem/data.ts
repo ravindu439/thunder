@@ -1,23 +1,8 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {AndroidLogo, FlutterLogo} from '@thunderid/components';
 import {ComponentType} from 'react';
-import AndroidLogo from '../icons/AndroidLogo';
 import AngularLogo from '../icons/AngularLogo';
 import AuthJsLogo from '../icons/AuthJsLogo';
 import BetterAuthLogo from '../icons/BetterAuthLogo';
@@ -25,7 +10,6 @@ import BrowserLogo from '../icons/BrowserLogo';
 import ClaudeLogo from '../icons/ClaudeLogo';
 import CodexLogo from '../icons/CodexLogo';
 import ExpressLogo from '../icons/ExpressLogo';
-import FlutterLogo from '../icons/FlutterLogo';
 import GoLogo from '../icons/GoLogo';
 import IOSLogo from '../icons/IOSLogo';
 import JavaScriptLogo from '../icons/JavaScriptLogo';
@@ -93,7 +77,7 @@ export const ECOSYSTEM_ITEMS: EcosystemItem[] = [
     description:
       'Add {{ProductName}} auth to Claude. Secure your tools, MCP servers, and agent actions with scoped, revocable tokens.',
     ctaLabel: 'Get plugin',
-    href: '/docs/next/guides/working-with-ai/skills',
+    href: '/docs/next/working-with-ai/skills',
   },
   {
     id: 'codex-plugin',
@@ -103,7 +87,7 @@ export const ECOSYSTEM_ITEMS: EcosystemItem[] = [
     category: 'agent',
     description: 'Bring {{ProductName}} sign-in and token management to OpenAI Codex and the Codex CLI.',
     ctaLabel: 'Get plugin',
-    href: '/docs/next/guides/working-with-ai/skills',
+    href: '/docs/next/working-with-ai/skills',
   },
   {
     id: 'agent-skills',
@@ -114,7 +98,7 @@ export const ECOSYSTEM_ITEMS: EcosystemItem[] = [
     description:
       'Reusable skills that let any agent issue, verify, and revoke {{ProductName}} credentials as part of a workflow.',
     ctaLabel: 'Browse skills',
-    href: '/docs/next/guides/working-with-ai/skills',
+    href: '/docs/next/working-with-ai/skills',
   },
   {
     id: 'react',
@@ -272,9 +256,10 @@ export const ECOSYSTEM_ITEMS: EcosystemItem[] = [
     icon: SpringSecurityLogo,
     packageName: 'io.thunderid:spring-security',
     category: 'integration',
-    description: '{{ProductName}} integration for Spring Security — secure Java and Kotlin back ends with minimal configuration.',
+    description:
+      '{{ProductName}} integration for Spring Security — secure Java and Kotlin back ends with minimal configuration.',
     ctaLabel: '',
-    soon: true,
+    href: '/docs/next/sdks/spring-security/overview',
   },
   {
     id: 'ios',

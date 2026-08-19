@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {parseStackItems} from '@thunderid/design';
 import {useLogger} from '@thunderid/logger/react';
 import {
   Autocomplete,
@@ -39,6 +25,37 @@ import {ElementTypes} from '../../models/elements';
 import type {Resource} from '../../models/resources';
 
 const TEXT_ALIGN_VALUES = ['left', 'center', 'right', 'justify', 'inherit'] as const;
+
+// Layout properties with a known value set. Rendered as free-text autocompletes so
+// the common values are discoverable while custom CSS values stay allowed.
+const LAYOUT_PROPERTY_SUGGESTIONS: Record<string, string[]> = {
+  align: ['stretch', 'center', 'flex-start', 'flex-end', 'baseline', 'start', 'end'],
+  direction: ['row', 'column', 'row-reverse', 'column-reverse'],
+  justify: ['stretch', 'center', 'flex-start', 'flex-end', 'space-between', 'space-around', 'space-evenly'],
+};
+
+// Structural layout values map straight to CSS rather than being shown to end users,
+// so they take literal values only: no i18n or meta template insertion.
+const LAYOUT_PROPERTY_KEYS: string[] = ['align', 'direction', 'gap', 'items', 'justify'];
+
+// A grid stack uses `direction` to pick the axis its slots run along. CSS Grid has no
+// reverse auto-flow, so the reverse variants are only offered in flex mode.
+const GRID_DIRECTION_VALUES: string[] = ['row', 'column'];
+
+/**
+ * Suggestions for a layout property, narrowed to the values the resource's current
+ * layout mode actually honors.
+ */
+function getLayoutSuggestions(resource: Resource, propertyKey: string): string[] {
+  const isGridStack: boolean =
+    resource.type === ElementTypes.Stack &&
+    parseStackItems((resource as Resource & {items?: string | number}).items) !== undefined;
+
+  if (isGridStack && propertyKey === 'direction') {
+    return GRID_DIRECTION_VALUES;
+  }
+  return LAYOUT_PROPERTY_SUGGESTIONS[propertyKey];
+}
 
 // ---------------------------------------------------------------------------
 // Lazy icon loading — loaded once on first picker open, then cached.
@@ -240,6 +257,24 @@ function CommonElementPropertyFactory({
     );
   }
 
+  const isLayoutProperty: boolean = LAYOUT_PROPERTY_KEYS.includes(propertyKey);
+
+  // Own-property check: a bare index lookup also matches inherited members such as
+  // `toString`, and element config keys are arbitrary.
+  if (Object.hasOwn(LAYOUT_PROPERTY_SUGGESTIONS, propertyKey) && typeof propertyValue === 'string') {
+    return (
+      <TextPropertyField
+        resource={resource}
+        propertyKey={propertyKey}
+        propertyValue={propertyValue}
+        onChange={onChange}
+        suggestions={getLayoutSuggestions(resource, propertyKey)}
+        supportsDynamicValue={false}
+        {...rest}
+      />
+    );
+  }
+
   if (typeof propertyValue === 'boolean') {
     return (
       <CheckboxPropertyField
@@ -259,6 +294,9 @@ function CommonElementPropertyFactory({
         propertyKey={propertyKey}
         propertyValue={String(propertyValue)}
         onChange={(key, value, res) => onChange(key, value !== '' ? Number(value) : 0, res, true)}
+        supportsDynamicValue={!isLayoutProperty}
+        type="number"
+        slotProps={{htmlInput: {min: 0}}}
         {...rest}
       />
     );

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authn
 
@@ -77,6 +62,20 @@ var (
 			DefaultValue: "The provided token is invalid",
 		},
 	}
+	// ErrorReservedCredentialType is the error when the request carries a credential type that is
+	// reserved for ThunderID's internal authentication flows.
+	ErrorReservedCredentialType = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AUTH-CRED-1005",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.authnservice.reserved_credential_type",
+			DefaultValue: "Reserved credential type",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.authnservice.reserved_credential_type_description",
+			DefaultValue: "The provided credentials contain a credential type that is reserved for internal use",
+		},
+	}
 	// ErrorOTPAuthenticationFailed is the error when the OTP authentication attempt fails.
 	ErrorOTPAuthenticationFailed = tidcommon.ServiceError{
 		Type: tidcommon.ClientErrorType,
@@ -101,6 +100,19 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.authnservice.passkey_authentication_failed_description",
 			DefaultValue: "The passkey authentication attempt failed",
+		},
+	}
+	// ErrorPasskeyEnrollmentFailed is the error when the passkey enrollment attempt fails.
+	ErrorPasskeyEnrollmentFailed = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AUTHN-PSK-1002",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.authnservice.passkey_enrollment_failed",
+			DefaultValue: "Enrollment failed",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.authnservice.passkey_enrollment_failed_description",
+			DefaultValue: "The passkey enrollment attempt failed",
 		},
 	}
 	// ErrorFederatedAuthenticationFailed is the error when federated authentication fails.

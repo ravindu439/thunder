@@ -1,22 +1,8 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {zodResolver} from '@hookform/resolvers/zod';
+import type {Application, AssertionConfig, OAuth2Config, ScopeClaims} from '@thunderid/configure-applications';
 import type {PropertyDefinition, ApiUserType} from '@thunderid/configure-user-types';
 import {useGetUserTypes} from '@thunderid/configure-user-types';
 import {useConfig} from '@thunderid/contexts';
@@ -30,8 +16,7 @@ import {z} from 'zod';
 import ScopeSection from './ScopeSection';
 import TokenUserAttributesSection from './TokenUserAttributesSection';
 import TokenValidationSection from './TokenValidationSection';
-import type {Application} from '../../../models/application';
-import type {OAuth2Config, ScopeClaims} from '../../../models/oauth';
+import {isOAuthTokenMode} from '../../../utils/oauth2Rules';
 
 /**
  * Props for the {@link EditTokenSettings} component.
@@ -41,6 +26,12 @@ interface EditTokenSettingsProps {
    * The application being edited
    */
   application: Application;
+  /**
+   * Pending, unsaved changes to the application as tracked by the edit page. Fields present here
+   * take precedence over the stored ones, so successive edits to the same field accumulate instead
+   * of each being applied on top of the stored value.
+   */
+  editedApp?: Partial<Application>;
   /**
    * OAuth2 configuration containing token settings (optional)
    */
@@ -52,6 +43,12 @@ interface EditTokenSettingsProps {
    */
   onFieldChange: (field: keyof Application, value: unknown) => void;
   onValidationChange?: (hasErrors: boolean) => void;
+  /**
+   * Bumped by the parent on Save/Reset to reset the Token Validity form fields in place. Unlike
+   * sibling sections, this doesn't remount the component — TokenValidationSection owns its own
+   * local sub-tab selection (Access/ID/Refresh Token) that must survive a Reset.
+   */
+  sectionResetKey?: number;
   /**
    * Singular noun used to refer to the entity in user-visible copy (default: 'application').
    */
@@ -66,6 +63,16 @@ interface EditTokenSettingsProps {
    * Defaults to false (applications); agents pass true.
    */
   showActorClaim?: boolean;
+  /**
+   * Value shown for `act.sub` in the actor claim preview (the acting agent's ID).
+   */
+  actorSub?: string;
+  /**
+   * Name of the tab where the OAuth client certificate is configured, used in the
+   * certificate-required hint. Defaults to "Advanced" (applications); agents pass
+   * "Credentials".
+   */
+  certificateLocation?: string;
 }
 
 const createTokenConfigSchema = (t: (key: string) => string) => {
@@ -83,6 +90,20 @@ const createTokenConfigSchema = (t: (key: string) => string) => {
 
 type TokenConfigFormData = z.infer<ReturnType<typeof createTokenConfigSchema>>;
 
+const computeValidityDefaults = (
+  config: OAuth2Config | undefined,
+  assertion: AssertionConfig | undefined,
+): TokenConfigFormData => ({
+  validityPeriod: config?.token?.validityPeriod ?? assertion?.validityPeriod ?? 3600,
+  accessTokenValidity: config?.token?.accessToken?.userConfig?.validityPeriod ?? 3600,
+  idTokenValidity: config?.token?.idToken?.validityPeriod ?? 3600,
+  refreshTokenValidity: config?.token?.refreshToken?.validityPeriod ?? 86400,
+});
+
+// Stable identity for the default, so an untouched application doesn't invalidate the memos below
+// on every render.
+const NO_PENDING_CHANGES: Partial<Application> = {};
+
 type TokenAttributeScope = 'shared' | 'access' | 'id' | 'userinfo';
 
 const createEmptyAttributeSetState = (): Record<TokenAttributeScope, Set<string>> => ({
@@ -98,6 +119,17 @@ const areAttributesEqual = (arr1: string[], arr2: string[]): boolean => {
   const sorted2 = [...arr2].sort();
   return sorted1.every((val, index) => val === sorted2[index]);
 };
+
+/**
+ * Flattens a scope-to-claims mapping into the set of attributes it exposes. ScopeClaims values are
+ * optional, so the undefined entries are dropped here rather than at every call site.
+ */
+const collectMappedAttributes = (scopeClaims: ScopeClaims): Set<string> =>
+  new Set(
+    Object.values(scopeClaims)
+      .flat()
+      .filter((attr): attr is string => attr !== undefined),
+  );
 
 const areSetsEqual = (set1: Set<string>, set2: Set<string>): boolean => {
   if (set1.size !== set2.size) return false;
@@ -128,12 +160,16 @@ const areSetsEqual = (set1: Set<string>, set2: Set<string>): boolean => {
  */
 export default function EditTokenSettings({
   application,
+  editedApp = NO_PENDING_CHANGES,
   oauth2Config = undefined,
   onFieldChange,
   onValidationChange = undefined,
+  sectionResetKey = 0,
   entityLabel = 'application',
   showUserInfoTab = true,
   showActorClaim = false,
+  actorSub = '<agent-id>',
+  certificateLocation = 'Advanced',
 }: EditTokenSettingsProps) {
   const logger = useLogger('EditTokenSettings');
   const {t} = useTranslation();
@@ -141,6 +177,9 @@ export default function EditTokenSettings({
   const {getServerUrl} = useConfig();
 
   const [userTypes, setUserTypes] = useState<ApiUserType[]>([]);
+  // The algorithm tokens are signed with is determined by the deployment's signing key, not a
+  // per-application choice. It is surfaced read-only from the OIDC discovery document.
+  const [signingAlg, setSigningAlg] = useState<string | undefined>(undefined);
 
   const {data: userTypesData, isLoading: userTypesLoading} = useGetUserTypes();
   const [activeTokenType, setActiveTokenType] = useState<'access' | 'id' | 'userinfo'>('access');
@@ -167,9 +206,15 @@ export default function EditTokenSettings({
   }, [userTypesData, allowedUserTypes]);
 
   // Determine if this is OAuth/OIDC mode (has separate token configs) or Native mode
-  const isOAuthMode = useMemo(
-    () => oauth2Config?.token?.accessToken !== undefined || oauth2Config?.token?.idToken !== undefined,
-    [oauth2Config],
+  const isOAuthMode = useMemo(() => isOAuthTokenMode(oauth2Config), [oauth2Config]);
+
+  // In Native mode both the attribute list and the validity period live on this single config, so
+  // each is written by spreading the other's current value. Prefer the pending assertion whenever
+  // the field has been touched — including an explicit undefined — otherwise the second edit would
+  // spread the stored value and discard the first.
+  const currentAssertion = useMemo(
+    () => ('assertion' in editedApp ? editedApp.assertion : application.assertion),
+    [editedApp, application.assertion],
   );
 
   const tokenConfigSchema = useMemo(() => createTokenConfigSchema(t), [t]);
@@ -177,16 +222,12 @@ export default function EditTokenSettings({
   const {
     control,
     trigger,
+    reset,
     formState: {errors, isValid},
   } = useForm<TokenConfigFormData>({
     resolver: zodResolver(tokenConfigSchema),
     mode: 'onChange',
-    defaultValues: {
-      validityPeriod: oauth2Config?.token?.validityPeriod ?? application.assertion?.validityPeriod ?? 3600,
-      accessTokenValidity: oauth2Config?.token?.accessToken?.userConfig?.validityPeriod ?? 3600,
-      idTokenValidity: oauth2Config?.token?.idToken?.validityPeriod ?? 3600,
-      refreshTokenValidity: oauth2Config?.token?.refreshToken?.validityPeriod ?? 86400,
-    },
+    defaultValues: computeValidityDefaults(oauth2Config, currentAssertion),
   });
 
   const [validityPeriod, accessTokenValidity, idTokenValidity, refreshTokenValidity] = useWatch({
@@ -198,11 +239,15 @@ export default function EditTokenSettings({
     onValidationChange?.(!isValid);
   }, [isValid, onValidationChange]);
 
-  // Refs to read latest config/application inside the validity effect without
-  // adding them as dependencies (which would cause infinite re-trigger loops).
   const oauth2ConfigRef = useRef(oauth2Config);
   const applicationRef = useRef(application);
+  const currentAssertionRef = useRef(currentAssertion);
   const isFirstRenderRef = useRef(true);
+  const prevSectionResetKeyRef = useRef(sectionResetKey);
+  // Attributes this editing session added to the token allow-lists on behalf of a scope mapping.
+  // Only these are auto-removed when the mapping drops them, so attributes added by hand in the
+  // advanced panel are never taken away.
+  const autoSyncedAttributes = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     oauth2ConfigRef.current = oauth2Config;
@@ -211,6 +256,28 @@ export default function EditTokenSettings({
   useEffect(() => {
     applicationRef.current = application;
   }, [application]);
+
+  useEffect(() => {
+    currentAssertionRef.current = currentAssertion;
+  }, [currentAssertion]);
+
+  // Resets the Token Validity fields in place on Save/Reset — deliberately not a remount
+  //  since TokenValidationSection owns its own local Access/ID/Refresh Token
+  // sub-tab selection that must survive this. Also clears the pending attribute add/remove
+  // highlight state below, which is edit-tracking state that should be cleared on Save/Reset.
+  // Relies on the ref-sync effects above running first in the same commit so oauth2ConfigRef and
+  // currentAssertionRef hold the latest values by the time this reads them — keep this effect
+  // declared after them.
+  useEffect(() => {
+    if (sectionResetKey === prevSectionResetKeyRef.current) return;
+    prevSectionResetKeyRef.current = sectionResetKey;
+
+    reset(computeValidityDefaults(oauth2ConfigRef.current, currentAssertionRef.current));
+
+    setPendingAdditionsByToken(createEmptyAttributeSetState());
+    setPendingRemovalsByToken(createEmptyAttributeSetState());
+    setHighlightedAttributesByToken(createEmptyAttributeSetState());
+  }, [sectionResetKey, reset]);
 
   useEffect(() => {
     if (isFirstRenderRef.current) {
@@ -224,18 +291,15 @@ export default function EditTokenSettings({
       const valid = await trigger();
       if (cancelled || !valid) return;
 
+      const baseline = computeValidityDefaults(oauth2ConfigRef.current, currentAssertionRef.current);
+
       if (isOAuthMode) {
         const config = oauth2ConfigRef.current;
 
-        // Check if values have actually changed
-        const currentAccessValidity = config?.token?.accessToken?.userConfig?.validityPeriod;
-        const currentIdValidity = config?.token?.idToken?.validityPeriod;
-        const currentRefreshValidity = config?.token?.refreshToken?.validityPeriod;
-
         if (
-          currentAccessValidity === accessTokenValidity &&
-          currentIdValidity === idTokenValidity &&
-          currentRefreshValidity === refreshTokenValidity
+          baseline.accessTokenValidity === accessTokenValidity &&
+          baseline.idTokenValidity === idTokenValidity &&
+          baseline.refreshTokenValidity === refreshTokenValidity
         ) {
           return; // No changes, skip update
         }
@@ -267,7 +331,11 @@ export default function EditTokenSettings({
         );
         onFieldChange('inboundAuthConfig', updatedInboundAuth);
       } else {
-        onFieldChange('assertion', {...applicationRef.current.assertion, validityPeriod});
+        if (baseline.validityPeriod === validityPeriod) {
+          return; // No changes, skip update
+        }
+
+        onFieldChange('assertion', {...currentAssertionRef.current, validityPeriod});
       }
     };
 
@@ -315,6 +383,47 @@ export default function EditTokenSettings({
     });
   }, [schemaIds, http, getServerUrl, logger]);
 
+  /**
+   * Fetch the deployment's signing algorithm from the OIDC discovery document. Signing is done
+   * with the server key, so this is informational only and shown read-only in the token sections.
+   * The discovery document is public, so it is fetched without credentials; sending an
+   * Authorization header would fail its CORS preflight (only Content-Type is allowed).
+   */
+  useEffect(() => {
+    if (!isOAuthMode) return undefined;
+
+    let cancelled = false;
+
+    const fetchSigningAlg = async () => {
+      try {
+        const response = await fetch(`${getServerUrl()}/.well-known/openid-configuration`);
+        if (cancelled) return;
+        if (!response.ok) {
+          logger.error('Discovery request for signing algorithm returned a non-OK status', {
+            status: response.status,
+          });
+          return;
+        }
+        const data = (await response.json()) as {id_token_signing_alg_values_supported?: string[]};
+        if (cancelled) return;
+        const algs = data?.id_token_signing_alg_values_supported;
+        if (Array.isArray(algs) && algs.length > 0) {
+          setSigningAlg(algs[0]);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          logger.error('Failed to fetch signing algorithm from discovery', {error: err});
+        }
+      }
+    };
+
+    void fetchSigningAlg();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOAuthMode, getServerUrl, logger]);
+
   const userAttributes = useMemo(() => {
     if (userTypes.length === 0) return [];
 
@@ -358,8 +467,8 @@ export default function EditTokenSettings({
       return [];
     }
 
-    return oauth2Config?.token?.userAttributes ?? application.assertion?.userAttributes ?? [];
-  }, [isOAuthMode, oauth2Config, application]);
+    return currentAssertion?.userAttributes ?? [];
+  }, [isOAuthMode, currentAssertion]);
 
   const currentAccessTokenAttributes = useMemo(
     () => oauth2Config?.token?.accessToken?.userConfig?.attributes ?? [],
@@ -436,22 +545,54 @@ export default function EditTokenSettings({
     }
   };
 
-  const handleScopesChange = (newScopes: string[]) => {
-    const updatedConfig = {...oauth2Config, scopes: newScopes};
-    const updatedInboundAuth = application.inboundAuthConfig?.map((config) => {
-      if (config.type === 'oauth2') {
-        return {...config, config: updatedConfig};
-      }
-      return config;
-    });
-    onFieldChange('inboundAuthConfig', updatedInboundAuth);
-  };
-
   const handleScopeClaimsChange = (newScopeClaims: ScopeClaims) => {
+    const mappedBefore = collectMappedAttributes(oauth2Config?.scopeClaims ?? {});
+    const mappedAfter = collectMappedAttributes(newScopeClaims);
+
+    const added = [...mappedAfter].filter((attr) => !mappedBefore.has(attr));
+    // Only attributes this session added through the mapper are auto-removed: anything added by
+    // hand in the advanced panel stays, since it may be there for the claims request parameter.
+    const removed = [...mappedBefore].filter(
+      (attr) => !mappedAfter.has(attr) && autoSyncedAttributes.current.has(attr),
+    );
+
+    added.forEach((attr) => autoSyncedAttributes.current.add(attr));
+    removed.forEach((attr) => autoSyncedAttributes.current.delete(attr));
+
+    const syncList = (current: string[]): string[] => [
+      ...current.filter((attr) => !removed.includes(attr)),
+      ...added.filter((attr) => !current.includes(attr)),
+    ];
+
+    // The mapping and both allow-lists are written as one config object: writing them through
+    // separate onFieldChange calls would have each rebuild oauth2Config from the same stale copy,
+    // so the last write would drop the other's change.
+    const idTokenAttributes = syncList(currentIdTokenAttributes);
     const updatedConfig = {
       ...oauth2Config,
       scopeClaims: newScopeClaims,
+      token: {
+        ...oauth2Config?.token,
+        idToken: {
+          validityPeriod: oauth2Config?.token?.idToken?.validityPeriod ?? 3600,
+          ...oauth2Config?.token?.idToken,
+          userAttributes: idTokenAttributes,
+        },
+      },
+      userInfo: {
+        ...oauth2Config?.userInfo,
+        userAttributes: syncList(currentUserInfoAttributes),
+      },
     };
+
+    if (added.length > 0 || removed.length > 0) {
+      setHighlightedAttributesByToken((prev) => ({
+        ...prev,
+        id: new Set([...prev.id, ...added, ...removed]),
+        userinfo: new Set([...prev.userinfo, ...added, ...removed]),
+      }));
+    }
+
     const updatedInboundAuth = application.inboundAuthConfig?.map((config) => {
       if (config.type === 'oauth2') {
         return {...config, config: updatedConfig};
@@ -463,16 +604,23 @@ export default function EditTokenSettings({
   };
 
   const handleIdTokenConfigChange = (field: string, value: string) => {
+    const nextIdToken = {
+      ...oauth2Config?.token?.idToken,
+      userAttributes: oauth2Config?.token?.idToken?.userAttributes ?? [],
+      validityPeriod: oauth2Config?.token?.idToken?.validityPeriod ?? 3600,
+      [field]: value,
+    };
+    // Switching to a non-encrypted format must drop the encryption fields, otherwise the backend
+    // rejects the config (encryption fields require an encrypted response type and a certificate).
+    if (field === 'responseType' && value !== 'JWE' && value !== 'NESTED_JWT') {
+      delete nextIdToken.encryptionAlg;
+      delete nextIdToken.encryptionEnc;
+    }
     const updatedConfig = {
       ...oauth2Config,
       token: {
         ...oauth2Config?.token,
-        idToken: {
-          ...oauth2Config?.token?.idToken,
-          userAttributes: oauth2Config?.token?.idToken?.userAttributes ?? [],
-          validityPeriod: oauth2Config?.token?.idToken?.validityPeriod ?? 3600,
-          [field]: value,
-        },
+        idToken: nextIdToken,
       },
     };
     const updatedInboundAuth = application.inboundAuthConfig?.map((config) => {
@@ -485,13 +633,24 @@ export default function EditTokenSettings({
   };
 
   const handleUserInfoConfigChange = (field: string, value: string) => {
+    const nextUserInfo = {
+      ...oauth2Config?.userInfo,
+      userAttributes: oauth2Config?.userInfo?.userAttributes ?? oauth2Config?.token?.idToken?.userAttributes ?? [],
+      [field]: value,
+    };
+    // Switching to a non-encrypted format must drop the encryption fields, otherwise the backend
+    // rejects the config (encryption fields require an encrypted response type and a certificate).
+    if (field === 'responseType' && value !== 'JWE' && value !== 'NESTED_JWT') {
+      delete nextUserInfo.encryptionAlg;
+      delete nextUserInfo.encryptionEnc;
+    }
+    // Signing always uses the server key, so a stale per-app signing algorithm is never sent.
+    if (field === 'responseType') {
+      delete nextUserInfo.signingAlg;
+    }
     const updatedConfig = {
       ...oauth2Config,
-      userInfo: {
-        ...oauth2Config?.userInfo,
-        userAttributes: oauth2Config?.userInfo?.userAttributes ?? oauth2Config?.token?.idToken?.userAttributes ?? [],
-        [field]: value,
-      },
+      userInfo: nextUserInfo,
     };
     const updatedInboundAuth = application.inboundAuthConfig?.map((config) => {
       if (config.type === 'oauth2') {
@@ -612,6 +771,16 @@ export default function EditTokenSettings({
             idToken: {...currentIdToken, userAttributes: nextAttrs},
           },
         };
+
+        // While User Info inherits from the ID token the two lists must stay identical, since the
+        // inherit toggle is derived from their equality. Writing only the ID token list would both
+        // flip the toggle off and leave User Info on the pre-edit list.
+        if (!isUserInfoCustomAttributes) {
+          updatedConfig = {
+            ...updatedConfig,
+            userInfo: {...updatedConfig.userInfo, userAttributes: nextAttrs},
+          };
+        }
       } else if (scope === 'userinfo') {
         updatedConfig = {
           ...updatedConfig,
@@ -630,7 +799,7 @@ export default function EditTokenSettings({
       });
       onFieldChange('inboundAuthConfig', updatedInboundAuth);
     } else if (scope === 'shared') {
-      onFieldChange('assertion', {...application.assertion, userAttributes: nextAttrs});
+      onFieldChange('assertion', {...currentAssertion, userAttributes: nextAttrs});
     }
   };
 
@@ -704,7 +873,8 @@ export default function EditTokenSettings({
       {/* OAuth/OIDC Mode */}
       {isOAuthMode ? (
         <>
-          {/* Merged User Attributes (Access Token / ID Token / User Info tabs) */}
+          {/* Merged User Attributes (Access Token / ID Token / User Info tabs). The scope-to-claims
+              mapping is passed in as a slot so it renders once, under the two tabs it feeds. */}
           <TokenUserAttributesSection
             accessTokenAttributes={currentAccessTokenAttributes}
             idTokenAttributes={currentIdTokenAttributes}
@@ -722,28 +892,30 @@ export default function EditTokenSettings({
             entityLabel={entityLabel}
             showUserInfoTab={showUserInfoTab}
             showActorClaim={showActorClaim}
+            actorSub={actorSub}
             disabled={application.isReadOnly}
+            signingAlg={signingAlg}
+            hasCertificate={Boolean(oauth2Config?.certificate?.type)}
+            certificateLocation={certificateLocation}
             idTokenResponseType={oauth2Config?.token?.idToken?.responseType}
             idTokenEncryptionAlg={oauth2Config?.token?.idToken?.encryptionAlg}
             idTokenEncryptionEnc={oauth2Config?.token?.idToken?.encryptionEnc}
             onIdTokenConfigChange={handleIdTokenConfigChange}
             userInfoResponseType={oauth2Config?.userInfo?.responseType}
-            userInfoSigningAlg={oauth2Config?.userInfo?.signingAlg}
             userInfoEncryptionAlg={oauth2Config?.userInfo?.encryptionAlg}
             userInfoEncryptionEnc={oauth2Config?.userInfo?.encryptionEnc}
             onUserInfoConfigChange={handleUserInfoConfigChange}
-          />
-
-          {/* Scopes & Attribute Mapping */}
-          <ScopeSection
-            scopes={oauth2Config?.scopes ?? []}
-            scopeClaims={oauth2Config?.scopeClaims ?? {}}
-            userAttributes={userAttributes}
-            isLoadingUserAttributes={isLoadingUserAttributes}
-            onScopesChange={handleScopesChange}
-            onScopeClaimsChange={handleScopeClaimsChange}
-            entityLabel={entityLabel}
-            disabled={application.isReadOnly}
+            scopeMapping={
+              <ScopeSection
+                scopeClaims={oauth2Config?.scopeClaims ?? {}}
+                userAttributes={userAttributes}
+                isLoadingUserAttributes={isLoadingUserAttributes}
+                hasAllowedUserTypes={allowedUserTypes.length > 0}
+                onScopeClaimsChange={handleScopeClaimsChange}
+                entityLabel={entityLabel}
+                disabled={application.isReadOnly}
+              />
+            }
           />
 
           {/* Merged Token Validation (Access Token / ID Token tabs) */}

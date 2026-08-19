@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ou
 
@@ -208,6 +193,76 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.ouservice.invalid_filter_description",
 			DefaultValue: "The filter parameter is invalid. Use format: attribute (eq|gt|lt) \"value\"",
+		},
+	}
+	// ErrorInvalidAuthFlowID is the error returned when authFlowId does not
+	// reference an existing authentication flow.
+	ErrorInvalidAuthFlowID = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "OU-1015",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_auth_flow_id",
+			DefaultValue: "Invalid default authentication flow ID",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_auth_flow_id_description",
+			DefaultValue: "The authFlowId does not reference an existing authentication flow",
+		},
+	}
+	// ErrorInvalidRegistrationFlowID is the error returned when registrationFlowId does not
+	// reference an existing registration flow.
+	ErrorInvalidRegistrationFlowID = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "OU-1016",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_registration_flow_id",
+			DefaultValue: "Invalid default registration flow ID",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_registration_flow_id_description",
+			DefaultValue: "The registrationFlowId does not reference an existing registration flow",
+		},
+	}
+	// ErrorInvalidRecoveryFlowID is the error returned when recoveryFlowId does not
+	// reference an existing recovery flow.
+	ErrorInvalidRecoveryFlowID = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "OU-1017",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_recovery_flow_id",
+			DefaultValue: "Invalid default recovery flow ID",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_recovery_flow_id_description",
+			DefaultValue: "The recoveryFlowId does not reference an existing recovery flow",
+		},
+	}
+	// ErrorInvalidSignOutFlowID is the error returned when signOutFlowId does not
+	// reference an existing sign-out flow.
+	ErrorInvalidSignOutFlowID = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "OU-1018",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_signout_flow_id",
+			DefaultValue: "Invalid default sign-out flow ID",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_signout_flow_id_description",
+			DefaultValue: "The signOutFlowId does not reference an existing sign-out flow",
+		},
+	}
+	// ErrorInvalidUserOnboardingFlowID is the error returned when userOnboardingFlowId does not
+	// reference an existing user onboarding flow.
+	ErrorInvalidUserOnboardingFlowID = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "OU-1019",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_user_onboarding_flow_id",
+			DefaultValue: "Invalid default user onboarding flow ID",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.ouservice.invalid_user_onboarding_flow_id_description",
+			DefaultValue: "The userOnboardingFlowId does not reference an existing user onboarding flow",
 		},
 	}
 )

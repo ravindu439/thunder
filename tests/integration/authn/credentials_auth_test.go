@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authn
 
@@ -1019,6 +1004,68 @@ func (suite *CredentialsAuthTestSuite) TestAuthenticateWithExistingAssertionEmpt
 	// Verify AAL1 for single-factor authentication
 	aal := extractAssuranceLevelFromAssertion(response.Assertion, "aal")
 	suite.Equal("AAL1", aal, "Single-factor authentication should result in AAL1")
+}
+
+// TestAuthenticateWithProvisionedEntityIDRejected verifies the authentication bypass is closed for a
+// real user ID. The provisionedEntityID credential type performs no verification at all, so before
+// the reject list this returned 200 with the user's identity and a signed assertion.
+func (suite *CredentialsAuthTestSuite) TestAuthenticateWithProvisionedEntityIDRejected() {
+	authRequest := map[string]interface{}{
+		"identifiers": map[string]interface{}{
+			"username": "credtest_user1",
+		},
+		"credentials": map[string]interface{}{
+			"provisionedEntityID": suite.users["username_password"],
+		},
+	}
+
+	response, statusCode, err := suite.sendAuthRequest(authRequest)
+	suite.Require().NoError(err, "Failed to send authenticate request")
+	suite.Equal(http.StatusBadRequest, statusCode, "Expected status 400 for a reserved credential type")
+	suite.Empty(response.ID, "Rejected request should not resolve a user")
+	suite.Empty(response.Assertion, "Rejected request should not mint an assertion")
+}
+
+// TestAuthenticateWithReservedCredentialTypesRejected verifies every reserved credential type is
+// rejected on the credentials API. The guard matches on key presence, so the values need not be
+// valid payloads. These names mirror InternalCredentialTypes and SystemCredentialTypes in the
+// backend's authnprovider/common package, which this module cannot import.
+func (suite *CredentialsAuthTestSuite) TestAuthenticateWithReservedCredentialTypesRejected() {
+	reservedTypes := []string{
+		"provisionedEntityID", "passkey", "otp", "federated", "magiclink", "openid4vp",
+		"sub", "clientSecret", "flowSecret",
+	}
+
+	for _, reserved := range reservedTypes {
+		suite.Run(reserved, func() {
+			suite.assertReservedCredentialTypeRejected(map[string]interface{}{
+				reserved: "attacker-supplied-value",
+			})
+		})
+	}
+
+	// The guard runs before authentication, so a reserved credential type cannot be smuggled in
+	// beside a valid one.
+	suite.Run("alongside a valid password", func() {
+		suite.assertReservedCredentialTypeRejected(map[string]interface{}{
+			"password":            "TestPassword123!",
+			"provisionedEntityID": suite.users["username_password"],
+		})
+	})
+}
+
+// assertReservedCredentialTypeRejected asserts the credentials API rejects the given credentials.
+func (suite *CredentialsAuthTestSuite) assertReservedCredentialTypeRejected(
+	credentials map[string]interface{}) {
+	errorResp, statusCode, err := suite.sendAuthRequestExpectingError(map[string]interface{}{
+		"identifiers": map[string]interface{}{
+			"username": "credtest_user1",
+		},
+		"credentials": credentials,
+	})
+	suite.Require().NoError(err, "Failed to send authenticate request")
+	suite.Equal(http.StatusBadRequest, statusCode, "Expected status 400 for a reserved credential type")
+	suite.Equal("AUTH-CRED-1005", errorResp.Code, "Expected error code AUTH-CRED-1005")
 }
 
 func (suite *CredentialsAuthTestSuite) sendAuthRequest(authRequest map[string]interface{}) (

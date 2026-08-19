@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import {describe, it, expect, vi} from 'vitest';
@@ -33,9 +18,6 @@ vi.mock('@xyflow/react', () => ({
     Bottom: 'bottom',
   },
 }));
-
-// Mock SCSS
-vi.mock('../End.scss', () => ({}));
 
 // Default mock props for End component
 const createMockProps = (overrides: Partial<CommonStepFactoryPropsInterface> = {}): CommonStepFactoryPropsInterface =>
@@ -72,11 +54,10 @@ describe('End', () => {
       expect(fab).toBeInTheDocument();
     });
 
-    it('should render with end class on Fab', () => {
+    it('should render the Fab in the success color', () => {
       render(<End {...createMockProps()} />);
 
-      const fab = screen.getByRole('button');
-      expect(fab).toHaveClass('end');
+      expect(screen.getByRole('button', {name: 'end'})).toHaveClass('MuiFab-success');
     });
   });
 
@@ -102,15 +83,6 @@ describe('End', () => {
       // Handle id should contain 'end' and '_PREVIOUS' suffix
       expect(handle.getAttribute('data-handle-id')).toContain('end');
       expect(handle.getAttribute('data-handle-id')).toContain('_PREVIOUS');
-    });
-
-    it('should have hidden-handle class', () => {
-      // Note: Since we're mocking Handle, we can't directly test the class
-      // but the component should pass the className prop
-      render(<End {...createMockProps()} />);
-
-      const handle = screen.getByTestId('handle-target');
-      expect(handle).toBeInTheDocument();
     });
   });
 

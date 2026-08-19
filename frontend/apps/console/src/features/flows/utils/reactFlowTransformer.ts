@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {Edge, Node} from '@xyflow/react';
 import generateResourceId from './generateResourceId';
@@ -23,7 +8,7 @@ import {ActionTypes} from '../models/actions';
 import type {Element} from '../models/elements';
 import {ElementCategories, ElementTypes, ActionEventTypes, ButtonTypes} from '../models/elements';
 import type {StepAction, StepData} from '../models/steps';
-import {StepTypes, StaticStepTypes} from '../models/steps';
+import {ExecutionTypes, StepTypes, StaticStepTypes} from '../models/steps';
 
 /**
  * Suffix used in edge sourceHandle to identify the connection point
@@ -94,6 +79,12 @@ interface FlowInput {
 interface FlowAction {
   ref: string;
   nextNode: string;
+  /**
+   * Semantic action type forwarded by the prompt node to the next executor
+   * (e.g. `CONFIRM`, which tells the session sign-out executor the End-User
+   * has confirmed).
+   */
+  type?: string;
   executor?: {
     name: string;
     [key: string]: unknown;
@@ -153,6 +144,17 @@ const STEP_TO_NODE_TYPE_MAP: Record<string, string> = {
 };
 
 /**
+ * Action element types whose prompt takes no inputs, regardless of the inputs their
+ * container block holds. The runtime validates the selected action's inputs, so an
+ * action that does not submit the surrounding form must not inherit them:
+ * - A RESEND re-issues the very code its container's input is waiting for, so
+ *   inheriting that input would block the resend on an empty field.
+ * - A RICH_TEXT link navigates rather than submitting, so one sitting inside a
+ *   credentials block would otherwise demand a username and password to fire.
+ */
+const INPUTLESS_ACTION_TYPES = new Set<string>([ElementTypes.Resend, ElementTypes.RichText]);
+
+/**
  * Set of input element types for quick lookup
  */
 const INPUT_ELEMENT_TYPES = new Set<string>([
@@ -165,6 +167,7 @@ const INPUT_ELEMENT_TYPES = new Set<string>([
   ElementTypes.OtpInput,
   ElementTypes.Checkbox,
   ElementTypes.Dropdown,
+  ElementTypes.Select,
 ]);
 
 /**
@@ -197,6 +200,33 @@ export function shouldPromoteToSubmit(components: Element[]): boolean {
   return hasInputs && actionCount === 1;
 }
 
+/** Matches the first `data-action-ref` attribute in a rich text's label and captures its value. */
+const LABEL_ACTION_REF = /\sdata-action-ref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+/**
+ * Resolves the ref a rich text's action is serialized with. An empty ref reaches here from a link
+ * that was never authored; the label's own sentinel is then preferred, so the serialized action,
+ * the prompt and the label all carry one value the runtime can match. The component id is the
+ * last resort, used when the label has no sentinel either.
+ *
+ * TODO(#4658): drop once the ref is no longer duplicated into the label HTML.
+ *
+ * @param component - The rich text component.
+ * @param ref - The authored ref, if any.
+ * @returns The ref to serialize.
+ */
+function resolveRichTextActionRef(component: Element, ref: string | undefined): string {
+  if (ref !== undefined && ref !== '') {
+    return ref;
+  }
+
+  const label = (component as Element & {label?: string}).label;
+  const sentinel = typeof label === 'string' ? LABEL_ACTION_REF.exec(label) : null;
+  const labelRef = sentinel?.[1] ?? sentinel?.[2];
+
+  return labelRef !== undefined && labelRef !== '' ? labelRef : component.id;
+}
+
 /**
  * Removes internal properties (variants, display, config, action) from components recursively.
  * These transformations prepare the component for the API payload.
@@ -227,11 +257,14 @@ function cleanComponents(components: Element[], promoteSubmit = false): Record<s
     // renderer can dispatch the anchor click as a flow action. Only `ref` survives —
     // `onSuccess` is a canvas-only hint used by the widget-drop edge generator, and the
     // nextNode wiring lives in `prompts.action.nextNode` from `extractActionFromComponent`.
-    if (component.type === ElementTypes.RichText && action !== undefined) {
+    // `action` is `null`, not `undefined`, once the author toggles the link off — the panel
+    // writes an explicit disabled sentinel — so both have to be excluded before reading `ref`.
+    // A present action is always serialized, even with no `ref` of its own: `extractPrompts`
+    // emits a prompt for it, and the resolved ref has to be on the component too or the
+    // runtime has a prompt it can never reach.
+    if (component.type === ElementTypes.RichText && action !== undefined && action !== null) {
       const richTextAction = action as {ref?: string};
-      if (richTextAction.ref !== undefined) {
-        cleanedComponent.action = {ref: richTextAction.ref};
-      }
+      cleanedComponent.action = {ref: resolveRichTextActionRef(component, richTextAction.ref)};
     }
 
     // For input field components, ensure ref property is set
@@ -375,6 +408,13 @@ function extractPrompts(components: Element[], nodeId: string, edges: Edge[]): F
         action.executor = component.action.executor as {name: string; [key: string]: unknown};
       }
 
+      // Authored on the button itself, so it survives the connection being
+      // redrawn; a prompt action only exists once the button is wired, which
+      // the `nextNode` guard below enforces.
+      if (component.actionType) {
+        action.type = component.actionType;
+      }
+
       return action.nextNode ? action : undefined;
     }
 
@@ -395,7 +435,7 @@ function extractPrompts(components: Element[], nodeId: string, edges: Edge[]): F
       if (!connectedEdge) {
         return undefined;
       }
-      return {ref: richTextAction.ref ?? component.id, nextNode: connectedEdge.target};
+      return {ref: resolveRichTextActionRef(component, richTextAction.ref), nextNode: connectedEdge.target};
     }
 
     return undefined;
@@ -408,9 +448,11 @@ function extractPrompts(components: Element[], nodeId: string, edges: Edge[]): F
     // Check if this component is an action
     const action = extractActionFromComponent(component);
     if (action) {
-      // This action gets the parent's inputs (all accumulated up to this point)
+      // This action gets the parent's inputs (all accumulated up to this point), unless it is
+      // one of the action types that never submits the surrounding form (see
+      // INPUTLESS_ACTION_TYPES).
       const prompt: FlowPrompt = {action};
-      if (parentInputs.length > 0) {
+      if (parentInputs.length > 0 && !INPUTLESS_ACTION_TYPES.has(component.type)) {
         prompt.inputs = parentInputs;
       }
       prompts.push(prompt);
@@ -924,6 +966,34 @@ export function validateFlowGraph(flowGraph: FlowGraph): string[] {
   if (endNodes.length === 0) {
     errors.push('Flow must have at least one END node');
   }
+
+  // SSO pairing: mirrors the backend contract so an invalid pairing never
+  // reaches the API, even when live validation could not see the executors.
+  const sessionNodeIds = new Set(
+    flowGraph.nodes.filter((node) => node.executor?.name === ExecutionTypes.Session).map((node) => node.id),
+  );
+  const referencedSessionIds = new Set<string>();
+
+  flowGraph.nodes.forEach((node) => {
+    if (node.executor?.name !== ExecutionTypes.SSOCheck) {
+      return;
+    }
+
+    const checkpointRef = node.properties?.checkpointRef;
+    if (typeof checkpointRef !== 'string' || checkpointRef === '') {
+      errors.push(`Node ${node.id}: SSO check must reference a session checkpoint via checkpointRef`);
+    } else if (!sessionNodeIds.has(checkpointRef)) {
+      errors.push(`Node ${node.id}: checkpointRef references non-existent session node ${checkpointRef}`);
+    } else {
+      referencedSessionIds.add(checkpointRef);
+    }
+  });
+
+  sessionNodeIds.forEach((sessionNodeId) => {
+    if (!referencedSessionIds.has(sessionNodeId)) {
+      errors.push(`Node ${sessionNodeId}: session node is not referenced by any SSO check`);
+    }
+  });
 
   return errors;
 }

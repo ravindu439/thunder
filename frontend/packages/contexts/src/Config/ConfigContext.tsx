@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Context, createContext} from 'react';
 import {ProductConfig} from './types';
@@ -127,6 +112,15 @@ export interface ConfigContextType {
    * @returns True if the trusted issuer is a generic OIDC provider
    */
   isTrustedIssuerGenericOidc: () => boolean;
+
+  /**
+   * Resolves the "Learn more" documentation link for a given section key.
+   * Returns undefined when the documentation block, its base URL, or the key's entry in
+   * `links` is not configured, so callers can hide the link entirely.
+   * @param key - The section id to look up in `documentation.links` (e.g. "users")
+   * @returns The resolved absolute URL, or undefined when not configured
+   */
+  getDocumentationLink: (key: string) => string | undefined;
 }
 
 /**

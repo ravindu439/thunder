@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {I18nDefaultConstants} from '@thunderid/i18n';
 import {Stack, Typography} from '@wso2/oxygen-ui';
 import {CogIcon} from '@wso2/oxygen-ui-icons-react';
-import {type EdgeTypes, type Node, type NodeTypes, ReactFlowProvider} from '@xyflow/react';
+import {type Edge, type EdgeTypes, type Node, type NodeTypes, ReactFlowProvider} from '@xyflow/react';
 import merge from 'lodash-es/merge';
 import startCase from 'lodash-es/startCase';
 import {
@@ -47,6 +32,7 @@ import type {FlowCompletionConfigsInterface} from '../models/flows';
 import type {Claim} from '../models/metadata';
 import {type Resource, ResourceTypes} from '../models/resources';
 import {StepTypes, EdgeStyleTypes, type EdgeStyleTypes as EdgeStyleTypesType} from '../models/steps';
+import type {GraphValidationRule} from '../validation/validation-rules';
 
 /**
  * Props interface for ElementFactory component
@@ -135,6 +121,8 @@ function FlowContextWrapper({
   const [isVerboseMode, setIsVerboseMode] = useState<boolean>(true);
   const [edgeStyle, setEdgeStyle] = useState<EdgeStyleTypesType>(EdgeStyleTypes.SmoothStep);
   const [flowNodes, setFlowNodes] = useState<Node[]>([]);
+  const [flowEdges, setFlowEdges] = useState<Edge[]>([]);
+  const [graphValidationRules, setGraphValidationRules] = useState<GraphValidationRule[]>([]);
 
   // ── I18n State ──
   const [language, setLanguage] = useState<string>(I18nDefaultConstants.FALLBACK_LANGUAGE);
@@ -192,9 +180,11 @@ function FlowContextWrapper({
     const headerText = resource?.display?.header ?? startCase(resource?.type?.toLowerCase());
 
     setResourcePropertiesPanelHeadingRef.current(
-      <Stack direction="row" className="sub-title" gap={1} alignItems="center">
-        <CogIcon />
-        <Typography variant="h5">{headerText} Properties</Typography>
+      <Stack direction="row" className="sub-title" gap={1.25} alignItems="center" sx={{minWidth: 0}}>
+        <CogIcon size={18} />
+        <Typography variant="h6" noWrap title={`${headerText} Properties`}>
+          {headerText} Properties
+        </Typography>
       </Stack>,
     );
     setLastInteractedElementInternalRef.current(resource);
@@ -327,6 +317,10 @@ function FlowContextWrapper({
       publishFlow: undefined as (() => Promise<boolean>) | undefined,
       flowNodes,
       setFlowNodes,
+      flowEdges,
+      setFlowEdges,
+      graphValidationRules,
+      setGraphValidationRules,
     }),
     [
       ElementFactory,
@@ -339,6 +333,8 @@ function FlowContextWrapper({
       flowNodeTypes,
       flowEdgeTypes,
       flowNodes,
+      flowEdges,
+      graphValidationRules,
     ],
   );
 

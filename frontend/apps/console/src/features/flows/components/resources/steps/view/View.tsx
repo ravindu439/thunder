@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, Button, FormGroup, IconButton, Menu, MenuItem, Paper, Tooltip, type Theme} from '@wso2/oxygen-ui';
 import {CogIcon, EyeIcon, PlusIcon, TrashIcon} from '@wso2/oxygen-ui-icons-react';
@@ -34,6 +19,7 @@ import dashedAddButtonSx from './dashedAddButtonSx';
 import ReorderableViewElement from './ReorderableElement';
 import Droppable from '../../../dnd/Droppable';
 import GapDropZone from '../../../dnd/GapDropZone';
+import {nodeShadowMixin} from '../flowNodeStyles';
 import StepTitle from '../StepTitle';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
 import useFlowPlugins from '@/features/flows/hooks/useFlowPlugins';
@@ -188,18 +174,12 @@ function View({
   return (
     // <ValidationErrorBoundary disableErrorBoundaryOnHover={false} resource={node}>
     <Box
-      className={`flow-builder-step ${className ?? ''}`.trim()}
+      className={className}
+      data-flow-node-surface
       sx={(theme: Theme) => ({
         overflow: 'hidden',
         borderRadius: 2,
-        ...theme.applyStyles('light', {
-          boxShadow:
-            '0 10px 22px 0 rgba(6,6,14,0.1), 0 24px 48px 0 rgba(199,211,234,0.05) inset, 0 1px 1px 0 rgba(199,211,234,0.12) inset',
-        }),
-        ...theme.applyStyles('dark', {
-          boxShadow:
-            '0 24px 32px 0 rgba(6,6,14,0.7), 0 24px 48px 0 rgba(199,211,234,0.05) inset, 0 1px 1px 0 rgba(199,211,234,0.12) inset',
-        }),
+        ...nodeShadowMixin(theme),
       })}
     >
       <Box
@@ -364,7 +344,6 @@ function View({
 
       <Handle type="target" position={Position.Left} />
       <Box
-        className="flow-builder-step-content"
         sx={{
           display: 'flex',
           flexFlow: 'column nowrap',
@@ -385,7 +364,7 @@ function View({
             cursor: 'auto',
           }}
         >
-          <Box className="flow-builder-step-content-form">
+          <Box>
             <FormGroup>
               <Droppable
                 id={generateResourceId(VisualFlowConstants.FLOW_BUILDER_VIEW_ID)}

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderWithProviders, screen, fireEvent, waitFor, userEvent} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -186,6 +171,20 @@ describe('ResourceNode', () => {
       expect(screen.getByRole('button', {name: 'Copy permission string'})).toBeInTheDocument();
     });
   });
+
+  it('does not show the add or delete controls on hover when read-only', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ResourceNode {...defaultProps} readOnly />);
+
+    const nameEl = screen.getByText('Documents');
+    await user.hover(nameEl);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', {name: 'Copy permission string'})).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', {name: 'Add'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument();
+  });
 });
 
 describe('ActionNode', () => {
@@ -263,5 +262,18 @@ describe('ActionNode', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', {name: 'Copy permission string'})).toBeInTheDocument();
     });
+  });
+
+  it('does not show the delete control on hover when read-only', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ActionNode {...defaultProps} readOnly />);
+
+    const nameEl = screen.getByText('Read All');
+    await user.hover(nameEl);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', {name: 'Copy permission string'})).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', {name: 'Delete'})).not.toBeInTheDocument();
   });
 });

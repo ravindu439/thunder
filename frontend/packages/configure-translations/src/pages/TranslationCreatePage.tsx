@@ -1,49 +1,34 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {FullScreenCreationWizardLayout} from '@thunderid/components';
 import {useGetTranslations, useCreateTranslations, I18nDefaultConstants} from '@thunderid/i18n';
 import {useLogger} from '@thunderid/logger/react';
-import {Alert, Box, Breadcrumbs, Button, IconButton, LinearProgress, Typography} from '@wso2/oxygen-ui';
-import {ChevronRight, X} from '@wso2/oxygen-ui-icons-react';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Box, Button, CircularProgress} from '@wso2/oxygen-ui';
 import {useCallback, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
-import InitializeLanguage from '@/components/create-translation/InitializeLanguage';
 import ReviewLocaleCode from '@/components/create-translation/ReviewLocaleCode';
 import SelectCountry from '@/components/create-translation/SelectCountry';
 import SelectLanguage from '@/components/create-translation/SelectLanguage';
 import useTranslationCreate from '@/contexts/TranslationCreate/useTranslationCreate';
+import useTranslationRoutes from '@/hooks/useTranslationRoutes';
 import {TranslationCreateFlowStep} from '@/models/translation-create-flow';
 
 const STEPS: TranslationCreateFlowStep[] = [
   TranslationCreateFlowStep.COUNTRY,
   TranslationCreateFlowStep.LANGUAGE,
   TranslationCreateFlowStep.LOCALE_CODE,
-  TranslationCreateFlowStep.INITIALIZE,
 ];
 
 /**
  * Full-page wizard for creating a new translation language.
  *
- * Guides the user through four sequential steps: choosing a country, selecting
- * the language variant, reviewing or overriding the derived BCP 47 locale code,
- * and choosing how to initialize the translation keys. On completion it writes
- * all keys to the server and navigates to the edit page for the new language.
+ * Guides the user through three sequential steps: choosing a country, selecting
+ * the language variant, and reviewing or overriding the derived BCP 47 locale
+ * code. On completion it seeds every key from English (en-US) and navigates to
+ * the edit page for the new language.
  *
  * @returns JSX element rendering the multi-step language creation page
  *
@@ -63,6 +48,7 @@ export default function TranslationCreatePage(): JSX.Element {
   const {t} = useTranslation('translations');
   const navigate = useNavigate();
   const logger = useLogger('TranslationCreatePage');
+  const routes = useTranslationRoutes();
   const {refetch: fetchEnTranslations} = useGetTranslations({
     language: I18nDefaultConstants.FALLBACK_LANGUAGE,
     enabled: false,
@@ -79,12 +65,8 @@ export default function TranslationCreatePage(): JSX.Element {
     localeCodeOverride,
     setLocaleCodeOverride,
     localeCode,
-    populateFromEnglish,
-    setPopulateFromEnglish,
     isCreating,
     setIsCreating,
-    progress,
-    setProgress,
     error,
     setError,
   } = useTranslationCreate();
@@ -93,7 +75,6 @@ export default function TranslationCreatePage(): JSX.Element {
     COUNTRY: false,
     LANGUAGE: false,
     LOCALE_CODE: true,
-    INITIALIZE: true,
   });
 
   // Reset locale when country changes
@@ -108,12 +89,19 @@ export default function TranslationCreatePage(): JSX.Element {
     COUNTRY: t('language.create.steps.country'),
     LANGUAGE: t('language.create.steps.language'),
     LOCALE_CODE: t('language.create.steps.localeCode'),
-    INITIALIZE: t('language.create.steps.initialize'),
   };
 
   const stepProgress = ((STEPS.indexOf(currentStep) + 1) / STEPS.length) * 100;
 
-  const getBreadcrumbSteps = (): TranslationCreateFlowStep[] => STEPS.slice(0, STEPS.indexOf(currentStep) + 1);
+  const getBreadcrumbItems = (): {key: string; label: string; onClick?: () => void}[] =>
+    STEPS.slice(0, STEPS.indexOf(currentStep) + 1).map((step, index, array) => {
+      const isLast = index === array.length - 1;
+      return {
+        key: step,
+        label: stepLabels[step],
+        ...(isLast || isCreating ? {} : {onClick: () => setCurrentStep(step)}),
+      };
+    });
 
   const handleCountryReady = useCallback((isReady: boolean): void => {
     setStepReady((prev) => ({...prev, COUNTRY: isReady}));
@@ -127,9 +115,35 @@ export default function TranslationCreatePage(): JSX.Element {
     setStepReady((prev) => ({...prev, LOCALE_CODE: isReady}));
   }, []);
 
+  // A create failure is stale once the wizard's data changes.
+  const handleCountryChange: typeof setSelectedCountry = useCallback(
+    (value) => {
+      setError(null);
+      setSelectedCountry(value);
+    },
+    [setError, setSelectedCountry],
+  );
+
+  const handleLocaleChange: typeof setSelectedLocale = useCallback(
+    (value) => {
+      setError(null);
+      setSelectedLocale(value);
+    },
+    [setError, setSelectedLocale],
+  );
+
+  const handleLocaleCodeOverrideChange: typeof setLocaleCodeOverride = useCallback(
+    (value) => {
+      setError(null);
+      setLocaleCodeOverride(value);
+    },
+    [setError, setLocaleCodeOverride],
+  );
+
   const handleClose = (): void => {
+    if (isCreating) return;
     (async () => {
-      await navigate('/translations');
+      await navigate(routes.list());
     })().catch((_error: unknown) => {
       logger.error('Failed to navigate to translations page', {error: _error});
     });
@@ -139,36 +153,41 @@ export default function TranslationCreatePage(): JSX.Element {
     if (!localeCode) return;
     setError(null);
     setIsCreating(true);
-    setProgress(0);
 
     const {data: enData, error: enError} = await fetchEnTranslations();
     if (enError || !enData) {
       logger.error('Failed to fetch en-US translations', {error: enError});
-      setError(t('language.add.error'));
+      setError(
+        enError
+          ? getErrorMessage(enError, t, 'language.add.error', 'Failed to add language. Please try again.')
+          : t('language.add.error'),
+      );
       setIsCreating(false);
       return;
     }
 
+    // The server rejects empty override values (a language is only known to exist once it has at
+    // least one translation row, so there's no way to represent a genuinely empty language), so
+    // every key is seeded from English; the admin can overwrite each value afterwards.
     const translations: Record<string, Record<string, string>> = {};
     Object.entries(enData.translations).forEach(([ns, nsValues]) => {
       translations[ns] = {};
       Object.entries(nsValues).forEach(([key, val]) => {
-        translations[ns][key] = populateFromEnglish ? val : '';
+        translations[ns][key] = val;
       });
     });
 
     try {
       await createTranslations.mutateAsync({language: localeCode, translations});
-      setProgress(100);
     } catch (_err: unknown) {
       logger.error('Failed to create translations', {error: _err});
-      setError(t('language.add.error'));
+      setError(getErrorMessage(_err as Error, t, 'language.add.error', 'Failed to add language. Please try again.'));
       setIsCreating(false);
       return;
     }
 
     try {
-      await navigate(`/translations/${localeCode}`);
+      await navigate(routes.detail(localeCode));
     } catch (_err: unknown) {
       logger.error('Translations created but navigation failed', {error: _err, localeCode});
       setIsCreating(false);
@@ -200,7 +219,7 @@ export default function TranslationCreatePage(): JSX.Element {
         return (
           <SelectCountry
             selectedCountry={selectedCountry}
-            onCountryChange={setSelectedCountry}
+            onCountryChange={handleCountryChange}
             onReadyChange={handleCountryReady}
           />
         );
@@ -210,7 +229,7 @@ export default function TranslationCreatePage(): JSX.Element {
           <SelectLanguage
             selectedCountry={selectedCountry}
             selectedLocale={selectedLocale}
-            onLocaleChange={setSelectedLocale}
+            onLocaleChange={handleLocaleChange}
             onReadyChange={handleLanguageReady}
           />
         );
@@ -220,17 +239,8 @@ export default function TranslationCreatePage(): JSX.Element {
           <ReviewLocaleCode
             derivedLocale={selectedLocale}
             localeCode={localeCodeOverride}
-            onLocaleCodeChange={setLocaleCodeOverride}
+            onLocaleCodeChange={handleLocaleCodeOverrideChange}
             onReadyChange={handleLocaleCodeReady}
-          />
-        );
-      case TranslationCreateFlowStep.INITIALIZE:
-        return (
-          <InitializeLanguage
-            populateFromEnglish={populateFromEnglish}
-            onPopulateChange={setPopulateFromEnglish}
-            isCreating={isCreating}
-            progress={progress}
           />
         );
       default:
@@ -239,90 +249,45 @@ export default function TranslationCreatePage(): JSX.Element {
   };
 
   const isFirstStep = currentStep === TranslationCreateFlowStep.COUNTRY;
+  const isLastStep = currentStep === TranslationCreateFlowStep.LOCALE_CODE;
 
-  return (
-    <Box sx={{height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
-      <LinearProgress variant="determinate" value={stepProgress} sx={{height: 6, flexShrink: 0}} />
-
-      <Box sx={{flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0}}>
-        {/* Header */}
-        <Box sx={{p: 4, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0}}>
-          <IconButton
-            onClick={handleClose}
-            disabled={isCreating}
-            sx={{bgcolor: 'background.paper', '&:hover': {bgcolor: 'action.hover'}, boxShadow: 1}}
-          >
-            <X size={24} />
-          </IconButton>
-          <Breadcrumbs separator={<ChevronRight size={16} />} aria-label="breadcrumb">
-            {getBreadcrumbSteps().map((step, index, array) => {
-              const isLast = index === array.length - 1;
-              return isLast ? (
-                <Typography key={step} variant="h5" color="text.primary">
-                  {stepLabels[step]}
-                </Typography>
-              ) : (
-                <Typography
-                  key={step}
-                  variant="h5"
-                  onClick={() => !isCreating && setCurrentStep(step)}
-                  sx={{cursor: isCreating ? 'default' : 'pointer'}}
-                >
-                  {stepLabels[step]}
-                </Typography>
-              );
-            })}
-          </Breadcrumbs>
-        </Box>
-
-        {/* Left-aligned form content */}
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            overflowY: 'auto',
-            py: 8,
-            px: 20,
-            alignItems: 'flex-start',
-          }}
+  const footer = (
+    <Box sx={{display: 'flex', justifyContent: isFirstStep ? 'flex-end' : 'space-between', gap: 2}}>
+      {!isFirstStep && (
+        <Button variant="outlined" onClick={handleBack} sx={{minWidth: 100}} disabled={isCreating}>
+          {t('common:actions.back', {ns: 'common', defaultValue: 'Back'})}
+        </Button>
+      )}
+      <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
+        {isCreating && <CircularProgress size={20} />}
+        <Button
+          variant="contained"
+          onClick={handleNext}
+          sx={{minWidth: 100}}
+          disabled={!stepReady[currentStep] || isCreating}
         >
-          <Box sx={{width: '100%', maxWidth: 800, display: 'flex', flexDirection: 'column'}}>
-            {error && (
-              <Alert severity="error" sx={{mb: 3}} onClose={() => setError(null)}>
-                {error}
-              </Alert>
-            )}
-
-            {renderStepContent()}
-
-            <Box
-              sx={{
-                mt: 4,
-                display: 'flex',
-                justifyContent: isFirstStep ? 'flex-end' : 'space-between',
-                gap: 2,
-              }}
-            >
-              {!isFirstStep && (
-                <Button variant="outlined" onClick={handleBack} sx={{minWidth: 100}} disabled={isCreating}>
-                  {t('common:actions.back', {ns: 'common'})}
-                </Button>
-              )}
-              <Button
-                variant="contained"
-                onClick={handleNext}
-                sx={{minWidth: 100}}
-                disabled={!stepReady[currentStep] || isCreating}
-              >
-                {currentStep === TranslationCreateFlowStep.INITIALIZE
-                  ? t('language.create.createButton')
-                  : t('common:actions.continue', {ns: 'common'})}
-              </Button>
-            </Box>
-          </Box>
-        </Box>
+          {isLastStep
+            ? t('language.create.createButton', {defaultValue: 'Create'})
+            : t('common:actions.continue', {ns: 'common', defaultValue: 'Continue'})}
+        </Button>
       </Box>
     </Box>
+  );
+
+  return (
+    <FullScreenCreationWizardLayout
+      onClose={handleClose}
+      progress={stepProgress}
+      breadcrumbItems={getBreadcrumbItems()}
+      footer={footer}
+    >
+      {error && (
+        <Alert severity="error" sx={{mb: 3}} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {renderStepContent()}
+    </FullScreenCreationWizardLayout>
   );
 }

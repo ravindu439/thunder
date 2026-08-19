@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package attributecache provides attribute caching functionality.
 package attributecache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -29,6 +15,8 @@ import (
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
+	"github.com/thunder-id/thunderid/internal/system/cryptolib"
+	"github.com/thunder-id/thunderid/internal/system/kmprovider"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 )
@@ -59,13 +47,21 @@ type AttributeCacheServiceInterface interface {
 
 // attributeCacheService is the default implementation of the AttributeCacheServiceInterface.
 type attributeCacheService struct {
-	store attributeCacheStoreInterface
+	store             attributeCacheStoreInterface
+	crypto            kmprovider.RuntimeCryptoProvider
+	encryptionEnabled bool
 }
 
 // newAttributeCacheService creates a new instance of attributeCacheService with injected dependencies.
-func newAttributeCacheService(store attributeCacheStoreInterface) AttributeCacheServiceInterface {
+func newAttributeCacheService(
+	store attributeCacheStoreInterface,
+	crypto kmprovider.RuntimeCryptoProvider,
+	encryptionEnabled bool,
+) AttributeCacheServiceInterface {
 	return &attributeCacheService{
-		store: store,
+		store:             store,
+		crypto:            crypto,
+		encryptionEnabled: encryptionEnabled,
 	}
 }
 
@@ -95,7 +91,22 @@ func (s *attributeCacheService) CreateAttributeCache(
 		return nil, &tidcommon.InternalServerError
 	}
 
-	err = s.store.CreateAttributeCache(ctx, *cache)
+	data, err := json.Marshal(cache.Attributes)
+	if err != nil {
+		logger.Error(ctx, "Failed to marshal attributes", log.Error(err))
+		return nil, &tidcommon.InternalServerError
+	}
+	if s.encryptionEnabled {
+		ciphertext, _, encErr := s.crypto.Encrypt(ctx, nil, string(cryptolib.AlgorithmAESGCM),
+			nil, data)
+		if encErr != nil {
+			logger.Error(ctx, "Failed to encrypt attributes", log.Error(encErr))
+			return nil, &tidcommon.InternalServerError
+		}
+		data = ciphertext
+	}
+
+	err = s.store.CreateAttributeCache(ctx, cache.ID, data, cache.TTLSeconds)
 	if err != nil {
 		logger.Error(ctx, "Failed to create attribute cache", log.Error(err), log.String("id", cache.ID))
 		return nil, &tidcommon.InternalServerError
@@ -116,7 +127,7 @@ func (s *attributeCacheService) GetAttributeCache(
 		return nil, &ErrorMissingCacheID
 	}
 
-	cache, err := s.store.GetAttributeCache(ctx, id)
+	data, err := s.store.GetAttributeCache(ctx, id)
 	if err != nil {
 		if errors.Is(err, errAttributeCacheNotFound) {
 			logger.Debug(ctx, "Attribute cache not found", log.String("id", id))
@@ -126,8 +137,26 @@ func (s *attributeCacheService) GetAttributeCache(
 		return nil, &tidcommon.InternalServerError
 	}
 
+	if s.encryptionEnabled {
+		plaintext, decErr := s.crypto.Decrypt(ctx, nil, string(cryptolib.AlgorithmAESGCM),
+			nil, data)
+		if decErr != nil {
+			logger.Error(ctx, "Failed to decrypt attributes", log.Error(decErr), log.String("id", id))
+			return nil, &tidcommon.InternalServerError
+		}
+		data = plaintext
+	}
+	var attrs map[string]interface{}
+	if err := json.Unmarshal(data, &attrs); err != nil {
+		logger.Error(ctx, "Failed to unmarshal attributes", log.Error(err), log.String("id", id))
+		return nil, &tidcommon.InternalServerError
+	}
+
 	logger.Debug(ctx, "Successfully retrieved attribute cache", log.String("id", id))
-	return &cache, nil
+	return &AttributeCache{
+		ID:         id,
+		Attributes: attrs,
+	}, nil
 }
 
 // ExtendAttributeCacheTTL extends the TTL of an attribute cache entry.

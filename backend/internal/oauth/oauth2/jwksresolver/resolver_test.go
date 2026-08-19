@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwksresolver
 
@@ -281,6 +266,15 @@ func (suite *ResolverTestSuite) TestParseEncryptionKeyFromJWKS_NoRSAKeys() {
 	pub, _, svcErr := r.parseEncryptionKeyFromJWKS(context.Background(), []byte(jwks), "RSA-OAEP-256", KeyUseLenientEnc)
 	assert.Nil(suite.T(), pub)
 	assert.NotNil(suite.T(), svcErr)
+}
+
+func (suite *ResolverTestSuite) TestParseEncryptionKeyFromJWKS_ECDHESKeyType() {
+	jwks := `{"keys":[{"kty":"EC","use":"enc","crv":"P-256","x":"x","y":"y","kid":"ec1"}]}`
+	r := newJWKSResolver(nil)
+	pub, kid, svcErr := r.parseEncryptionKeyFromJWKS(context.Background(), []byte(jwks), "ECDH-ES", KeyUseLenientEnc)
+	suite.Require().Nil(svcErr)
+	suite.Equal("ec1", kid)
+	suite.Equal("EC", pub["kty"])
 }
 
 func (suite *ResolverTestSuite) TestParseEncryptionKeyFromJWKS_AlgMismatch() {

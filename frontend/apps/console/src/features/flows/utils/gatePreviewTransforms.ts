@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import type {Application} from '@thunderid/configure-applications';
 import {deriveEventType, shouldPromoteToSubmit} from './reactFlowTransformer';
 import {containsTemplateLiteral} from '../components/resources/elements/adapters/TemplatePlaceholder';
 import {ActionEventTypes, ElementCategories, ElementTypes, type Element} from '../models/elements';
-import type {Application} from '@/features/applications/models/application';
 
 /**
  * A flow element as consumed by the simulation preview, with the presentation
@@ -158,5 +143,33 @@ export function withDynamicFieldStandIns(list: PreviewComponent[], caption: stri
       return {...component, components: withDynamicFieldStandIns(component.components as PreviewComponent[], caption)};
     }
     return component;
+  });
+}
+
+/**
+ * Re-attaches the SDK-facing `action.ref` to RICH_TEXT components from the
+ * simulation options. A rich-text link's option carries the component id as
+ * `sourceComponentId` and the wiring ref as `edgeId`; the gate's RichTextAdapter
+ * only dispatches an anchor click when the component exposes `action.ref`, and
+ * that field can be lost by the time a loaded flow reaches the preview. Sourcing
+ * it from the simulation graph makes link clicks work regardless.
+ */
+export function withRichTextActionRefs(
+  list: PreviewComponent[],
+  optionsByComponentId: Map<string, string>,
+): PreviewComponent[] {
+  return list.map((component: PreviewComponent) => {
+    let next = component;
+    const ref = component.type === ElementTypes.RichText ? optionsByComponentId.get(component.id) : undefined;
+    if (ref && (component as {action?: {ref?: string}}).action?.ref !== ref) {
+      next = {...component, action: {...(component as {action?: object}).action, ref}} as PreviewComponent;
+    }
+    if (next.components?.length) {
+      next = {
+        ...next,
+        components: withRichTextActionRefs(next.components as PreviewComponent[], optionsByComponentId),
+      };
+    }
+    return next;
   });
 }

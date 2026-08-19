@@ -1,66 +1,67 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {FullScreenCreationWizardLayout} from '@thunderid/components';
+import {OAuth2GrantTypes, TokenEndpointAuthMethods, useGetApplications} from '@thunderid/configure-applications';
+import type {Application, ApplicationType, OAuth2Config} from '@thunderid/configure-applications';
 import {AuthenticatorTypes, IdentityProviderTypes, useIdentityProviders} from '@thunderid/configure-connections';
-import {useHasMultipleOUs} from '@thunderid/configure-organization-units';
+import {GatePreview, VIEWPORT_WIDTHS, VIEWPORT_HEIGHTS} from '@thunderid/configure-design';
+import {
+  OrganizationUnitPickerScreen,
+  useGetOrganizationUnit,
+  useHasMultipleOUs,
+} from '@thunderid/configure-organization-units';
+import {isRowEmpty, useGetCorsConfig, useUpdateCorsConfig} from '@thunderid/configure-settings';
 import {useGetUserTypes} from '@thunderid/configure-user-types';
+import {useToast} from '@thunderid/contexts';
+import {DefaultTheme, useGetTheme, type Theme} from '@thunderid/design';
+import {useTemplateLiteralResolver} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
-import {Box, Stack, Button, IconButton, LinearProgress, Alert, CircularProgress, AppBreadcrumbs} from '@wso2/oxygen-ui';
-import {X} from '@wso2/oxygen-ui-icons-react';
+import type {EmbeddedFlowComponent} from '@thunderid/react';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Box, Button, CircularProgress, IconButton, Typography} from '@wso2/oxygen-ui';
+import {ChevronLeft, ChevronRight, Home} from '@wso2/oxygen-ui-icons-react';
 import type {JSX} from 'react';
-import {useState, useCallback, useEffect, useMemo} from 'react';
+import {useState, useCallback, useEffect, useMemo, useRef} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useLocation, useNavigate} from 'react-router';
+import RouteConfig from '../../../configs/RouteConfig';
 import useCreateFlow from '../../flows/api/useCreateFlow';
+import useDeleteFlow from '../../flows/api/useDeleteFlow';
 import useGetFlowById from '../../flows/api/useGetFlowById';
 import type {BasicFlowDefinition} from '../../flows/models/responses';
+import {resolveApplicationMeta, resolveTemplatesDeep} from '../../flows/utils/gatePreviewTransforms';
 import generateFlowGraph from '../../flows/utils/generateFlowGraph';
-import getFlowEntryComponents from '../../flows/utils/getFlowEntryComponents';
+import getFlowPromptComponentsSequence from '../../flows/utils/getFlowPromptComponentsSequence';
 import useCreateApplication from '../api/useCreateApplication';
-import useGetApplications from '../api/useGetApplications';
-import ConfigureSignInOptions from '../components/create-application/configure-signin-options/ConfigureSignInOptions';
+import ConfigureSecuritySettings from '../components/create-application/configure-security-settings/ConfigureSecuritySettings';
+import ConfigureApplicationDetails from '../components/create-application/ConfigureApplicationDetails';
 import ConfigureDesign from '../components/create-application/ConfigureDesign';
 import ConfigureDetails from '../components/create-application/ConfigureDetails';
-import ConfigureExperience from '../components/create-application/ConfigureExperience';
-import ConfigureName from '../components/create-application/ConfigureName';
-import ConfigureOrganizationUnit from '../components/create-application/ConfigureOrganizationUnit';
 import ConfigureMcpClientType from '../components/create-application/mcp/ConfigureMcpClientType';
-import McpConnectComplete from '../components/create-application/mcp/McpConnectComplete';
-import ShowClientSecret from '../components/create-application/ShowClientSecret';
+import ApplicationConstants from '../constants/application-constants';
 import TemplateConstants from '../constants/template-constants';
 import useApplicationCreate from '../contexts/ApplicationCreate/useApplicationCreate';
-import type {Application} from '../models/application';
 import {
   ApplicationCreateFlowConfiguration,
   ApplicationCreateFlowSignInApproach,
   ApplicationCreateFlowStep,
+  OrganizationUnitDefaultItem,
 } from '../models/application-create-flow';
-import {PlatformApplicationTemplate} from '../models/application-templates';
+import {PlatformApplicationTemplate, TechnologyApplicationTemplate} from '../models/application-templates';
 import {McpClientTypes} from '../models/mcp-client';
-import {OAuth2GrantTypes, TokenEndpointAuthMethods, type OAuth2Config} from '../models/oauth';
 import type {CreateApplicationRequest} from '../models/requests';
+import getApplicationErrorMessage from '../utils/getApplicationErrorMessage';
 import getConfigurationTypeFromTemplate from '../utils/getConfigurationTypeFromTemplate';
+import isRedirectCapableTemplate from '../utils/isRedirectCapableTemplate';
+import mergeCorsOrigins from '../utils/mergeCorsOrigins';
+import resolveApplicationType from '../utils/resolveApplicationType';
 import resolveCreationFlow from '../utils/resolveCreationFlow';
-import GatePreview from '@/components/GatePreview/GatePreview';
-import buildPreviewMock from '@/components/GatePreview/mocks/buildPreviewMock';
 
 export default function ApplicationCreatePage(): JSX.Element {
   const {t} = useTranslation();
+  const {showToast} = useToast();
+  const {resolveAll} = useTemplateLiteralResolver();
 
   const {
     currentStep,
@@ -73,14 +74,30 @@ export default function ApplicationCreatePage(): JSX.Element {
     setThemeId,
     selectedTheme,
     setSelectedTheme,
+    layoutId,
+    setLayoutId,
+    setSelectedLayout,
     appLogo,
     setAppLogo,
     integrations,
-    toggleIntegration,
+    isEmailOtpMfaEnabled,
+    isSmsOtpMfaEnabled,
+    smsOtpSenderId,
     selectedAuthFlow,
     setSelectedAuthFlow,
     signInApproach,
     setSignInApproach,
+    registrationFlowId,
+    isRegistrationFlowEnabled,
+    recoveryFlowId,
+    isRecoveryFlowEnabled,
+    signOutFlowId,
+    isSignOutFlowEnabled,
+    redirectUris,
+    postLogoutRedirectUris,
+    corsOrigins,
+    ouDefaults,
+    setOuDefaults,
     selectedTechnology,
     selectedPlatform,
     mcpClientType,
@@ -102,23 +119,18 @@ export default function ApplicationCreatePage(): JSX.Element {
 
   const steps: Record<ApplicationCreateFlowStep, {label: string; order: number}> = useMemo(
     () => ({
-      STACK: {label: t('applications:onboarding.steps.stack'), order: 1},
-      NAME: {label: t('applications:onboarding.steps.name'), order: 2},
-      ORGANIZATION_UNIT: {label: t('applications:onboarding.steps.organizationUnit'), order: 3},
+      ORGANIZATION_UNIT: {label: t('applications:onboarding.steps.organizationUnit', 'Organization Unit'), order: 1},
+      DETAILS: {label: t('applications:onboarding.steps.details'), order: 2},
+      SECURITY: {label: t('applications:onboarding.steps.security'), order: 3},
       DESIGN: {label: t('applications:onboarding.steps.design'), order: 4},
-      OPTIONS: {label: t('applications:onboarding.steps.options'), order: 5},
-      EXPERIENCE: {label: t('applications:onboarding.steps.experience'), order: 6},
       CONFIGURE: {
-        label:
-          selectedPlatform === PlatformApplicationTemplate.WALLET
-            ? t('applications:onboarding.steps.walletConfigure')
-            : t('applications:onboarding.steps.configure'),
-        order: 7,
+        label: t('applications:onboarding.steps.configure'),
+        order: 6,
       },
-      CLIENT_TYPE: {label: t('applications:onboarding.steps.clientType'), order: 4},
-      COMPLETE: {label: t('applications:onboarding.steps.complete'), order: 8},
+      CLIENT_TYPE: {label: t('applications:onboarding.steps.configure'), order: 3},
+      COMPLETE: {label: t('applications:onboarding.steps.complete'), order: 7},
     }),
-    [t, selectedPlatform],
+    [t],
   );
   const navigate = useNavigate();
   const {pathname} = useLocation();
@@ -127,7 +139,29 @@ export default function ApplicationCreatePage(): JSX.Element {
   const createApplication = useCreateApplication();
   const {data: userTypesData} = useGetUserTypes();
   const {data: applicationsData} = useGetApplications({limit: 100});
+  const {data: corsConfigData} = useGetCorsConfig();
+  const updateCorsConfig = useUpdateCorsConfig();
   const {hasMultipleOUs, isLoading: isOuLoading, ouList} = useHasMultipleOUs();
+
+  const handleBackToTemplates = (): void => {
+    void navigate(isWelcomeFlow ? '/welcome/get-started/applications/types' : '/applications/types');
+  };
+
+  // The organization unit whose defaults are offered on the Details step: the picked one when
+  // there are multiple, or the deployment's sole one otherwise.
+  const resolvedOuId: string | undefined = hasMultipleOUs ? ouId || undefined : ouList[0]?.id;
+  const {data: resolvedOrganizationUnit} = useGetOrganizationUnit(resolvedOuId, Boolean(resolvedOuId));
+
+  // When the Details step snapshots the organization unit's theme, the preview should reflect
+  // that actual theme rather than staying unconfigured (the Design step, which normally seeds it,
+  // doesn't run in that case).
+  const ouThemeId = ouDefaults[OrganizationUnitDefaultItem.THEME] ? (resolvedOrganizationUnit?.themeId ?? '') : '';
+  const {data: ouThemeDetails} = useGetTheme(ouThemeId);
+  // Until a real theme is resolved (OU snapshot still loading, or the Design step hasn't run
+  // yet), the preview falls back to the same DefaultTheme the actual gate uses (see
+  // apps/gate/src/hocs/withTheme.tsx) rather than sitting on a spinner or unstyled text.
+  const previewTheme: Theme | undefined =
+    (ouDefaults[OrganizationUnitDefaultItem.THEME] ? ouThemeDetails?.theme : selectedTheme) ?? undefined;
 
   // Client ids already in use, so the wallet step can flag a duplicate before submission.
   const existingClientIds = useMemo(
@@ -138,11 +172,35 @@ export default function ApplicationCreatePage(): JSX.Element {
     [applicationsData],
   );
 
+  // Application names already in use, so the details step can flag a duplicate before submission.
+  const existingAppNames = useMemo(
+    (): string[] => (applicationsData?.applications ?? []).map((app) => app.name).filter(Boolean),
+    [applicationsData],
+  );
+
   const [selectedUserTypes, setSelectedUserTypes] = useState<string[]>([]);
-  const [createdApplication, setCreatedApplication] = useState<Application | null>(null);
+  // Names the server rejected as duplicates (APP-1020) that weren't in the fetched existingAppNames
+  // (e.g. beyond the pagination limit). Treated as additional existing names so the details step
+  // flags them and blocks readiness until the name is edited, avoiding a resubmit-and-fail loop.
+  const [rejectedAppNames, setRejectedAppNames] = useState<string[]>([]);
+
+  const knownAppNames = useMemo(
+    (): string[] => [...existingAppNames, ...rejectedAppNames],
+    [existingAppNames, rejectedAppNames],
+  );
 
   const createFlow = useCreateFlow();
+  const deleteFlow = useDeleteFlow();
   const {data: idpData} = useIdentityProviders();
+
+  // Tracks the generated flow for the current inputs so failed creates can roll it back
+  // and unchanged retries can reuse it without creating a duplicate.
+  const generatedFlowRef = useRef<{inputsKey: string; flowId: string} | null>(null);
+
+  // The generated flow that was pushed into selectedAuthFlow. Setting selectedAuthFlow back to null
+  // on rollback would clear the create error the user has to act on (the provider clears it whenever
+  // the form fingerprint changes), so the dead id is filtered out at submit time instead.
+  const generatedSelectionIdRef = useRef<string | null>(null);
 
   const hasEnabledIntegrations = useMemo((): boolean => Object.values(integrations).some(Boolean), [integrations]);
 
@@ -150,25 +208,102 @@ export default function ApplicationCreatePage(): JSX.Element {
     !hasEnabledIntegrations && selectedAuthFlow ? selectedAuthFlow.id : undefined;
   const {data: previewFlow, isLoading: isPreviewFlowLoading} = useGetFlowById(previewFlowId, Boolean(previewFlowId));
 
-  const previewMock = useMemo(() => {
-    if (hasEnabledIntegrations || !selectedAuthFlow) {
-      return buildPreviewMock(integrations, idpData ?? [], {
-        application: {
-          logoUrl: appLogo!,
-        },
-      });
-    }
+  // The raw graph both preview sources below walk carries unresolved `{{ meta(application.*) }}` /
+  // `{{ t(...) }}` placeholders (the app isn't created yet, so there's no persisted Application to
+  // resolve them against), so they're resolved here from the wizard's own in-progress details,
+  // mirroring SimulationStepPreview's themed preview.
+  const previewApplicationMeta = useMemo(
+    (): Application => ({name: appName, logoUrl: appLogo ?? undefined}) as unknown as Application,
+    [appName, appLogo],
+  );
 
-    return getFlowEntryComponents(previewFlow) ?? [];
-  }, [hasEnabledIntegrations, selectedAuthFlow, integrations, idpData, appLogo, previewFlow]);
+  // The wizard's own generated preview, as a sequence of screens: the primary sign-in screen, then
+  // whatever screen(s) sequentially follow it (an MFA challenge, a magic-link "check your email"
+  // wait screen, etc). Walks the exact same flow generateFlowGraph would submit on Continue — via
+  // the same getFlowPromptComponentsSequence walker the pre-configured-flow case below uses — so
+  // this preview can never drift from what toggling an auth method actually produces.
+  const generatedPreviewScreens = useMemo((): EmbeddedFlowComponent[][] => {
+    const availableIntegrations = idpData ?? [];
+    const googleProvider = availableIntegrations.find((idp) => idp.type === IdentityProviderTypes.GOOGLE);
+    const githubProvider = availableIntegrations.find((idp) => idp.type === IdentityProviderTypes.GITHUB);
+
+    const generatedFlow = generateFlowGraph({
+      appName,
+      hasCredentialsAuth: integrations[AuthenticatorTypes.CREDENTIALS_AUTH] ?? false,
+      hasPasskey: integrations[AuthenticatorTypes.PASSKEY] ?? false,
+      hasMagicLink: integrations[AuthenticatorTypes.MAGIC_LINK] ?? false,
+      googleIdpId: integrations[googleProvider?.id ?? ''] ? googleProvider?.id : undefined,
+      githubIdpId: integrations[githubProvider?.id ?? ''] ? githubProvider?.id : undefined,
+      hasSmsOtp: integrations['sms-otp'] ?? false,
+      relyingPartyId: relyingPartyId || window.location.hostname,
+      relyingPartyName: relyingPartyName || appName,
+      hasEmailOtpMfa: isEmailOtpMfaEnabled,
+      hasSmsOtpMfa: isSmsOtpMfaEnabled,
+      smsOtpSenderId,
+    });
+
+    const screens = getFlowPromptComponentsSequence(generatedFlow) ?? [[]];
+    return screens.map(
+      (screen) =>
+        resolveTemplatesDeep(
+          resolveApplicationMeta(screen, previewApplicationMeta),
+          (raw: string) => resolveAll(raw, {t}) ?? raw,
+        ) as EmbeddedFlowComponent[],
+    );
+  }, [
+    appName,
+    integrations,
+    idpData,
+    relyingPartyId,
+    relyingPartyName,
+    isEmailOtpMfaEnabled,
+    isSmsOtpMfaEnabled,
+    smsOtpSenderId,
+    previewApplicationMeta,
+    resolveAll,
+    t,
+  ]);
+
+  // A manually-selected pre-configured flow's own screens, walked directly from its graph — may
+  // have any number of sequential screens (e.g. a hand-built multi-step flow).
+  const externalFlowScreens = useMemo((): EmbeddedFlowComponent[][] | null => {
+    const screens = getFlowPromptComponentsSequence(previewFlow);
+    if (!screens) return screens;
+    return screens.map(
+      (screen) =>
+        resolveTemplatesDeep(
+          resolveApplicationMeta(screen, previewApplicationMeta),
+          (raw: string) => resolveAll(raw, {t}) ?? raw,
+        ) as EmbeddedFlowComponent[],
+    );
+  }, [previewFlow, previewApplicationMeta, resolveAll, t]);
+
+  const allPreviewScreens: EmbeddedFlowComponent[][] = (hasEnabledIntegrations || !selectedAuthFlow
+    ? generatedPreviewScreens
+    : externalFlowScreens) ?? [[]];
+  const totalPreviewSteps = allPreviewScreens.length;
+
+  // Which preview screen is shown. Reset to the first screen on every wizard-step change AND
+  // whenever the preview's underlying source changes (a different flow selected, or the toggled
+  // integrations change) by adjusting state during render (React's recommended alternative to an
+  // effect for this) rather than committing a stale, now out-of-range index first.
+  const [previewStepIndex, setPreviewStepIndex] = useState(0);
+  const [previewScreenStep, setPreviewScreenStep] = useState(currentStep);
+  const previewSourceKey = `${selectedAuthFlow?.id ?? ''}|${JSON.stringify(integrations)}`;
+  const [previewScreenSourceKey, setPreviewScreenSourceKey] = useState(previewSourceKey);
+  if (currentStep !== previewScreenStep || previewSourceKey !== previewScreenSourceKey) {
+    setPreviewScreenStep(currentStep);
+    setPreviewScreenSourceKey(previewSourceKey);
+    setPreviewStepIndex(0);
+  }
+
+  const activePreviewMock = allPreviewScreens[previewStepIndex] ?? [];
 
   const [stepReady, setStepReady] = useState<Record<ApplicationCreateFlowStep, boolean>>({
-    STACK: true,
-    NAME: false,
     ORGANIZATION_UNIT: false,
+    DETAILS: false,
+    SECURITY: true,
     DESIGN: true,
-    OPTIONS: true,
-    EXPERIENCE: true,
     CONFIGURE: true,
     CLIENT_TYPE: false,
     COMPLETE: true,
@@ -204,7 +339,6 @@ export default function ApplicationCreatePage(): JSX.Element {
       responseTypes: [...(oauthInboundConfig.responseTypes ?? [])],
       redirectUris: oauthInboundConfig.redirectUris ? [...oauthInboundConfig.redirectUris] : [],
       tokenEndpointAuthMethod: oauthInboundConfig.tokenEndpointAuthMethod,
-      scopes: ['openid', 'profile', 'email'],
     };
   }, [selectedTemplateConfig]);
 
@@ -216,19 +350,67 @@ export default function ApplicationCreatePage(): JSX.Element {
     if (walletClientId.trim()) {
       config = {...config, clientId: walletClientId.trim()};
     }
+    // Merge in any additional redirect / post-logout redirect URIs entered on the Configuration
+    // step, on top of the template-derived defaults above.
+    const extraRedirectUris = redirectUris.map((uri) => uri.trim()).filter(Boolean);
+    if (extraRedirectUris.length > 0) {
+      config = {
+        ...config,
+        redirectUris: Array.from(new Set([...(config.redirectUris ?? []), ...extraRedirectUris])),
+      };
+    }
+    const validPostLogoutRedirectUris = postLogoutRedirectUris.map((uri) => uri.trim()).filter(Boolean);
+    if (validPostLogoutRedirectUris.length > 0) {
+      config = {...config, postLogoutRedirectUris: validPostLogoutRedirectUris};
+    }
     return config;
-  }, [oauthConfig, callbackUrlFromConfig, walletClientId]);
+  }, [oauthConfig, callbackUrlFromConfig, walletClientId, redirectUris, postLogoutRedirectUris]);
 
   const creationFlow = useMemo(() => resolveCreationFlow(selectedTemplateConfig), [selectedTemplateConfig]);
 
+  // The organization unit is the wizard's first step whenever there's a choice to make. Single-OU
+  // deployments never need it, so once that's known, skip straight past it.
+  useEffect((): void => {
+    if (isOuLoading || hasMultipleOUs || currentStep !== ApplicationCreateFlowStep.ORGANIZATION_UNIT) return;
+    const next = creationFlow.steps[creationFlow.steps.indexOf(ApplicationCreateFlowStep.ORGANIZATION_UNIT) + 1];
+    if (next) setCurrentStep(next);
+  }, [isOuLoading, hasMultipleOUs, currentStep, creationFlow, setCurrentStep]);
+
+  // The canonical application type, resolved once from the template, falling back to the OAuth
+  // profile for legacy/custom templates without an explicit type.
+  const resolvedApplicationType = useMemo<ApplicationType>(
+    () => resolveApplicationType(selectedTemplateConfig?.type, oauthConfig ?? undefined),
+    [selectedTemplateConfig, oauthConfig],
+  );
+
+  // Whether this template's flow ever presents a hosted sign-in screen at all. Templates without
+  // a SECURITY step (e.g. machine-to-machine backends) never render one, so there's nothing for
+  // the wizard's sign-in preview to reflect.
+  const hasSecurityStep = useMemo(
+    (): boolean => creationFlow.steps.includes(ApplicationCreateFlowStep.SECURITY),
+    [creationFlow],
+  );
+
+  // Whether this template's flow ever presents a Design step at all. Templates without one (e.g.
+  // machine-to-machine backends) have no theme/layout of their own, so inheriting the organization
+  // unit's design defaults wouldn't apply to anything.
+  const hasDesignStep = useMemo(
+    (): boolean => creationFlow.steps.includes(ApplicationCreateFlowStep.DESIGN),
+    [creationFlow],
+  );
+
   // Browser-based SPAs are public clients that must use the redirect-based flow, so the
-  // embedded (native) sign-in approach is not offered for them. Native mobile apps and digital
-  // wallets are also public clients but legitimately use app-native flows, so they are excluded
-  // from this rule.
+  // embedded (native) sign-in approach is not offered for them. Native mobile apps (both the
+  // generic Mobile platform template and the individual Android/iOS/Flutter technology
+  // templates) and digital wallets are also public clients but legitimately use app-native
+  // flows, so they are excluded from this rule.
   const isBrowserSpaTemplate = useMemo((): boolean => {
     if (
       selectedPlatform === PlatformApplicationTemplate.MOBILE ||
-      selectedPlatform === PlatformApplicationTemplate.WALLET
+      selectedPlatform === PlatformApplicationTemplate.WALLET ||
+      selectedTechnology === TechnologyApplicationTemplate.ANDROID ||
+      selectedTechnology === TechnologyApplicationTemplate.IOS ||
+      selectedTechnology === TechnologyApplicationTemplate.FLUTTER
     ) {
       return false;
     }
@@ -236,30 +418,87 @@ export default function ApplicationCreatePage(): JSX.Element {
       (config) => config.type === 'oauth2',
     )?.config;
     return oauthConfig?.publicClient === true;
-  }, [selectedTemplateConfig, selectedPlatform]);
+  }, [selectedTemplateConfig, selectedPlatform, selectedTechnology]);
 
-  const needsConfigure = useMemo((): boolean => {
+  // Wallets are OID4VCI issuance flows that redirect to a hosted page; there's no native UI to
+  // embed, so unlike mobile apps they get no sign-in approach choice at all.
+  const isWalletTemplate = selectedPlatform === PlatformApplicationTemplate.WALLET;
+
+  // Reset to the redirect-based approach if the embedded approach isn't allowed but is currently
+  // selected (e.g. after switching away from a BYOUI-capable template).
+  useEffect((): void => {
+    if (isBrowserSpaTemplate && signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED) {
+      setSignInApproach(ApplicationCreateFlowSignInApproach.REDIRECT_BASED);
+    }
+  }, [isBrowserSpaTemplate, signInApproach, setSignInApproach]);
+
+  // Whether the template needs any of the Configure step's fields (hosting/callback URL, deep
+  // link, passkey relying party). Embedded (native) sign-in doesn't redirect to hosted pages, so
+  // none of the redirect/callback-oriented configuration applies to it — only passkey relying
+  // party details still apply, since those are required regardless of how the user reaches
+  // sign-in. This must mirror ConfigureDetails' own effectiveConfigurationType/
+  // effectiveIsRedirectCapable so the step is skipped exactly when that step would render nothing.
+  const needsConfigureFields = useMemo((): boolean => {
     const isPasskeyEnabled = !selectedAuthFlow && (integrations[AuthenticatorTypes.PASSKEY] ?? false);
     if (signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED) {
       return isPasskeyEnabled;
     }
     return (
       getConfigurationTypeFromTemplate(selectedTemplateConfig) !== ApplicationCreateFlowConfiguration.NONE ||
+      isRedirectCapableTemplate(selectedTemplateConfig) ||
       isPasskeyEnabled
     );
-  }, [selectedTemplateConfig, integrations, signInApproach, selectedAuthFlow]);
+  }, [selectedTemplateConfig, integrations, selectedAuthFlow, signInApproach]);
+
+  // Browser SPAs are redirect-only (see isBrowserSpaTemplate above) and wallets are redirect-only
+  // for a different reason (see isWalletTemplate above), so neither has anything to choose between
+  // hosted pages and a custom UI — the Design step shows the picker for every other template.
+  const showApproachSection = !isBrowserSpaTemplate && !isWalletTemplate;
+
+  // The Configure step shows whenever the template needs configuring (hosting/callback URL, deep
+  // link, passkey relying party), independent of the sign-in approach picker, which now lives on
+  // the Design step.
+  const showConfigureStep = needsConfigureFields;
 
   const visibleSteps = useMemo((): ApplicationCreateFlowStep[] => {
     return creationFlow.steps.filter((step) => {
+      // Single-OU deployments have no organization unit choice to make.
       if (step === ApplicationCreateFlowStep.ORGANIZATION_UNIT) return hasMultipleOUs;
-      if (step === ApplicationCreateFlowStep.CONFIGURE) return needsConfigure;
-      // COMPLETE step is dynamic — only shown when an app with a client secret is created.
-      // It's filtered out of visibleSteps here and is only set explicitly via setCurrentStep
-      // when the creation succeeds with a client secret.
+      if (step === ApplicationCreateFlowStep.CONFIGURE) return showConfigureStep;
+      // Nothing left to show once the Sign In section is snapshotted from the organization
+      // unit's default — Sign Up/Recovery/Sign Out live elsewhere and aren't configured here.
+      if (step === ApplicationCreateFlowStep.SECURITY) return !ouDefaults[OrganizationUnitDefaultItem.SIGN_IN];
+      // The Design step also hosts the sign-in approach picker, so it stays visible whenever
+      // that picker is offered, regardless of the organization unit's theme/layout defaults.
+      // Otherwise, nothing is left to show once every design default the organization unit
+      // actually has (theme and/or layout) is snapshotted. An item the unit has no value for was
+      // never available to opt into, so it shouldn't keep this step visible.
+      if (step === ApplicationCreateFlowStep.DESIGN) {
+        // Wallets have no approach picker but still need a theme for their hosted issuance pages,
+        // so they also always keep this step regardless of the organization unit's design defaults.
+        if (showApproachSection || isWalletTemplate) return true;
+        const availableDesignItems = [OrganizationUnitDefaultItem.THEME, OrganizationUnitDefaultItem.LAYOUT].filter(
+          (item) =>
+            item === OrganizationUnitDefaultItem.THEME
+              ? Boolean(resolvedOrganizationUnit?.themeId)
+              : Boolean(resolvedOrganizationUnit?.layoutId),
+        );
+        return !(availableDesignItems.length > 0 && availableDesignItems.every((item) => ouDefaults[item]));
+      }
+      // COMPLETE is never rendered as a wizard step: the client secret is shown as a popup on the
+      // created application's detail page instead, so it's filtered out of visibleSteps here.
       if (step === ApplicationCreateFlowStep.COMPLETE) return false;
       return true;
     });
-  }, [creationFlow, hasMultipleOUs, needsConfigure]);
+  }, [
+    creationFlow,
+    hasMultipleOUs,
+    showConfigureStep,
+    showApproachSection,
+    isWalletTemplate,
+    ouDefaults,
+    resolvedOrganizationUnit,
+  ]);
 
   const handleClose = (): void => {
     void navigate(isWelcomeFlow ? '/home' : '/applications');
@@ -269,21 +508,79 @@ export default function ApplicationCreatePage(): JSX.Element {
     setAppLogo(logoUrl);
   };
 
-  const handleIntegrationToggle = (integrationId: string): void => {
-    toggleIntegration(integrationId);
+  // Both of these feed the create payload but live in page state rather than the provider, so the
+  // provider's form fingerprint doesn't cover them. Clear a stale create error here instead.
+  const handleUserTypesChange = (userTypes: string[]): void => {
+    setError(null);
+    setSelectedUserTypes(userTypes);
   };
+
+  const handleWalletClientIdChange = (clientId: string): void => {
+    setError(null);
+    setWalletClientId(clientId);
+  };
+
+  // Best-effort removal of a flow this wizard generated but never bound to an application. A failure
+  // is logged only: the application error is what the user has to act on, so it must stay on screen.
+  const rollbackGeneratedFlow = (generated: {inputsKey: string; flowId: string}): void => {
+    // Dropped up front, not on success: while the delete is in flight the flow must not be reused,
+    // or a fast retry would bind the application to a flow that is about to disappear.
+    if (generatedFlowRef.current?.flowId === generated.flowId) {
+      generatedFlowRef.current = null;
+    }
+
+    deleteFlow.mutate(generated.flowId, {
+      onError: (err: Error) => {
+        logger.error('Failed to roll back the generated sign-in flow', {error: err, flowId: generated.flowId});
+        generatedFlowRef.current ??= generated;
+      },
+    });
+  };
+
+  // True while a generated flow that selectedAuthFlow still points at is rolled back or being rolled
+  // back: the memo drops it when the delete fires and restores it only if that delete fails.
+  const isRolledBackGeneratedFlow = (flowId: string | undefined): boolean =>
+    Boolean(flowId) && generatedSelectionIdRef.current === flowId && generatedFlowRef.current?.flowId !== flowId;
 
   const handleCreateApplication = (skipOAuthConfig = false, overrideFlowId?: string): void => {
     setError(null);
 
-    const includesOptions = creationFlow.steps.includes(ApplicationCreateFlowStep.OPTIONS);
+    const includesSecurity = hasSecurityStep;
     const includesDesign = creationFlow.steps.includes(ApplicationCreateFlowStep.DESIGN);
-    const includesExperience = creationFlow.steps.includes(ApplicationCreateFlowStep.EXPERIENCE);
 
-    const authFlowId: string | undefined = overrideFlowId ?? selectedAuthFlow?.id;
+    // Each organization-unit-defaultable item resolves to either a snapshot of the organization
+    // unit's current value (when its Details-step toggle is on) or the value built up elsewhere
+    // in the wizard.
+    const finalAuthFlowId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.SIGN_IN]
+      ? (resolvedOrganizationUnit?.authFlowId ?? undefined)
+      : (overrideFlowId ?? (isRolledBackGeneratedFlow(selectedAuthFlow?.id) ? undefined : selectedAuthFlow?.id));
+    const finalRegistrationFlowId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.SIGN_UP]
+      ? (resolvedOrganizationUnit?.registrationFlowId ?? undefined)
+      : (registrationFlowId ?? undefined);
+    const finalIsRegistrationFlowEnabled: boolean = ouDefaults[OrganizationUnitDefaultItem.SIGN_UP]
+      ? Boolean(resolvedOrganizationUnit?.isRegistrationFlowEnabled)
+      : isRegistrationFlowEnabled;
+    const finalRecoveryFlowId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.RECOVERY]
+      ? (resolvedOrganizationUnit?.recoveryFlowId ?? undefined)
+      : (recoveryFlowId ?? undefined);
+    const finalIsRecoveryFlowEnabled: boolean = ouDefaults[OrganizationUnitDefaultItem.RECOVERY]
+      ? Boolean(resolvedOrganizationUnit?.isRecoveryFlowEnabled)
+      : isRecoveryFlowEnabled;
+    const finalSignOutFlowId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.SIGN_OUT]
+      ? (resolvedOrganizationUnit?.signOutFlowId ?? undefined)
+      : (signOutFlowId ?? undefined);
+    const finalIsSignOutFlowEnabled: boolean = ouDefaults[OrganizationUnitDefaultItem.SIGN_OUT]
+      ? Boolean(resolvedOrganizationUnit?.isSignOutFlowEnabled)
+      : isSignOutFlowEnabled;
+    const finalThemeId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.THEME]
+      ? (resolvedOrganizationUnit?.themeId ?? undefined)
+      : (themeId ?? undefined);
+    const finalLayoutId: string | undefined = ouDefaults[OrganizationUnitDefaultItem.LAYOUT]
+      ? (resolvedOrganizationUnit?.layoutId ?? undefined)
+      : (layoutId ?? undefined);
 
     // authFlowId is only required when the flow has user-facing sign-in steps
-    if (includesOptions && !authFlowId) {
+    if (includesSecurity && !finalAuthFlowId) {
       setError(t('onboarding.configure.SignInOptions.noFlowFound'));
       return;
     }
@@ -299,9 +596,14 @@ export default function ApplicationCreatePage(): JSX.Element {
 
     const templateId = selectedTemplateConfig?.id;
     const finalTemplateId =
-      templateId && includesExperience && signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED
+      templateId && signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED
         ? `${templateId}${TemplateConstants.EMBEDDED_SUFFIX}`
         : templateId;
+
+    // The canonical application type resolved above. The MCP client template can resolve to two
+    // types, so the machine-to-machine selection overrides it.
+    const applicationType: ApplicationType =
+      isMcpClientTemplate && mcpClientType === McpClientTypes.M2M ? 'm2m' : resolvedApplicationType;
 
     // The mcp-client template branches the oauth2 config off the template-seeded config (never
     // rebuilt from scratch): user-delegated keeps the seeded authorization_code/refresh_token/PKCE/
@@ -325,18 +627,32 @@ export default function ApplicationCreatePage(): JSX.Element {
     const applicationData: CreateApplicationRequest = {
       name: appName,
       ...(hostingUrl && {url: hostingUrl}),
-      ...(authFlowId && {authFlowId}),
+      ...(finalAuthFlowId && {authFlowId: finalAuthFlowId}),
       ...(effectiveOuId && {ouId: effectiveOuId}),
+      ...(applicationType && {type: applicationType}),
       ...(finalTemplateId && {template: finalTemplateId}),
       ...(includesDesign && {
         logoUrl: appLogo ?? undefined,
-        ...(themeId && {themeId}),
+        ...(finalThemeId && {themeId: finalThemeId}),
+        ...(finalLayoutId && {layoutId: finalLayoutId}),
       }),
-      ...((includesOptions || (isMcpClientTemplate && mcpClientType === McpClientTypes.USER_DELEGATED)) && {
-        userAttributes: ['given_name', 'family_name', 'email', 'groups'],
-        isRegistrationFlowEnabled: true,
+      // User attributes are not sent: the server derives them from the seeded scope-to-claims
+      // mapping, intersected with the schemas of the allowed user types.
+      ...(includesSecurity && {
+        isRegistrationFlowEnabled: finalIsRegistrationFlowEnabled,
+        ...(finalRegistrationFlowId && {registrationFlowId: finalRegistrationFlowId}),
+        isRecoveryFlowEnabled: finalIsRecoveryFlowEnabled,
+        ...(finalRecoveryFlowId && {recoveryFlowId: finalRecoveryFlowId}),
       }),
-      ...(includesExperience && allowedUserTypes && {allowedUserTypes}),
+      ...(isMcpClientTemplate &&
+        mcpClientType === McpClientTypes.USER_DELEGATED && {
+          isRegistrationFlowEnabled: true,
+        }),
+      ...(finalSignOutFlowId && {
+        signOutFlowId: finalSignOutFlowId,
+        isSignOutFlowEnabled: finalIsSignOutFlowEnabled,
+      }),
+      ...(allowedUserTypes && {allowedUserTypes}),
       ...(!skipOAuthConfig && {
         inboundAuthConfig: [{type: 'oauth2', config: mcpOAuth2Config ?? effectiveOauthConfig}],
       }),
@@ -344,65 +660,157 @@ export default function ApplicationCreatePage(): JSX.Element {
 
     createApplication.mutate(applicationData, {
       onSuccess: (createdApp: Application): void => {
-        // The mcp-client template always routes to its Connect completion screen, even when no
-        // secret is returned (the user-delegated variant has none).
-        if (isMcpClientTemplate) {
-          setCreatedApplication(createdApp);
-          setCurrentStep(ApplicationCreateFlowStep.COMPLETE);
-          return;
+        // CORS is a deployment-wide setting, not per-application, so origins entered on the
+        // Configuration step are merged into the deployment's allow-list here rather than sent as
+        // part of the application payload above. This is independent of application creation
+        // succeeding, so it neither blocks nor is blocked by the navigation below.
+        const corsAdditions = corsOrigins.filter((row) => !isRowEmpty(row));
+        if (selectedTemplateConfig?.capabilities?.cors && corsAdditions.length > 0) {
+          updateCorsConfig.mutate(
+            {
+              data: mergeCorsOrigins(
+                corsConfigData?.writable.allowedOrigins ?? [],
+                corsConfigData?.readOnly.allowedOrigins ?? [],
+                corsAdditions,
+              ),
+            },
+            {
+              // The application itself is already created and the wizard navigates away below, so
+              // there is no form left to attach an inline error to and retrying here would risk a
+              // second application. Name the one thing the admin has to redo instead, otherwise the
+              // origins they entered are silently missing from the deployment's allow-list.
+              onError: (err: Error) => {
+                logger.error('Failed to merge the wizard CORS origins into the deployment allow-list', {
+                  applicationId: createdApp.id,
+                  error: err,
+                });
+                showToast(
+                  t(
+                    'applications:onboarding.configure.details.corsOrigins.saveError',
+                    'The application was created, but its allowed origins were not saved. Add them under Settings, CORS.',
+                  ),
+                  'error',
+                );
+              },
+            },
+          );
         }
 
-        const hasClientSecret = createdApp.inboundAuthConfig?.some(
-          (config) => config.type === 'oauth2' && config.config?.clientSecret,
-        );
-        // Backend / server-side apps receive an Flow Secret (top-level) even when they have no
-        // OAuth client secret, so surface the save-secret step for either credential.
-        const hasSecret = Boolean(hasClientSecret) || Boolean(createdApp.flowSecret);
-
-        if (hasSecret) {
-          setCreatedApplication(createdApp);
-          setCurrentStep(ApplicationCreateFlowStep.COMPLETE);
-        } else {
+        // The mcp-client template has no completion step of its own, so it always goes straight
+        // to the created application's detail page.
+        if (isMcpClientTemplate) {
           (async () => {
-            await navigate(`/applications/${createdApp.id}`);
+            await navigate(RouteConfig.applications.detail(createdApp.id));
           })().catch((_error: unknown) => {
             logger.error('Failed to navigate to application details', {error: _error, applicationId: createdApp.id});
           });
+          return;
         }
+
+        const oauth2Config = createdApp.inboundAuthConfig?.find((config) => config.type === 'oauth2');
+        const clientId = oauth2Config?.config?.clientId;
+        const clientSecret = oauth2Config?.config?.clientSecret;
+        const {flowSecret} = createdApp;
+        // Backend / server-side apps receive a Flow Secret (top-level) even when they have no
+        // OAuth client secret, so surface the save-secret popup for either credential.
+        const hasSecret = Boolean(clientSecret) || Boolean(flowSecret);
+
+        (async () => {
+          if (hasSecret) {
+            await navigate(RouteConfig.applications.detail(createdApp.id), {
+              state: {justCreatedSecret: {appName, clientId, clientSecret, flowSecret}},
+            });
+          } else {
+            await navigate(RouteConfig.applications.detail(createdApp.id));
+          }
+        })().catch((_error: unknown) => {
+          logger.error('Failed to navigate to application details', {error: _error, applicationId: createdApp.id});
+        });
       },
       onError: (err: Error) => {
-        setError(err.message ?? 'Failed to create application. Please try again.');
+        // The client-side pre-check can miss names beyond the fetched list; when the backend rejects
+        // a name as a duplicate, record it so the details step flags it and stays un-ready until the
+        // name is edited (preventing a resubmit-and-fail loop), then return there.
+        // getApplicationErrorMessage resolves the errors.APP-1020 message for this case (and the
+        // generic message otherwise).
+        const errorCode = (err as {response?: {data?: {code?: string}}})?.response?.data?.code;
+        if (errorCode === ApplicationConstants.DUPLICATE_APP_NAME_ERROR_CODE) {
+          setRejectedAppNames((prev) => (prev.includes(appName) ? prev : [...prev, appName]));
+          setCurrentStep(ApplicationCreateFlowStep.DETAILS);
+        }
+        setError(
+          getApplicationErrorMessage(
+            err,
+            (key, options) => t(key.includes(':') ? key : `applications:${key}`, options),
+            'create.error',
+            'Failed to create application. Please try again.',
+          ),
+        );
+
+        // The flow was persisted before the application, so a failure here leaves it orphaned.
+        const generated = generatedFlowRef.current;
+        if (generated) {
+          rollbackGeneratedFlow(generated);
+        }
       },
     });
   };
 
   const ensureFlowAndCreateApplication = (skipOAuthConfig = false): void => {
-    // If we already have a selected flow, proceed to create application
-    if (selectedAuthFlow) {
+    const hasEnabledIntegrations = Object.values(integrations).some((v) => v);
+
+    // A selected flow only short-circuits generation when it's a genuine manual pick (no
+    // integrations enabled). Otherwise it's an auto-match riding along with active toggles, and
+    // must still be regenerated below so MFA settings aren't silently dropped.
+    if (selectedAuthFlow && !hasEnabledIntegrations && !isRolledBackGeneratedFlow(selectedAuthFlow.id)) {
       handleCreateApplication(skipOAuthConfig);
       return;
     }
-
-    // Check if we need to generate a flow
-    const hasEnabledIntegrations = Object.values(integrations).some((v) => v);
 
     if (hasEnabledIntegrations) {
       const availableIntegrations = idpData ?? [];
       const googleProvider = availableIntegrations.find((idp) => idp.type === IdentityProviderTypes.GOOGLE);
       const githubProvider = availableIntegrations.find((idp) => idp.type === IdentityProviderTypes.GITHUB);
 
-      const generatedFlowRequest = generateFlowGraph({
+      const flowInputs = {
+        appName,
         hasCredentialsAuth: integrations[AuthenticatorTypes.CREDENTIALS_AUTH] ?? false,
         hasPasskey: integrations[AuthenticatorTypes.PASSKEY] ?? false,
+        hasMagicLink: integrations[AuthenticatorTypes.MAGIC_LINK] ?? false,
         googleIdpId: integrations[googleProvider?.id ?? ''] ? googleProvider?.id : undefined,
         githubIdpId: integrations[githubProvider?.id ?? ''] ? githubProvider?.id : undefined,
         hasSmsOtp: integrations['sms-otp'] ?? false,
         relyingPartyId: relyingPartyId || window.location.hostname,
         relyingPartyName: relyingPartyName || appName,
-      });
+        hasEmailOtpMfa: isEmailOtpMfaEnabled,
+        hasSmsOtpMfa: isSmsOtpMfaEnabled,
+        smsOtpSenderId,
+      };
+
+      // Generation randomizes the flow handle so retries never collide, which also means a retry
+      // always mints a duplicate. Keying the generated flow on its inputs is what makes the retry
+      // reuse it: same inputs, same flow.
+      const inputsKey = JSON.stringify(flowInputs);
+      const memoizedFlow = generatedFlowRef.current;
+
+      if (memoizedFlow?.inputsKey === inputsKey) {
+        handleCreateApplication(skipOAuthConfig, memoizedFlow.flowId);
+        return;
+      }
+
+      // The inputs changed since the last attempt (an edited application name, a toggled
+      // integration), so the flow generated then is stale and unreferenced.
+      if (memoizedFlow) {
+        rollbackGeneratedFlow(memoizedFlow);
+      }
+
+      const generatedFlowRequest = generateFlowGraph(flowInputs);
 
       createFlow.mutate(generatedFlowRequest, {
         onSuccess: (savedFlow) => {
+          generatedFlowRef.current = {inputsKey, flowId: savedFlow.id};
+          generatedSelectionIdRef.current = savedFlow.id;
+
           // We cast because BasicFlowDefinition is a subset of FlowDefinitionResponse
           setSelectedAuthFlow(savedFlow as unknown as BasicFlowDefinition);
 
@@ -410,7 +818,14 @@ export default function ApplicationCreatePage(): JSX.Element {
           handleCreateApplication(skipOAuthConfig, savedFlow.id);
         },
         onError: (err) => {
-          setError(err.message ?? 'Failed to generate authentication flow.');
+          setError(
+            getErrorMessage(
+              err,
+              (key, options) => t(key.includes(':') ? key : `flows:${key}`, options),
+              'applications:create.flowGenerationError',
+              'Failed to generate the authentication flow. Please try again.',
+            ),
+          );
         },
       });
     } else {
@@ -420,39 +835,22 @@ export default function ApplicationCreatePage(): JSX.Element {
   };
 
   const handleNextStep = (): void => {
-    // COMPLETE is a terminal step after creation — handled separately
-    if (currentStep === ApplicationCreateFlowStep.COMPLETE) {
-      if (createdApplication) {
-        (async () => {
-          await navigate(`/applications/${createdApplication.id}`);
-        })().catch((_error: unknown) => {
-          logger.error('Failed to navigate to application details', {
-            error: _error,
-            applicationId: createdApplication.id,
-          });
-        });
-      }
-      return;
-    }
-
-    // NAME has a special wait condition for OU loading
-    if (currentStep === ApplicationCreateFlowStep.NAME && isOuLoading) return;
+    // DETAILS has a special wait condition for OU loading
+    if (currentStep === ApplicationCreateFlowStep.DETAILS && isOuLoading) return;
 
     const idx = visibleSteps.indexOf(currentStep);
     const next = visibleSteps[idx + 1];
 
     if (next === undefined) {
       // No more visible steps → create the application
-      const includesOptions = creationFlow.steps.includes(ApplicationCreateFlowStep.OPTIONS);
-      const includesExperience = creationFlow.steps.includes(ApplicationCreateFlowStep.EXPERIENCE);
-      const skipOAuth = includesExperience && signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED;
+      const skipOAuth = signInApproach === ApplicationCreateFlowSignInApproach.EMBEDDED;
 
-      if (includesOptions) {
+      if (hasSecurityStep && !ouDefaults[OrganizationUnitDefaultItem.SIGN_IN]) {
         // user-facing flow → may need to generate the auth flow from integrations
         ensureFlowAndCreateApplication(skipOAuth);
       } else {
-        // m2m flow → no integrations; server assigns default flow
-        handleCreateApplication(false);
+        // OU-default sign-in flow or m2m flow → no integrations; nothing to generate
+        handleCreateApplication(skipOAuth);
       }
     } else {
       setCurrentStep(next);
@@ -472,16 +870,9 @@ export default function ApplicationCreatePage(): JSX.Element {
     }));
   }, []);
 
-  const handleNameStepReadyChange = useCallback(
+  const handleDetailsStepReadyChange = useCallback(
     (isReady: boolean): void => {
-      handleStepReadyChange(ApplicationCreateFlowStep.NAME, isReady);
-    },
-    [handleStepReadyChange],
-  );
-
-  const handleOuStepReadyChange = useCallback(
-    (isReady: boolean): void => {
-      handleStepReadyChange(ApplicationCreateFlowStep.ORGANIZATION_UNIT, isReady);
+      handleStepReadyChange(ApplicationCreateFlowStep.DETAILS, isReady);
     },
     [handleStepReadyChange],
   );
@@ -493,16 +884,9 @@ export default function ApplicationCreatePage(): JSX.Element {
     [handleStepReadyChange],
   );
 
-  const handleOptionsStepReadyChange = useCallback(
+  const handleSecurityStepReadyChange = useCallback(
     (isReady: boolean): void => {
-      handleStepReadyChange(ApplicationCreateFlowStep.OPTIONS, isReady);
-    },
-    [handleStepReadyChange],
-  );
-
-  const handleApproachStepReadyChange = useCallback(
-    (isReady: boolean): void => {
-      handleStepReadyChange(ApplicationCreateFlowStep.EXPERIENCE, isReady);
+      handleStepReadyChange(ApplicationCreateFlowStep.SECURITY, isReady);
     },
     [handleStepReadyChange],
   );
@@ -523,9 +907,27 @@ export default function ApplicationCreatePage(): JSX.Element {
 
   const renderStepContent = (): JSX.Element | null => {
     switch (currentStep) {
-      case ApplicationCreateFlowStep.NAME:
+      case ApplicationCreateFlowStep.DETAILS:
         return (
-          <ConfigureName appName={appName} onAppNameChange={setAppName} onReadyChange={handleNameStepReadyChange} />
+          <ConfigureApplicationDetails
+            hasMultipleOUs={hasMultipleOUs}
+            selectedOuId={ouId}
+            onChangeOu={() => setCurrentStep(ApplicationCreateFlowStep.ORGANIZATION_UNIT)}
+            resolvedOuId={resolvedOuId}
+            appName={appName}
+            onAppNameChange={setAppName}
+            appLogo={appLogo}
+            onLogoSelect={handleLogoSelect}
+            ouDefaults={ouDefaults}
+            onOuDefaultsChange={setOuDefaults}
+            hasSecurityStep={hasSecurityStep}
+            hasDesignStep={hasDesignStep}
+            userTypes={userTypesData?.types ?? []}
+            selectedUserTypes={selectedUserTypes}
+            onUserTypesChange={handleUserTypesChange}
+            onReadyChange={handleDetailsStepReadyChange}
+            existingAppNames={knownAppNames}
+          />
         );
 
       case ApplicationCreateFlowStep.CLIENT_TYPE:
@@ -539,51 +941,29 @@ export default function ApplicationCreatePage(): JSX.Element {
           />
         );
 
-      case ApplicationCreateFlowStep.ORGANIZATION_UNIT:
-        return (
-          <ConfigureOrganizationUnit
-            selectedOuId={ouId}
-            onOuIdChange={setOuId}
-            onReadyChange={handleOuStepReadyChange}
-          />
-        );
-
       case ApplicationCreateFlowStep.DESIGN:
         return (
           <ConfigureDesign
-            appLogo={appLogo}
             themeId={themeId}
-            selectedTheme={selectedTheme}
-            onLogoSelect={handleLogoSelect}
+            layoutId={layoutId}
             onThemeSelect={(id, config) => {
               setThemeId(id);
               setSelectedTheme(config);
             }}
+            onLayoutSelect={(id, config) => {
+              setLayoutId(id);
+              setSelectedLayout(config);
+            }}
             onReadyChange={handleDesignStepReadyChange}
-          />
-        );
-
-      case ApplicationCreateFlowStep.OPTIONS:
-        return (
-          <ConfigureSignInOptions
-            integrations={integrations}
-            onIntegrationToggle={handleIntegrationToggle}
-            onReadyChange={handleOptionsStepReadyChange}
-          />
-        );
-
-      case ApplicationCreateFlowStep.EXPERIENCE:
-        return (
-          <ConfigureExperience
             selectedApproach={signInApproach}
             onApproachChange={setSignInApproach}
             allowEmbeddedApproach={!isBrowserSpaTemplate}
-            onReadyChange={handleApproachStepReadyChange}
-            userTypes={userTypesData?.types ?? []}
-            selectedUserTypes={selectedUserTypes}
-            onUserTypesChange={setSelectedUserTypes}
+            showApproachSection={showApproachSection}
           />
         );
+
+      case ApplicationCreateFlowStep.SECURITY:
+        return <ConfigureSecuritySettings onReadyChange={handleSecurityStepReadyChange} />;
 
       case ApplicationCreateFlowStep.CONFIGURE:
         return (
@@ -592,63 +972,21 @@ export default function ApplicationCreatePage(): JSX.Element {
             platform={selectedPlatform}
             onHostingUrlChange={setHostingUrl}
             onCallbackUrlChange={setCallbackUrlFromConfig}
-            onClientIdChange={setWalletClientId}
+            onClientIdChange={handleWalletClientIdChange}
             existingClientIds={existingClientIds}
+            selectedApproach={signInApproach}
             onReadyChange={handleConfigureStepReadyChange}
           />
         );
-
-      case ApplicationCreateFlowStep.COMPLETE: {
-        if (!createdApplication) {
-          return null;
-        }
-
-        const oauth2Config = createdApplication.inboundAuthConfig?.find((config) => config.type === 'oauth2');
-        const clientId = oauth2Config?.config?.clientId;
-        const clientSecret = oauth2Config?.config?.clientSecret;
-        const {flowSecret} = createdApplication;
-
-        if (isMcpClientTemplate) {
-          return (
-            <McpConnectComplete
-              appName={appName}
-              clientId={clientId}
-              clientSecret={clientSecret}
-              redirectUris={oauth2Config?.config?.redirectUris ?? []}
-              clientType={mcpClientType}
-              onContinue={handleNextStep}
-            />
-          );
-        }
-
-        if (!clientSecret && !flowSecret) {
-          return null;
-        }
-
-        return (
-          <ShowClientSecret
-            appName={appName}
-            clientId={clientId}
-            clientSecret={clientSecret}
-            flowSecret={flowSecret}
-            onContinue={handleNextStep}
-          />
-        );
-      }
 
       default:
         return null;
     }
   };
 
-  // visibleSteps excludes the terminal COMPLETE step (it's set explicitly post-create), so it's
-  // padded by one here to represent that final screen. Computing progress against visibleSteps
-  // rather than creationFlow.steps keeps the bar filling smoothly even when steps are filtered
-  // out (e.g. ORGANIZATION_UNIT for a single OU).
   const getStepProgress = (): number => {
-    const totalSteps = visibleSteps.length + 1;
-    const currentIndex =
-      currentStep === ApplicationCreateFlowStep.COMPLETE ? totalSteps - 1 : visibleSteps.indexOf(currentStep);
+    const totalSteps = visibleSteps.length;
+    const currentIndex = visibleSteps.indexOf(currentStep);
     return ((currentIndex + 1) / totalSteps) * 100;
   };
 
@@ -660,170 +998,186 @@ export default function ApplicationCreatePage(): JSX.Element {
 
   const prefixCrumbs = isWelcomeFlow
     ? [
-        {key: 'welcome', label: t('common:welcome.header'), onClick: () => void navigate('/welcome')},
+        {key: 'welcome', label: t('common:welcome.header'), onClick: () => void navigate(RouteConfig.welcome.root())},
         {
           key: 'new',
           label: t('common:welcome.createProject.breadcrumb'),
-          onClick: () => void navigate('/welcome/create-project'),
+          onClick: () => void navigate(RouteConfig.welcome.createProject()),
         },
         {
           key: 'get-started',
           label: t('common:welcome.getStarted.breadcrumb'),
-          onClick: () => void navigate('/welcome/get-started'),
+          onClick: () => void navigate(RouteConfig.welcome.getStarted()),
         },
       ]
-    : [{key: 'applications', label: t('navigation:pages.applications'), onClick: () => void navigate('/applications')}];
+    : [
+        {
+          key: 'applications',
+          label: t('navigation:pages.applications'),
+          onClick: () => void navigate(RouteConfig.applications.list()),
+        },
+      ];
 
-  // The wallet template's CONFIGURE step runs before DESIGN/OPTIONS, so there's no branding
-  // to preview yet — show it full-width instead of alongside an empty/loading preview panel.
-  const isWalletConfigureStep =
-    currentStep === ApplicationCreateFlowStep.CONFIGURE && selectedPlatform === PlatformApplicationTemplate.WALLET;
+  // Which steps render the live sign-in preview panel is declared by the template itself
+  // (`creationFlow.previewSteps`), not guessed here from the current step or platform — e.g. the
+  // wallet template's CONFIGURE step has no hosted sign-in screen to preview (it just wires up
+  // wallet client details and redirect URIs) and machine-to-machine templates never present a
+  // hosted sign-in screen at all, so both simply omit the relevant steps from their own
+  // `previewSteps` list.
+  const hasNoPreview = !creationFlow.previewSteps.includes(currentStep);
+
+  // The wizard preview has no viewport switcher of its own (see the `showToolbar={false}` below)
+  // — the device frame it renders at is fixed per template via `previewDevice`, defaulting to
+  // desktop when a template doesn't set it.
+  const isMobilePreview = selectedTemplateConfig?.previewDevice === 'mobile';
+  const previewViewport = isMobilePreview
+    ? {width: VIEWPORT_WIDTHS.mobile, height: VIEWPORT_HEIGHTS.mobile}
+    : undefined;
+
+  const isFirstStep = visibleSteps.indexOf(currentStep) === 0;
+  const isLastStep = visibleSteps.indexOf(currentStep) === visibleSteps.length - 1;
+
+  // Switching the organization unit invalidates any previously inherited defaults: the new OU may
+  // not offer the same defaultable items, and the Details step's reseeding effect only turns
+  // items *on* for what's available on the new OU, it never turns stale ones back off.
+  const handleOuIdChange = (newOuId: string): void => {
+    setOuId(newOuId);
+    setOuDefaults({
+      [OrganizationUnitDefaultItem.SIGN_IN]: false,
+      [OrganizationUnitDefaultItem.SIGN_UP]: false,
+      [OrganizationUnitDefaultItem.RECOVERY]: false,
+      [OrganizationUnitDefaultItem.SIGN_OUT]: false,
+      [OrganizationUnitDefaultItem.THEME]: false,
+      [OrganizationUnitDefaultItem.LAYOUT]: false,
+    });
+  };
+
+  if (currentStep === ApplicationCreateFlowStep.ORGANIZATION_UNIT) {
+    if (isOuLoading || !hasMultipleOUs) {
+      return (
+        <Box sx={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    return (
+      <OrganizationUnitPickerScreen
+        icon={<Home size={26} />}
+        title={t('applications:onboarding.organizationUnit.title')}
+        subtitle={t('applications:onboarding.organizationUnit.subtitle')}
+        value={ouId}
+        onChange={handleOuIdChange}
+        onBack={ouId ? () => setCurrentStep(ApplicationCreateFlowStep.DETAILS) : handleBackToTemplates}
+        onContinue={handleNextStep}
+        backLabel={t('common:actions.back')}
+        continueLabel={t('common:actions.continue')}
+      />
+    );
+  }
 
   return (
-    <Box sx={{minHeight: '100vh', display: 'flex', flexDirection: 'column'}}>
-      {/* Progress bar at the very top */}
-      <LinearProgress variant="determinate" value={getStepProgress()} sx={{height: 6}} />
-
-      <Box sx={{flex: 1, display: 'flex', flexDirection: 'row'}}>
-        <Box
-          sx={{
-            flex:
-              currentStep === ApplicationCreateFlowStep.NAME ||
-              currentStep === ApplicationCreateFlowStep.ORGANIZATION_UNIT ||
-              currentStep === ApplicationCreateFlowStep.CLIENT_TYPE ||
-              currentStep === ApplicationCreateFlowStep.COMPLETE ||
-              isWalletConfigureStep
-                ? 1
-                : '0 0 50%',
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {/* Header with close button and breadcrumb */}
-          <Box sx={{p: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <IconButton
-                onClick={handleClose}
-                sx={{
-                  bgcolor: 'background.paper',
-                  '&:hover': {bgcolor: 'action.hover'},
-                  boxShadow: 1,
-                }}
-              >
-                <X size={24} />
-              </IconButton>
-              <AppBreadcrumbs
-                items={[
-                  ...prefixCrumbs,
-                  ...getBreadcrumbSteps().map((step, index, array) => ({
-                    key: step,
-                    label: steps[step].label,
-                    onClick: index < array.length - 1 ? () => setCurrentStep(step) : undefined,
-                  })),
-                ]}
-              />
-            </Stack>
+    <FullScreenCreationWizardLayout
+      onClose={handleClose}
+      progress={getStepProgress()}
+      breadcrumbItems={[
+        ...prefixCrumbs,
+        ...getBreadcrumbSteps().map((step, index, array) => ({
+          key: step,
+          label: steps[step].label,
+          onClick: index < array.length - 1 ? () => setCurrentStep(step) : undefined,
+        })),
+      ]}
+      preview={
+        hasNoPreview ? undefined : isPreviewFlowLoading ? (
+          <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1}}>
+            <CircularProgress />
           </Box>
-
-          {/* Main content */}
-          <Box sx={{flex: 1, display: 'flex', minHeight: 0}}>
-            {/* Left side - Form content */}
-            <Box
-              sx={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                py: 8,
-                px: 20,
-                mx:
-                  currentStep === ApplicationCreateFlowStep.NAME ||
-                  currentStep === ApplicationCreateFlowStep.ORGANIZATION_UNIT ||
-                  currentStep === ApplicationCreateFlowStep.CLIENT_TYPE ||
-                  isWalletConfigureStep
-                    ? 'auto'
-                    : 0,
-                alignItems: currentStep === ApplicationCreateFlowStep.COMPLETE ? 'center' : 'flex-start',
-              }}
-            >
-              <Box
-                sx={{
-                  width: '100%',
-                  maxWidth: {xs: '100%', md: 800},
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                {/* Error Alert */}
-                {error && (
-                  <Alert severity="error" sx={{my: 3}} onClose={() => setError(null)}>
-                    {error}
-                  </Alert>
-                )}
-
-                {renderStepContent()}
-
-                {/* Navigation buttons */}
-                <Box
-                  sx={{
-                    mt: 4,
-                    display: 'flex',
-                    justifyContent: visibleSteps.indexOf(currentStep) === 0 ? 'flex-end' : 'space-between',
-                    gap: 2,
-                  }}
-                >
-                  {visibleSteps.indexOf(currentStep) !== 0 && currentStep !== ApplicationCreateFlowStep.COMPLETE && (
-                    <Button
-                      variant="outlined"
-                      onClick={handlePrevStep}
-                      sx={{minWidth: 100}}
-                      disabled={createApplication.isPending}
+        ) : (
+          <Box sx={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+            <GatePreview
+              theme={previewTheme}
+              baseTheme={DefaultTheme as Theme}
+              mock={activePreviewMock}
+              displayName={appName ?? undefined}
+              showToolbar={false}
+              viewport={previewViewport}
+              frameStyle={isMobilePreview ? 'phone' : 'browser'}
+              footer={
+                currentStep === ApplicationCreateFlowStep.SECURITY && totalPreviewSteps >= 2 ? (
+                  <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2, py: 1.5}}>
+                    <IconButton
+                      size="small"
+                      disabled={previewStepIndex === 0}
+                      onClick={() => setPreviewStepIndex((index) => Math.max(0, index - 1))}
+                      aria-label={t('common:actions.previous')}
+                      sx={{bgcolor: 'action.hover'}}
                     >
-                      {t('common:actions.back')}
-                    </Button>
-                  )}
+                      <ChevronLeft size={18} />
+                    </IconButton>
+                    <Typography variant="body2" color="text.secondary">
+                      {t('applications:onboarding.preview.stepOf', 'Step {{n}} of {{total}}', {
+                        n: previewStepIndex + 1,
+                        total: totalPreviewSteps,
+                      })}
+                    </Typography>
+                    <IconButton
+                      size="small"
+                      disabled={previewStepIndex === totalPreviewSteps - 1}
+                      onClick={() => setPreviewStepIndex((index) => Math.min(totalPreviewSteps - 1, index + 1))}
+                      aria-label={t('common:actions.next')}
+                      sx={{
+                        bgcolor: previewStepIndex === totalPreviewSteps - 1 ? 'action.hover' : 'primary.main',
+                        color: previewStepIndex === totalPreviewSteps - 1 ? undefined : 'primary.contrastText',
+                        '&:hover': {
+                          bgcolor: previewStepIndex === totalPreviewSteps - 1 ? 'action.hover' : 'primary.dark',
+                        },
+                      }}
+                    >
+                      <ChevronRight size={18} />
+                    </IconButton>
+                  </Box>
+                ) : undefined
+              }
+            />
+          </Box>
+        )
+      }
+      footer={
+        <Box sx={{display: 'flex', justifyContent: isFirstStep ? 'flex-end' : 'space-between', gap: 2}}>
+          {!isFirstStep && (
+            <Button
+              variant="outlined"
+              onClick={handlePrevStep}
+              sx={{minWidth: 100}}
+              disabled={createApplication.isPending}
+            >
+              {t('common:actions.back')}
+            </Button>
+          )}
 
-                  {currentStep !== ApplicationCreateFlowStep.COMPLETE && (
-                    <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
-                      {createFlow.isPending && <CircularProgress size={20} />}
-                      <Button
-                        data-testid="application-wizard-next-button"
-                        variant="contained"
-                        disabled={
-                          !stepReady[currentStep] ||
-                          createFlow.isPending ||
-                          (currentStep === ApplicationCreateFlowStep.NAME && isOuLoading)
-                        }
-                        sx={{minWidth: 100}}
-                        onClick={handleNextStep}
-                      >
-                        {visibleSteps.indexOf(currentStep) === visibleSteps.length - 1
-                          ? t('common:actions.finish')
-                          : t('common:actions.continue')}
-                      </Button>
-                    </Box>
-                  )}
-                </Box>
-              </Box>
-            </Box>
+          <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
+            {(createFlow.isPending || createApplication.isPending) && <CircularProgress size={20} />}
+            <Button
+              data-testid="application-wizard-next-button"
+              variant="contained"
+              disabled={!stepReady[currentStep] || createFlow.isPending || createApplication.isPending}
+              sx={{minWidth: 100}}
+              onClick={handleNextStep}
+            >
+              {isLastStep ? t('common:actions.finish') : t('common:actions.continue')}
+            </Button>
           </Box>
         </Box>
-        {/* Right side - Preview (show from design step onwards, but hide on complete step) */}
-        {currentStep !== ApplicationCreateFlowStep.NAME &&
-          currentStep !== ApplicationCreateFlowStep.ORGANIZATION_UNIT &&
-          currentStep !== ApplicationCreateFlowStep.CLIENT_TYPE &&
-          currentStep !== ApplicationCreateFlowStep.COMPLETE &&
-          !isWalletConfigureStep && (
-            <Box sx={{flex: '0 0 50%', display: 'flex', flexDirection: 'column', p: 5}}>
-              {isPreviewFlowLoading ? (
-                <Box sx={{display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1}}>
-                  <CircularProgress />
-                </Box>
-              ) : (
-                <GatePreview theme={selectedTheme} mock={previewMock} displayName={appName ?? undefined} />
-              )}
-            </Box>
-          )}
-      </Box>
-    </Box>
+      }
+    >
+      {error && (
+        <Alert severity="error" sx={{mb: 3}} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {renderStepContent()}
+    </FullScreenCreationWizardLayout>
   );
 }

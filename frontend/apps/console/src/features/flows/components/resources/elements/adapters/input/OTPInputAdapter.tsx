@@ -1,28 +1,15 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useTemplateLiteralResolver} from '@thunderid/hooks';
 import {Box, FormHelperText, InputLabel, OutlinedInput} from '@wso2/oxygen-ui';
+import {useEdges, useNodes} from '@xyflow/react';
 import {type CSSProperties, type ReactElement, type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Hint} from '../../hint';
 import TemplatePlaceholder, {containsTemplateLiteral} from '../TemplatePlaceholder';
 import type {Element as FlowElement} from '@/features/flows/models/elements';
+import resolveUpstreamOtpLength from '@/features/flows/utils/resolveUpstreamOtpLength';
 
 /**
  * OTP Input element type with properties at top level.
@@ -44,6 +31,10 @@ export interface OTPInputAdapterPropsInterface {
    * The OTP input element properties.
    */
   resource: FlowElement;
+  /**
+   * The step id the element resides on, used to locate the Generate OTP node that feeds it.
+   */
+  stepId: string;
 }
 
 /**
@@ -52,11 +43,14 @@ export interface OTPInputAdapterPropsInterface {
  * @param props - Props injected to the component.
  * @returns The OTPInputAdapter component.
  */
-function OTPInputAdapter({resource}: OTPInputAdapterPropsInterface): ReactElement {
+function OTPInputAdapter({resource, stepId}: OTPInputAdapterPropsInterface): ReactElement {
   const {t} = useTranslation();
   const {resolve} = useTemplateLiteralResolver();
+  const nodes = useNodes();
+  const edges = useEdges();
 
   const otpElement = resource as OTPInputElement;
+  const otpLength = resolveUpstreamOtpLength(stepId, nodes, edges);
 
   const rawLabel = otpElement?.label ?? '';
   const labelNode: ReactNode = containsTemplateLiteral(rawLabel) ? (
@@ -71,7 +65,7 @@ function OTPInputAdapter({resource}: OTPInputAdapterPropsInterface): ReactElemen
         {labelNode}
       </InputLabel>
       <Box display="flex" flexDirection="row" gap={1}>
-        {Array.from({length: 6}, (_, index) => (
+        {Array.from({length: otpLength}, (_, index) => (
           <OutlinedInput
             key={index}
             size="small"

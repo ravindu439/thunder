@@ -1,34 +1,18 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, Card, IconButton, Tooltip} from '@wso2/oxygen-ui';
 import {CogIcon, InfoIcon, TrashIcon} from '@wso2/oxygen-ui-icons-react';
 import {Handle, Position, useNodeId, useReactFlow} from '@xyflow/react';
-import classNames from 'classnames';
 import type {ReactElement} from 'react';
 import {useTranslation} from 'react-i18next';
 import ExecutionFactory from './execution-factory/ExecutionFactory';
+import OutcomeHandleWrapper, {executionSurfaceMixin, nodeShadowMixin} from '../flowNodeStyles';
 import StepTitle from '../StepTitle';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
 import useInteractionState from '@/features/flows/hooks/useInteractionState';
 import useUIPanelState from '@/features/flows/hooks/useUIPanelState';
 import type {Step, StepData} from '@/features/flows/models/steps';
-import './ExecutionMinimal.scss';
 
 /**
  * Props interface of {@link ExecutionMinimal}
@@ -86,21 +70,25 @@ function ExecutionMinimal({resource}: ExecutionMinimalPropsInterface): ReactElem
   };
 
   return (
-    <Box className={classNames('execution-minimal-step', {'has-branching': hasBranchingSupport})}>
+    <Box
+      data-flow-node-surface
+      data-testid="execution-minimal-step"
+      sx={[{borderRadius: 1, position: 'relative'}, nodeShadowMixin]}
+    >
       <Box
         display="flex"
         justifyContent="space-between"
         alignItems="center"
-        className="execution-minimal-step-action-panel"
         sx={{
           backgroundColor: '#151515',
+          borderRadius: '8px 8px 0 0',
           px: 2,
           py: 1.25,
           height: 44,
           gap: 1.5,
         }}
       >
-        <Box className="execution-minimal-step-title">
+        <Box sx={{fontWeight: 500}}>
           <StepTitle label={displayLabel} />
         </Box>
         <Box display="flex" alignItems="center" gap={0.5}>
@@ -120,7 +108,6 @@ function ExecutionMinimal({resource}: ExecutionMinimalPropsInterface): ReactElem
             <IconButton
               size="small"
               onClick={handleConfigClick}
-              className="execution-minimal-step-action"
               sx={(theme) => ({
                 color: 'common.white',
                 '&:hover': {
@@ -148,7 +135,6 @@ function ExecutionMinimal({resource}: ExecutionMinimalPropsInterface): ReactElem
                     deleteElements({nodes: [{id: stepId}]});
                   }
                 }}
-                className="execution-minimal-step-action"
                 sx={(theme) => ({
                   color: 'common.white',
                   '&:hover': {
@@ -171,25 +157,41 @@ function ExecutionMinimal({resource}: ExecutionMinimalPropsInterface): ReactElem
       </Box>
       <Handle type="target" position={Position.Left} />
       <Card
-        className="execution-minimal-step-content"
+        data-testid="execution-minimal-step-content"
         onClick={() => {
           setLastInteractedStepId(resource.id);
           setLastInteractedResource(resource);
         }}
+        sx={[
+          executionSurfaceMixin,
+          {
+            alignItems: 'center',
+            border: 'none',
+            borderRadius: '0 0 8px 8px',
+            cursor: 'pointer',
+            display: 'flex',
+            flexFlow: 'column nowrap',
+            justifyContent: 'center',
+            minWidth: 200,
+            p: 3,
+            textAlign: 'left',
+            ...(hasBranchingSupport && {minHeight: 60}),
+          },
+        ]}
       >
         <ExecutionFactory resource={resource} />
       </Card>
       {/* Success handle - always shown on the right */}
       {hasBranchingSupport ? (
         <Tooltip title={successLabel} placement="right">
-          <Box className="handle-wrapper success-wrapper">
+          <OutcomeHandleWrapper kind="success" handleSize={12}>
             <Handle
               type="source"
               position={Position.Right}
               id={`${resource.id}${VisualFlowConstants.FLOW_BUILDER_NEXT_HANDLE_SUFFIX}`}
-              className="execution-handle-success"
+              data-handle="execution-handle-success"
             />
-          </Box>
+          </OutcomeHandleWrapper>
         </Tooltip>
       ) : (
         <Handle
@@ -201,22 +203,22 @@ function ExecutionMinimal({resource}: ExecutionMinimalPropsInterface): ReactElem
       {/* Failure handle - shown at the bottom when the action supports branching (has onFailure property) */}
       {hasBranchingSupport && (
         <Tooltip title={failureLabel} placement="bottom">
-          <Box className="handle-wrapper failure-wrapper">
-            <Handle type="source" position={Position.Bottom} id="failure" className="execution-handle-failure" />
-          </Box>
+          <OutcomeHandleWrapper kind="failure" handleSize={12}>
+            <Handle type="source" position={Position.Bottom} id="failure" data-handle="execution-handle-failure" />
+          </OutcomeHandleWrapper>
         </Tooltip>
       )}
       {/* Incomplete handle - shown at the top when the action supports incomplete (has onIncomplete property) */}
       {hasIncompleteSupport && (
         <Tooltip title={incompleteLabel} placement="top">
-          <Box className="handle-wrapper incomplete-wrapper">
+          <OutcomeHandleWrapper kind="incomplete" handleSize={12}>
             <Handle
               type="source"
               position={Position.Top}
               id={`${resource.id}${VisualFlowConstants.FLOW_BUILDER_INCOMPLETE_HANDLE_SUFFIX}`}
-              className="execution-handle-incomplete"
+              data-handle="execution-handle-incomplete"
             />
-          </Box>
+          </OutcomeHandleWrapper>
         </Tooltip>
       )}
     </Box>

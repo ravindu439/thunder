@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package revocation implements single-token revocation over the database.runtime_persistent deny list (the
 // JTI deny list): the RFC 7009 POST /oauth2/revoke write path (RevocationService) and the read/
@@ -25,31 +10,42 @@ package revocation
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/clientauth"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/discovery"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/jti"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
-// Initialize wires the revocation feature: it constructs the shared enforcement service (read path)
-// and registers the RFC 7009 revocation endpoint (write path). It returns the enforcement service (to
-// inject into the hot paths — refresh grant, token exchange, introspection) and the refresh-token
-// revoker (to inject into the refresh grant for single-use rotation).
+// Initialize constructs the shared revocation read and write services.
 func Initialize(
+	jwtService jwt.JWTServiceInterface,
+	observabilitySvc providers.ObservabilityProvider,
+	tokenFamilyRevocationTTL time.Duration,
+	revokeTokenFamilyOnExplicit bool,
+) (EnforcementServiceInterface, RevocationServiceInterface) {
+	store := newRevocationStore()
+	return newEnforcementService(observabilitySvc, store), newRevocationService(
+		jwtService, store, tokenFamilyRevocationTTL, revokeTokenFamilyOnExplicit, observabilitySvc)
+}
+
+// RegisterRoutes registers the RFC 7009 revocation endpoint using the shared revocation service.
+func RegisterRoutes(
 	mux *http.ServeMux,
 	jwtService jwt.JWTServiceInterface,
 	actorProvider providers.ActorProvider,
 	authnProvider providers.AuthnProviderManager,
 	discoveryService discovery.DiscoveryServiceInterface,
-	observabilitySvc providers.ObservabilityProvider,
-) (EnforcementServiceInterface, RefreshTokenRevokerInterface) {
-	enforcementService := newEnforcementService(observabilitySvc)
-	revocationService := newRevocationService(jwtService, newRevokedTokenStore(), observabilitySvc)
+	revocationService RevocationServiceInterface,
+	jtiStore jti.JTIStoreInterface,
+	leeway int64,
+) {
 	revocationHandler := newRevocationHandler(revocationService)
-	registerRoutes(mux, revocationHandler, actorProvider, authnProvider, jwtService, discoveryService)
-	return enforcementService, revocationService
+	registerRoutes(mux, revocationHandler, actorProvider, authnProvider, jwtService, discoveryService,
+		jtiStore, leeway)
 }
 
 // registerRoutes registers the routes for the token revocation endpoint.
@@ -60,6 +56,8 @@ func registerRoutes(
 	authnProvider providers.AuthnProviderManager,
 	jwtService jwt.JWTServiceInterface,
 	discoveryService discovery.DiscoveryServiceInterface,
+	jtiStore jti.JTIStoreInterface,
+	leeway int64,
 ) {
 	opts := middleware.CORSOptions{
 		AllowedMethods:   []string{"POST", "OPTIONS"},
@@ -68,8 +66,9 @@ func registerRoutes(
 		MaxAge:           600,
 	}
 
-	endpointURL := discoveryService.GetOAuth2AuthorizationServerMetadata(context.Background()).RevocationEndpoint
-	clientAuthMiddleware := clientauth.ClientAuthMiddleware(actorProvider, authnProvider, jwtService, endpointURL)
+	issuer := discoveryService.GetOAuth2AuthorizationServerMetadata(context.Background()).Issuer
+	clientAuthMiddleware := clientauth.ClientAuthMiddleware(actorProvider, authnProvider, jwtService,
+		jtiStore, issuer, leeway)
 	handler := clientAuthMiddleware(http.HandlerFunc(revocationHandler.HandleRevoke))
 
 	pattern, wrappedHandler := middleware.WithCORS(

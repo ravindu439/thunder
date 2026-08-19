@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package resourceindicators provides shared helpers for RFC 8707 resource indicator
 // processing across OAuth 2.0 grant handlers and the authorization endpoint.
@@ -29,8 +14,6 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
-	"github.com/thunder-id/thunderid/internal/resource"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
 )
 
 // ValidateResourceURIs returns an error response when any resource URI is not absolute
@@ -56,13 +39,13 @@ func ValidateResourceURIs(resources []string) *model.ErrorResponse {
 
 // ResolveTargetResourceServer resolves the single target Resource Server for a token request.
 // At most one resource is allowed; more than one is invalid_target. When exactly one resource is
-// supplied it is resolved by identifier. When none is supplied the deployment's configured
-// defaultResourceServer is used; if no default is configured the request is rejected
-// (invalid_target) — token issuance is bound to exactly one resource server.
+// supplied it is resolved by identifier. When none is supplied an empty identifier is passed to the
+// provider, which (when default-aware) resolves the deployment's configured default resource server;
+// if no default is configured the request is rejected (invalid_target) — token issuance is bound to
+// exactly one resource server.
 func ResolveTargetResourceServer(
 	ctx context.Context,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
 	resources []string,
 ) (*providers.ResourceServer, *model.ErrorResponse) {
 	if errResp := ValidateResourceURIs(resources); errResp != nil {
@@ -74,17 +57,24 @@ func ResolveTargetResourceServer(
 			ErrorDescription: "Only a single resource parameter is supported",
 		}
 	}
-
-	if len(resources) == 1 {
-		rs, svcErr := resourceService.GetResourceServerByIdentifier(ctx, resources[0])
-		if svcErr != nil {
-			return nil, resolveTargetError(svcErr,
-				"The resource parameter does not match any registered resource server")
+	if resourceService == nil {
+		return nil, &model.ErrorResponse{
+			Error:            constants.ErrorInvalidTarget,
+			ErrorDescription: "No resource parameter supplied and no default resource server is configured",
 		}
-		return rs, nil
 	}
 
-	return resolveDefaultResourceServer(ctx, resourceService, serverConfigService)
+	identifier := ""
+	invalidTargetDescription := "No resource parameter supplied and no default resource server is configured"
+	if len(resources) == 1 {
+		identifier = resources[0]
+		invalidTargetDescription = "The resource parameter does not match any registered resource server"
+	}
+	rs, svcErr := resourceService.GetResourceServerByIdentifier(ctx, identifier)
+	if svcErr != nil {
+		return nil, resolveTargetError(svcErr, invalidTargetDescription)
+	}
+	return rs, nil
 }
 
 // ResolveAudienceBinding decides the single resource server an access token binds to. It returns
@@ -95,49 +85,13 @@ func ResolveTargetResourceServer(
 func ResolveAudienceBinding(
 	ctx context.Context,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
 	resources []string,
 	permissionScopes []string,
 ) (*providers.ResourceServer, *model.ErrorResponse) {
 	if len(resources) == 0 && len(permissionScopes) == 0 {
 		return nil, nil
 	}
-	return ResolveTargetResourceServer(ctx, resourceService, serverConfigService, resources)
-}
-
-// resolveDefaultResourceServer resolves the deployment's configured default resource server.
-func resolveDefaultResourceServer(
-	ctx context.Context,
-	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
-) (*providers.ResourceServer, *model.ErrorResponse) {
-	// No server-config service (e.g. the embedded engine) means no default can be configured, so an
-	// implicit (no-resource) request cannot be bound to a resource server.
-	if serverConfigService == nil {
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorInvalidTarget,
-			ErrorDescription: "No resource parameter supplied and no default resource server is configured",
-		}
-	}
-	merged, svcErr := serverConfigService.GetMergedConfig(ctx, string(serverconfig.ConfigNameDefaultResourceServer))
-	if svcErr != nil {
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorServerError,
-			ErrorDescription: "Failed to resolve default resource server",
-		}
-	}
-	cfg, _ := merged.(resource.DefaultResourceServerConfig)
-	if cfg.ResourceServerID == "" {
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorInvalidTarget,
-			ErrorDescription: "No resource parameter supplied and no default resource server is configured",
-		}
-	}
-	rs, svcErr := resourceService.GetResourceServer(ctx, cfg.ResourceServerID)
-	if svcErr != nil {
-		return nil, resolveTargetError(svcErr, "The configured default resource server does not exist")
-	}
-	return rs, nil
+	return ResolveTargetResourceServer(ctx, resourceService, resources)
 }
 
 // resolveTargetError maps a resource-service error to invalid_target (client) or server_error.

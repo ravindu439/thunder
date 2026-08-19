@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -37,7 +22,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
 	"github.com/thunder-id/thunderid/internal/system/security"
 	"github.com/thunder-id/thunderid/internal/system/sysauthz"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 	"github.com/thunder-id/thunderid/tests/mocks/entitymock"
@@ -67,6 +51,8 @@ func newAllowAllAuthz(t *testing.T) sysauthz.SystemAuthorizationServiceInterface
 		Return(true, (*tidcommon.ServiceError)(nil)).Maybe()
 	mockAuthz.On("GetAccessibleResources", mock.Anything, mock.Anything, security.ResourceTypeOU).
 		Return(&sysauthz.AccessibleResources{AllAllowed: true}, (*tidcommon.ServiceError)(nil)).Maybe()
+	mockAuthz.On("CanGrantMembership", mock.Anything, mock.Anything, mock.Anything).
+		Return((*tidcommon.ServiceError)(nil)).Maybe()
 	return mockAuthz
 }
 
@@ -77,6 +63,8 @@ func newAuthzError(t *testing.T) sysauthz.SystemAuthorizationServiceInterface {
 		Return(false, &tidcommon.InternalServerError).Maybe()
 	mockAuthz.On("GetAccessibleResources", mock.Anything, mock.Anything, security.ResourceTypeOU).
 		Return((*sysauthz.AccessibleResources)(nil), &tidcommon.InternalServerError).Maybe()
+	mockAuthz.On("CanGrantMembership", mock.Anything, mock.Anything, mock.Anything).
+		Return(&tidcommon.InternalServerError).Maybe()
 	return mockAuthz
 }
 
@@ -2070,7 +2058,7 @@ func (suite *GroupServiceTestSuite) TestGroupService_AddMembersToGroups() {
 				tc.setup(storeMock, entityMock)
 			}
 
-			var txner transaction.Transactioner
+			var txner providers.Transactioner
 			if tc.txErr != nil {
 				txMock := transactionmock.NewTransactionerMock(suite.T())
 				txMock.On("Transact", mock.Anything, mock.Anything).Return(tc.txErr)
@@ -2644,6 +2632,9 @@ func TestUpdateGroupMembers_OUValidationFailure(t *testing.T) {
 
 	authzSvcMock.On("IsActionAllowed", mock.Anything, security.ActionUpdateGroup, mock.Anything).
 		Return(true, (*tidcommon.ServiceError)(nil)).Once()
+
+	authzSvcMock.On("CanGrantMembership", mock.Anything, sysauthz.PrincipalTypeGroup, "group1").
+		Return((*tidcommon.ServiceError)(nil)).Once()
 
 	entitySvcMock.On("GetEntitiesByIDs", mock.Anything, []string{"user-1"}).
 		Return([]providers.Entity{

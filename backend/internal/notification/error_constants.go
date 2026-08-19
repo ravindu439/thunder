@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package notification
 
@@ -154,19 +139,6 @@ var (
 			DefaultValue: "The provided recipient is invalid",
 		},
 	}
-	// ErrorInvalidChannel is the error returned when an invalid channel is provided.
-	ErrorInvalidChannel = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "MNS-1011",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.notificationservice.invalid_channel",
-			DefaultValue: "Invalid channel",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.notificationservice.invalid_channel_description",
-			DefaultValue: "The provided channel is invalid",
-		},
-	}
 	// ErrorUnsupportedChannel is the error returned when an unsupported channel is provided.
 	ErrorUnsupportedChannel = tidcommon.ServiceError{
 		Type: tidcommon.ClientErrorType,
@@ -204,20 +176,6 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.notificationservice.invalid_session_token_description",
 			DefaultValue: "The provided session token is invalid, malformed, or expired",
-		},
-	}
-	// ErrorClientErrorWhileRetrievingMessageClient is the error returned when a client error occurs
-	// while retrieving the message client.
-	ErrorClientErrorWhileRetrievingMessageClient = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "MNS-1015",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.notificationservice.error_while_retrieving_message_client",
-			DefaultValue: "Error while retrieving message client",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.notificationservice.error_while_retrieving_message_client_description",
-			DefaultValue: "An error occurred while retrieving the message client",
 		},
 	}
 	// ErrorSenderHasBlockingDependencies is returned when a notification sender cannot be deleted

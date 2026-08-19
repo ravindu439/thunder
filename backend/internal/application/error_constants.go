@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -302,19 +287,6 @@ var (
 			DefaultValue: "An application with the same client ID already exists",
 		},
 	}
-	// ErrorJWKSUriNotHTTPS is the error returned when jwks_uri does not use HTTPS.
-	ErrorJWKSUriNotHTTPS = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "APP-1022",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.applicationservice.invalid_jwks_uri_scheme",
-			DefaultValue: "Invalid JWKS URI scheme",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.applicationservice.invalid_jwks_uri_scheme_description",
-			DefaultValue: "'jwks_uri' must use HTTPS scheme",
-		},
-	}
 	// ErrorInvalidPublicClientConfiguration is the generic error returned for public client configuration issues.
 	ErrorInvalidPublicClientConfiguration = tidcommon.ServiceError{
 		Type: tidcommon.ClientErrorType,
@@ -511,13 +483,96 @@ var (
 		Code: "APP-1039",
 		Error: tidcommon.I18nMessage{
 			Key:          "error.applicationservice.application_flow_mismatch",
-			DefaultValue: "Referenced flow does not match the application's configuration",
+			DefaultValue: "Conflicting flow references",
 		},
 		ErrorDescription: tidcommon.I18nMessage{
 			Key: "error.applicationservice.application_flow_mismatch_description",
-			DefaultValue: "The application's {{param(sourceFlowType)}} flow invokes a " +
-				"{{param(flowType)}} flow that is not consistent with the application's " +
-				"{{param(flowType)}} configuration.",
+			DefaultValue: "The {{param(sourceFlowType)}} flow references a different " +
+				"{{param(flowType)}} flow than the one configured on the application. " +
+				"Both must point to the same {{param(flowType)}} flow.",
+		},
+	}
+	// ErrorInvalidApplicationType is returned when an application is created or updated with an
+	// unrecognized type value.
+	ErrorInvalidApplicationType = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1040",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_application_type",
+			DefaultValue: "Invalid application type",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.applicationservice.invalid_application_type_description",
+			DefaultValue: "The provided application type is not supported. It must be one of: " +
+				"browser, fullstack, mobile, m2m, mcp, custom.",
+		},
+	}
+	// ErrorApplicationTypeImmutable is returned when an update attempts to change the application type.
+	ErrorApplicationTypeImmutable = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1041",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.application_type_immutable",
+			DefaultValue: "Application type cannot be changed",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.application_type_immutable_description",
+			DefaultValue: "The application type is set at creation and cannot be modified.",
+		},
+	}
+	// ErrorApplicationTypeRequired is returned when an application is created without a type.
+	ErrorApplicationTypeRequired = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1042",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.application_type_required",
+			DefaultValue: "Application type is required",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.applicationservice.application_type_required_description",
+			DefaultValue: "An application type must be provided. It must be one of: " +
+				"browser, fullstack, mobile, m2m, mcp, custom.",
+		},
+	}
+	// ErrorInvalidTosURI is the error returned when an invalid Terms of Service URI is provided.
+	ErrorInvalidTosURI = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1043",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_tos_uri",
+			DefaultValue: "Invalid Terms of Service URI",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_tos_uri_description",
+			DefaultValue: "The provided Terms of Service URI is not a valid URI",
+		},
+	}
+	// ErrorInvalidPolicyURI is the error returned when an invalid Privacy Policy URI is provided
+	ErrorInvalidPolicyURI = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1044",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_policy_uri",
+			DefaultValue: "Invalid Privacy Policy URI",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_policy_uri_description",
+			DefaultValue: "The provided Privacy Policy URI is not a valid URI",
+		},
+	}
+	// ErrorInvalidSubjectAttributeMapping is the error returned when the subject attribute mapping
+	// references an attribute that is not unique, required, and string-typed in an allowed user type.
+	ErrorInvalidSubjectAttributeMapping = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "APP-1045",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.applicationservice.invalid_subject_attribute_mapping",
+			DefaultValue: "Invalid subject attribute mapping",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.applicationservice.invalid_subject_attribute_mapping_description",
+			DefaultValue: "The subject attribute mapping must reference an attribute that is unique, required, " +
+				"and string-typed in an allowed user type",
 		},
 	}
 )

@@ -1,32 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {Box, FormControl, FormLabel, IconButton, Stack, TextField, Tooltip} from '@wso2/oxygen-ui';
-import {Plus, Trash} from '@wso2/oxygen-ui-icons-react';
-import {useState, type ReactElement} from 'react';
+import {Autocomplete, Box, Chip, FormControl, FormLabel, TextField} from '@wso2/oxygen-ui';
+import {useState, type ReactElement, type SyntheticEvent} from 'react';
 import {useTranslation} from 'react-i18next';
-import PanelActionButton from './PanelActionButton';
 import type {Resource} from '../../models/resources';
 
-const parseClasses = (value: string): string[] => {
-  const classes = (value ?? '').split(/\s+/).filter(Boolean);
-  return classes.length > 0 ? classes : [''];
-};
+const parseClasses = (value: string): string[] => (value ?? '').split(/\s+/).filter(Boolean);
 
 /**
  * Props interface of {@link ClassesPropertyField}
@@ -70,24 +50,12 @@ function ClassesPropertyField({
   const {t} = useTranslation();
   const [classNames, setClassNames] = useState<string[]>(() => parseClasses(propertyValue));
 
-  const commitClasses = (updated: string[], debounce?: boolean): void => {
-    setClassNames(updated);
-    onChange(propertyKey, updated.join(' '), resource, debounce);
-  };
-
-  const handleAdd = (): void => {
-    commitClasses([...classNames, '']);
-  };
-
-  const handleRemove = (index: number): void => {
-    commitClasses(classNames.filter((_, i) => i !== index));
-  };
-
-  const handleChange = (index: number, value: string): void => {
-    commitClasses(
-      classNames.map((className, i) => (i === index ? value : className)),
-      true,
-    );
+  const commitClasses = (updated: string[]): void => {
+    // Class names are whitespace separated, so a typed value cannot contain spaces.
+    const normalized: string[] = updated.flatMap((entry: string) => entry.split(/\s+/).filter(Boolean));
+    const deduped: string[] = [...new Set(normalized)];
+    setClassNames(deduped);
+    onChange(propertyKey, deduped.join(' '), resource);
   };
 
   return (
@@ -96,33 +64,32 @@ function ClassesPropertyField({
         <FormLabel htmlFor={`${resource.id}-${propertyKey}`}>
           {t('flows:core.elements.classesPropertyField.label')}
         </FormLabel>
-
-        <Stack spacing={2} id={`${resource.id}-${propertyKey}`}>
-          {classNames.map((className, index) => (
-            // eslint-disable-next-line react/no-array-index-key
-            <Stack key={index} direction="row" spacing={1} alignItems="flex-start">
-              <TextField
-                fullWidth
-                value={className}
-                onChange={(e) => handleChange(index, e.target.value)}
-                placeholder={t('flows:core.elements.classesPropertyField.placeholder')}
-              />
-              {classNames.length > 1 && (
-                <Tooltip title={t('common:actions.delete')}>
-                  <IconButton onClick={() => handleRemove(index)} color="error">
-                    <Trash size={20} />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </Stack>
-          ))}
-
-          <Box>
-            <PanelActionButton startIcon={<Plus size={16} />} onClick={handleAdd}>
-              {t('flows:core.elements.classesPropertyField.addClass')}
-            </PanelActionButton>
-          </Box>
-        </Stack>
+        {/* One tag input rather than a stack of text fields: classes are short tokens,
+            so they read better as chips and the field stays a fixed height. */}
+        <Autocomplete
+          multiple
+          freeSolo
+          autoSelect
+          clearOnBlur
+          options={[] as string[]}
+          value={classNames}
+          onChange={(_event: SyntheticEvent, newValue: string[]) => commitClasses(newValue)}
+          renderTags={(value: string[], getTagProps) =>
+            value.map((option: string, index: number) => {
+              const {key, ...tagProps} = getTagProps({index});
+              return <Chip key={key} size="small" label={option} {...tagProps} />;
+            })
+          }
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              id={`${resource.id}-${propertyKey}`}
+              placeholder={
+                classNames.length === 0 ? t('flows:core.elements.classesPropertyField.placeholder') : undefined
+              }
+            />
+          )}
+        />
       </FormControl>
     </Box>
   );

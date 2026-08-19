@@ -23,7 +23,7 @@ inputs:
   git-user-email:
     description: 'Git committer email'
     required: false
-    default: 'thunderid-bot@wso2.com'
+    default: 'thunderid-bot@thunderid.dev'
   tag-convention:
     description: 'Git tag format. Use {name} (basename of package-dir) and {version} as placeholders. Leave empty to skip tagging.'
     required: false

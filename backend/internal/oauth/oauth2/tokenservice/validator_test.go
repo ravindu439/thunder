@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package tokenservice
 
@@ -27,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +28,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/tests/mocks/idp/idpmock"
 	"github.com/thunder-id/thunderid/tests/mocks/jose/jwtmock"
+	"github.com/thunder-id/thunderid/tests/mocks/oauth/oauth2/jtimock"
 	"github.com/thunder-id/thunderid/tests/mocks/oauth/oauth2/revocationmock"
 )
 
@@ -274,7 +261,8 @@ func (suite *TokenValidatorTestSuite) TestExtractSubjectTokenClaims_MapsReserved
 	assert.Equal(suite.T(), "Jane", result.UserAttributes["firstName"])
 	// Reserved claims are still filtered out of the attribute set.
 	assert.NotContains(suite.T(), result.UserAttributes, "sub")
-	assert.NotContains(suite.T(), result.UserAttributes, "given_name")
+	// Mappings copy rather than rename, so the source claim survives alongside the local attribute.
+	assert.Equal(suite.T(), "Jane", result.UserAttributes["given_name"])
 }
 
 func (suite *TokenValidatorTestSuite) TestValidateSubjectToken_Error_InvalidJWTFormat() {
@@ -871,9 +859,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_Basic() {
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -901,9 +889,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_WithActor
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -926,9 +914,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_WithoutUs
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -950,9 +938,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_EmptyScop
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -963,7 +951,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_EmptyScop
 func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_InvalidSignature() {
 	token := "invalid.token.signature"
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").
 		Return(&tidcommon.ServiceError{
 			Type: tidcommon.ServerErrorType,
 			Code: "SIGNATURE_VERIFICATION_FAILED",
@@ -976,7 +964,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_InvalidSign
 			},
 		})
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -988,7 +976,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_InvalidJWTF
 	token := invalidJWTFormat
 
 	// VerifyJWT is called first and should fail for invalid format
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").
 		Return(&tidcommon.ServiceError{
 			Type: tidcommon.ClientErrorType,
 			Code: "INVALID_JWT_FORMAT",
@@ -1000,7 +988,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_InvalidJWTF
 			},
 		})
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1014,7 +1002,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_DecodeFailu
 	token := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.invalid-base64.signature"
 
 	// VerifyJWT is called first and should fail for invalid base64
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").
 		Return(&tidcommon.ServiceError{
 			Type: tidcommon.ServerErrorType,
 			Code: "INVALID_JWT_SIGNATURE",
@@ -1026,7 +1014,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_DecodeFailu
 			},
 		})
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1049,9 +1037,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_MissingIa
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -1077,7 +1065,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_ExpiredToke
 	token := suite.createTestJWT(claims)
 
 	// VerifyJWT should catch expired tokens
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").
 		Return(&tidcommon.ServiceError{
 			Type:  tidcommon.ClientErrorType,
 			Code:  "TOKEN_EXPIRED",
@@ -1087,7 +1075,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_ExpiredToke
 			},
 		})
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1112,7 +1100,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_NotYetValid
 	token := suite.createTestJWT(claims)
 
 	// VerifyJWT should catch not yet valid tokens
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").
 		Return(&tidcommon.ServiceError{
 			Type: tidcommon.ClientErrorType,
 			Code: "TOKEN_NOT_VALID_YET",
@@ -1124,7 +1112,7 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_NotYetValid
 			},
 		})
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1146,9 +1134,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_MissingSub(
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1156,12 +1144,14 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_MissingSub(
 	suite.mockJWTService.AssertExpectations(suite.T())
 }
 
-func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_WrongClientID() {
+// Validation is client-agnostic so introspection can reuse it: a refresh token issued to another
+// client validates here and reports its owner, leaving the binding to the redeeming caller.
+func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_ReportsClientID() {
 	now := time.Now().Unix()
 	claims := map[string]interface{}{
-		"sub":              "wrong-client",
+		"sub":              "other-client",
 		"iss":              "https://example.com",
-		"aud":              "wrong-client",
+		"aud":              "other-client",
 		"exp":              float64(now + 3600),
 		"iat":              float64(now),
 		"access_token_sub": "user123",
@@ -1170,13 +1160,13 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_WrongClient
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
-	assert.Error(suite.T(), err)
-	assert.Nil(suite.T(), result)
-	assert.Contains(suite.T(), err.Error(), "refresh token does not belong to the requesting client")
+	assert.NoError(suite.T(), err)
+	assert.Equal(suite.T(), "other-client", result.ClientID)
+	assert.Equal(suite.T(), "user123", result.Sub)
 	suite.mockJWTService.AssertExpectations(suite.T())
 }
 
@@ -1194,9 +1184,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_MissingAcce
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1218,9 +1208,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_MissingAcce
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1242,9 +1232,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Error_MissingGran
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -1269,9 +1259,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_WithClaim
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -1301,9 +1291,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_WithDPoPJ
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -1325,9 +1315,9 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_Success_WithoutDP
 	}
 	token := suite.createTestJWT(claims)
 
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
-	result, err := suite.validator.ValidateRefreshToken(context.Background(), token, "test-client")
+	result, err := suite.validator.ValidateRefreshToken(context.Background(), token)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -2013,7 +2003,10 @@ func (suite *TokenValidatorTestSuite) validatorWithEnforcement(
 	jti string, returnedErr error,
 ) *tokenValidator {
 	enforcement := revocationmock.NewEnforcementServiceInterfaceMock(suite.T())
-	enforcement.On("EnsureNotRevoked", mock.Anything, jti).Return(returnedErr)
+	enforcement.On("EnsureNotRevoked", mock.Anything,
+		mock.MatchedBy(func(identity revocation.RevocationIdentity) bool {
+			return identity.JTI == jti
+		})).Return(returnedErr)
 	return &tokenValidator{
 		cfg:                suite.validator.cfg,
 		jwtService:         suite.mockJWTService,
@@ -2030,12 +2023,19 @@ func (suite *TokenValidatorTestSuite) TestValidateAccessToken_Revoked() {
 		"aud":       "test-app",
 		"client_id": "test-client",
 		"jti":       "at-jti-revoked",
+		"tfid":      "tfid-at-revoked",
 	}
 	token := suite.createTestAccessToken(claims)
 	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
+	// The token's tfid claim must reach the enforcement service verbatim so family-scoped revocation works.
 	enforcement := revocationmock.NewEnforcementServiceInterfaceMock(suite.T())
-	enforcement.On("EnsureNotRevoked", mock.Anything, "at-jti-revoked").Return(revocation.ErrTokenRevoked)
+	enforcement.On("EnsureNotRevoked", mock.Anything, mock.MatchedBy(func(identity revocation.RevocationIdentity) bool {
+		return identity.JTI == "at-jti-revoked" && len(identity.Criteria) > 0 &&
+			identity.Criteria[0].Type == revocation.CriterionTypeTokenFamily &&
+			identity.Criteria[0].Value == "tfid-at-revoked"
+	})).
+		Return(revocation.ErrTokenRevoked)
 	validator := &tokenValidator{
 		cfg:                suite.validator.cfg,
 		jwtService:         suite.mockJWTService,
@@ -2046,6 +2046,21 @@ func (suite *TokenValidatorTestSuite) TestValidateAccessToken_Revoked() {
 
 	assert.Nil(suite.T(), result)
 	assert.ErrorIs(suite.T(), err, revocation.ErrTokenRevoked)
+}
+
+func (suite *TokenValidatorTestSuite) TestRevocationIdentity_RefreshTokenUsesAccessTokenSubject() {
+	identity := revocationIdentity(map[string]interface{}{
+		"sub":              "oauth-client",
+		"access_token_sub": "user-123",
+		"iat":              float64(1_700_000_000),
+	}, "refresh-jti", "refresh-family")
+
+	assert.Contains(suite.T(), identity.Criteria, revocation.Criterion{
+		Type: revocation.CriterionTypeSubject, Value: "user-123",
+	})
+	assert.NotContains(suite.T(), identity.Criteria, revocation.Criterion{
+		Type: revocation.CriterionTypeSubject, Value: "oauth-client",
+	})
 }
 
 // When the deny list cannot be consulted, the validator surfaces revocation.ErrEnforcementUnavailable
@@ -2062,7 +2077,10 @@ func (suite *TokenValidatorTestSuite) TestValidateAccessToken_EnforcementUnavail
 	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
 	enforcement := revocationmock.NewEnforcementServiceInterfaceMock(suite.T())
-	enforcement.On("EnsureNotRevoked", mock.Anything, "at-jti-unknown").
+	enforcement.On("EnsureNotRevoked", mock.Anything,
+		mock.MatchedBy(func(identity revocation.RevocationIdentity) bool {
+			return identity.JTI == "at-jti-unknown"
+		})).
 		Return(revocation.ErrEnforcementUnavailable)
 	validator := &tokenValidator{
 		cfg:                suite.validator.cfg,
@@ -2074,6 +2092,30 @@ func (suite *TokenValidatorTestSuite) TestValidateAccessToken_EnforcementUnavail
 
 	assert.Nil(suite.T(), result)
 	assert.ErrorIs(suite.T(), err, revocation.ErrEnforcementUnavailable)
+}
+
+// When token revocation is disabled, enforcementService is nil. Validation must still succeed
+// rather than dereferencing the nil service.
+func (suite *TokenValidatorTestSuite) TestValidateAccessToken_NilEnforcementService_Succeeds() {
+	claims := map[string]interface{}{
+		"sub":       "user123",
+		"iss":       "https://example.com",
+		"aud":       "test-app",
+		"client_id": "test-client",
+		"jti":       "at-jti-no-enforcement",
+	}
+	token := suite.createTestAccessToken(claims)
+	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
+
+	validator := &tokenValidator{
+		cfg:        suite.validator.cfg,
+		jwtService: suite.mockJWTService,
+	}
+
+	result, err := validator.ValidateAccessToken(context.Background(), token)
+
+	assert.NoError(suite.T(), err)
+	assert.NotNil(suite.T(), result)
 }
 
 // Refresh token validation enforces the deny list as its final step: a revoked token surfaces
@@ -2096,10 +2138,10 @@ func (suite *TokenValidatorTestSuite) TestValidateRefreshToken_RevocationEnforce
 				"jti":              tc.jti,
 			}
 			token := suite.createTestJWT(claims)
-			suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
+			suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "https://example.com").Return(nil)
 
 			validator := suite.validatorWithEnforcement(tc.jti, tc.returnedErr)
-			result, err := validator.ValidateRefreshToken(context.Background(), token, "test-client")
+			result, err := validator.ValidateRefreshToken(context.Background(), token)
 
 			assert.Nil(suite.T(), result)
 			assert.ErrorIs(suite.T(), err, tc.returnedErr)
@@ -2129,48 +2171,6 @@ func (suite *TokenValidatorTestSuite) TestValidateSubjectToken_SelfIssued_Revoca
 
 			validator := suite.validatorWithEnforcement(tc.jti, tc.returnedErr)
 			result, err := validator.ValidateSubjectToken(context.Background(), token, suite.oauthApp)
-
-			assert.Nil(suite.T(), result)
-			assert.ErrorIs(suite.T(), err, tc.returnedErr)
-		})
-	}
-}
-
-// ValidateToken (used by introspection) verifies the signature, enforces the deny list, and returns
-// the raw claims for a valid, non-revoked token.
-func (suite *TokenValidatorTestSuite) TestValidateToken_Success() {
-	claims := map[string]interface{}{
-		"sub": "user123",
-		"iss": "https://example.com",
-		"jti": "vt-jti-active",
-	}
-	token := suite.createTestJWT(claims)
-	suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
-
-	result, err := suite.validator.ValidateToken(context.Background(), token)
-
-	assert.NoError(suite.T(), err)
-	assert.Equal(suite.T(), "user123", result["sub"])
-	assert.Equal(suite.T(), "vt-jti-active", result["jti"])
-	suite.mockJWTService.AssertExpectations(suite.T())
-}
-
-// ValidateToken enforces the deny list after signature verification: a revoked token surfaces
-// revocation.ErrTokenRevoked (so introspection reports it inactive) and an unavailable deny list
-// fails closed with revocation.ErrEnforcementUnavailable.
-func (suite *TokenValidatorTestSuite) TestValidateToken_RevocationEnforced() {
-	for _, tc := range revocationEnforcementCases("vt") {
-		suite.Run(tc.name, func() {
-			claims := map[string]interface{}{
-				"sub": "user123",
-				"iss": "https://example.com",
-				"jti": tc.jti,
-			}
-			token := suite.createTestJWT(claims)
-			suite.mockJWTService.On("VerifyJWT", mock.Anything, token, "", "").Return(nil)
-
-			validator := suite.validatorWithEnforcement(tc.jti, tc.returnedErr)
-			result, err := validator.ValidateToken(context.Background(), token)
 
 			assert.Nil(suite.T(), result)
 			assert.ErrorIs(suite.T(), err, tc.returnedErr)
@@ -2768,8 +2768,8 @@ func (suite *ExternalIDPValidatorTestSuite) TestValidateSubjectToken_ExternalIDP
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
 	assert.Equal(suite.T(), "user@example.com", result.UserAttributes["email"])
-	_, originalPresent := result.UserAttributes[externalAttribute]
-	assert.False(suite.T(), originalPresent)
+	// Mappings copy rather than rename, so the source claim survives alongside the local attribute.
+	assert.Equal(suite.T(), "user@example.com", result.UserAttributes[externalAttribute])
 	suite.mockIDPService.AssertExpectations(suite.T())
 	suite.mockJWTService.AssertExpectations(suite.T())
 }
@@ -2913,6 +2913,7 @@ type IDJAGValidatorTestSuite struct {
 	mockJWTService         *jwtmock.JWTServiceInterfaceMock
 	mockIDPService         *idpmock.IDPServiceInterfaceMock
 	mockEnforcementService *revocationmock.EnforcementServiceInterfaceMock
+	mockJTIStore           *jtimock.JTIStoreInterfaceMock
 	validator              *tokenValidator
 }
 
@@ -2936,6 +2937,7 @@ func (suite *IDJAGValidatorTestSuite) SetupTest() {
 	suite.mockIDPService = idpmock.NewIDPServiceInterfaceMock(suite.T())
 	suite.mockEnforcementService = revocationmock.NewEnforcementServiceInterfaceMock(suite.T())
 	suite.mockEnforcementService.On("EnsureNotRevoked", mock.Anything, mock.Anything).Return(nil).Maybe()
+	suite.mockJTIStore = jtimock.NewJTIStoreInterfaceMock(suite.T())
 	suite.validator = &tokenValidator{
 		cfg: oauthconfig.Config{
 			JWT: engineconfig.JWTConfig{
@@ -2948,6 +2950,7 @@ func (suite *IDJAGValidatorTestSuite) SetupTest() {
 		jwtService:         suite.mockJWTService,
 		idpService:         suite.mockIDPService,
 		enforcementService: suite.mockEnforcementService,
+		jtiStore:           suite.mockJTIStore,
 	}
 }
 
@@ -2979,8 +2982,10 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_Success() {
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(true, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -3000,8 +3005,10 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_SingleResourceC
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(true, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -3016,8 +3023,10 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_MultipleResourc
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(true, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -3030,8 +3039,10 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_NoResourceClaim
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(true, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
@@ -3041,7 +3052,7 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_NoResourceClaim
 func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_WrongTyp() {
 	assertion := suite.createAssertion(jwt.TokenTypeJWT, suite.idjagClaims())
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -3054,7 +3065,7 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_UntrustedIssuer
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return([]providers.IDPDTO{}, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -3075,7 +3086,7 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_IDJagNotEnabled
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(idpDTOs, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -3098,7 +3109,7 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_InvalidSignatur
 			},
 		})
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -3117,7 +3128,7 @@ func (suite *IDJAGValidatorTestSuite) assertRejectsSignedAssertion(
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -3165,12 +3176,6 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_AudMismatch() {
 	suite.assertRejectsSignedAssertion(claims, "assertion audience does not match server issuer")
 }
 
-func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_ClientIDMismatch() {
-	claims := suite.idjagClaims()
-	claims["client_id"] = "a-different-client"
-	suite.assertRejectsSignedAssertion(claims, "does not match the authenticated client")
-}
-
 func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_MissingClientIDClaim() {
 	claims := suite.idjagClaims()
 	delete(claims, "client_id")
@@ -3194,12 +3199,54 @@ func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_SingleElementAu
 	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
 		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
 	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(true, nil)
 
-	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion, testClientID)
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
 
 	assert.NoError(suite.T(), err)
 	assert.NotNil(suite.T(), result)
 	assert.Equal(suite.T(), "ext-user-123", result.Sub)
 	suite.mockIDPService.AssertExpectations(suite.T())
 	suite.mockJWTService.AssertExpectations(suite.T())
+}
+
+func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_ReplayedJTI() {
+	claims := suite.idjagClaims()
+	assertion := suite.createAssertion(jwt.TokenTypeIDJAG, claims)
+
+	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
+		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
+	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(false, nil)
+
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.ErrorIs(suite.T(), err, ErrAssertionReplayed)
+}
+
+func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_JTIStoreError() {
+	claims := suite.idjagClaims()
+	assertion := suite.createAssertion(jwt.TokenTypeIDJAG, claims)
+
+	suite.mockIDPService.On("GetIdentityProvidersByProperty", context.Background(),
+		idp.PropIssuer, testExternalIssuer).Return(buildIDJAGIDPDTOs(), nil)
+	suite.mockJWTService.On("VerifyJWTSignatureWithJWKS", mock.Anything, assertion, testExternalJWKS).Return(nil)
+	suite.mockJTIStore.On("RecordJTI", mock.Anything, idjagJTINamespace, testIDJAGAssertionJTI,
+		mock.AnythingOfType("time.Time")).Return(false, fmt.Errorf("store unavailable"))
+
+	result, err := suite.validator.ValidateIDJAGAssertion(context.Background(), assertion)
+
+	assert.Error(suite.T(), err)
+	assert.Nil(suite.T(), result)
+	assert.Contains(suite.T(), err.Error(), "failed to record assertion jti")
+}
+
+func (suite *IDJAGValidatorTestSuite) TestValidateIDJAGAssertion_JTIExceedsMaxLength() {
+	claims := suite.idjagClaims()
+	claims["jti"] = strings.Repeat("a", 257)
+	suite.assertRejectsSignedAssertion(claims, "assertion 'jti' exceeds maximum length")
 }

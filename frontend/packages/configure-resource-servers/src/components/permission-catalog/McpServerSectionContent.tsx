@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Alert, Box, CircularProgress, Typography} from '@wso2/oxygen-ui';
 import {type JSX} from 'react';
@@ -31,6 +16,7 @@ interface CatalogSubsectionProps {
   resourceServerId: string;
   selected: ResourcePermissions[];
   readOnly: boolean;
+  delimiter: string;
   onChange: (selected: ResourcePermissions[]) => void;
 }
 
@@ -40,6 +26,7 @@ function CatalogSubsection({
   resourceServerId,
   selected,
   readOnly,
+  delimiter,
   onChange,
 }: CatalogSubsectionProps): JSX.Element | null {
   if (actions.length === 0) return null;
@@ -67,7 +54,7 @@ function CatalogSubsection({
           depth={1}
           checked={isPermissionSelected(selected, resourceServerId, action.permission)}
           disabled={readOnly}
-          onToggle={() => onChange(togglePermission(selected, resourceServerId, action.permission))}
+          onToggle={() => onChange(togglePermission(selected, resourceServerId, action.permission, delimiter))}
         />
       ))}
     </>
@@ -125,6 +112,7 @@ export default function McpServerSectionContent({
         resourceServerId={server.id}
         selected={selected}
         readOnly={readOnly}
+        delimiter={delimiter}
         onChange={onChange}
       />
       <CatalogSubsection
@@ -133,6 +121,7 @@ export default function McpServerSectionContent({
         resourceServerId={server.id}
         selected={selected}
         readOnly={readOnly}
+        delimiter={delimiter}
         onChange={onChange}
       />
       {resources.map((resource) => (

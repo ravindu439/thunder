@@ -7,7 +7,7 @@ package providermock
 import (
 	mock "github.com/stretchr/testify/mock"
 	"github.com/thunder-id/thunderid/internal/system/database/provider"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // NewDBProviderInterfaceMock creates a new instance of DBProviderInterfaceMock. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -93,23 +93,23 @@ func (_c *DBProviderInterfaceMock_GetConfigDBClient_Call) RunAndReturn(run func(
 }
 
 // GetConfigDBTransactioner provides a mock function for the type DBProviderInterfaceMock
-func (_mock *DBProviderInterfaceMock) GetConfigDBTransactioner() (transaction.Transactioner, error) {
+func (_mock *DBProviderInterfaceMock) GetConfigDBTransactioner() (providers.Transactioner, error) {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetConfigDBTransactioner")
 	}
 
-	var r0 transaction.Transactioner
+	var r0 providers.Transactioner
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (transaction.Transactioner, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func() (providers.Transactioner, error)); ok {
 		return returnFunc()
 	}
-	if returnFunc, ok := ret.Get(0).(func() transaction.Transactioner); ok {
+	if returnFunc, ok := ret.Get(0).(func() providers.Transactioner); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transaction.Transactioner)
+			r0 = ret.Get(0).(providers.Transactioner)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func() error); ok {
@@ -137,12 +137,12 @@ func (_c *DBProviderInterfaceMock_GetConfigDBTransactioner_Call) Run(run func())
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetConfigDBTransactioner_Call) Return(transactioner transaction.Transactioner, err error) *DBProviderInterfaceMock_GetConfigDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetConfigDBTransactioner_Call) Return(transactioner providers.Transactioner, err error) *DBProviderInterfaceMock_GetConfigDBTransactioner_Call {
 	_c.Call.Return(transactioner, err)
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetConfigDBTransactioner_Call) RunAndReturn(run func() (transaction.Transactioner, error)) *DBProviderInterfaceMock_GetConfigDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetConfigDBTransactioner_Call) RunAndReturn(run func() (providers.Transactioner, error)) *DBProviderInterfaceMock_GetConfigDBTransactioner_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -203,23 +203,23 @@ func (_c *DBProviderInterfaceMock_GetEntityDBClient_Call) RunAndReturn(run func(
 }
 
 // GetEntityDBTransactioner provides a mock function for the type DBProviderInterfaceMock
-func (_mock *DBProviderInterfaceMock) GetEntityDBTransactioner() (transaction.Transactioner, error) {
+func (_mock *DBProviderInterfaceMock) GetEntityDBTransactioner() (providers.Transactioner, error) {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetEntityDBTransactioner")
 	}
 
-	var r0 transaction.Transactioner
+	var r0 providers.Transactioner
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (transaction.Transactioner, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func() (providers.Transactioner, error)); ok {
 		return returnFunc()
 	}
-	if returnFunc, ok := ret.Get(0).(func() transaction.Transactioner); ok {
+	if returnFunc, ok := ret.Get(0).(func() providers.Transactioner); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transaction.Transactioner)
+			r0 = ret.Get(0).(providers.Transactioner)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func() error); ok {
@@ -247,12 +247,12 @@ func (_c *DBProviderInterfaceMock_GetEntityDBTransactioner_Call) Run(run func())
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetEntityDBTransactioner_Call) Return(transactioner transaction.Transactioner, err error) *DBProviderInterfaceMock_GetEntityDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetEntityDBTransactioner_Call) Return(transactioner providers.Transactioner, err error) *DBProviderInterfaceMock_GetEntityDBTransactioner_Call {
 	_c.Call.Return(transactioner, err)
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetEntityDBTransactioner_Call) RunAndReturn(run func() (transaction.Transactioner, error)) *DBProviderInterfaceMock_GetEntityDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetEntityDBTransactioner_Call) RunAndReturn(run func() (providers.Transactioner, error)) *DBProviderInterfaceMock_GetEntityDBTransactioner_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -313,23 +313,23 @@ func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBClient_Call) RunAndRetur
 }
 
 // GetRuntimePersistentDBTransactioner provides a mock function for the type DBProviderInterfaceMock
-func (_mock *DBProviderInterfaceMock) GetRuntimePersistentDBTransactioner() (transaction.Transactioner, error) {
+func (_mock *DBProviderInterfaceMock) GetRuntimePersistentDBTransactioner() (providers.Transactioner, error) {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRuntimePersistentDBTransactioner")
 	}
 
-	var r0 transaction.Transactioner
+	var r0 providers.Transactioner
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (transaction.Transactioner, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func() (providers.Transactioner, error)); ok {
 		return returnFunc()
 	}
-	if returnFunc, ok := ret.Get(0).(func() transaction.Transactioner); ok {
+	if returnFunc, ok := ret.Get(0).(func() providers.Transactioner); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transaction.Transactioner)
+			r0 = ret.Get(0).(providers.Transactioner)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func() error); ok {
@@ -357,12 +357,12 @@ func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call) Run(
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call) Return(transactioner transaction.Transactioner, err error) *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call) Return(transactioner providers.Transactioner, err error) *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call {
 	_c.Call.Return(transactioner, err)
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call) RunAndReturn(run func() (transaction.Transactioner, error)) *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call) RunAndReturn(run func() (providers.Transactioner, error)) *DBProviderInterfaceMock_GetRuntimePersistentDBTransactioner_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -423,23 +423,23 @@ func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBClient_Call) RunAndReturn
 }
 
 // GetRuntimeTransientDBTransactioner provides a mock function for the type DBProviderInterfaceMock
-func (_mock *DBProviderInterfaceMock) GetRuntimeTransientDBTransactioner() (transaction.Transactioner, error) {
+func (_mock *DBProviderInterfaceMock) GetRuntimeTransientDBTransactioner() (providers.Transactioner, error) {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetRuntimeTransientDBTransactioner")
 	}
 
-	var r0 transaction.Transactioner
+	var r0 providers.Transactioner
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (transaction.Transactioner, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func() (providers.Transactioner, error)); ok {
 		return returnFunc()
 	}
-	if returnFunc, ok := ret.Get(0).(func() transaction.Transactioner); ok {
+	if returnFunc, ok := ret.Get(0).(func() providers.Transactioner); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(transaction.Transactioner)
+			r0 = ret.Get(0).(providers.Transactioner)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func() error); ok {
@@ -467,12 +467,12 @@ func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call) Run(r
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call) Return(transactioner transaction.Transactioner, err error) *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call) Return(transactioner providers.Transactioner, err error) *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call {
 	_c.Call.Return(transactioner, err)
 	return _c
 }
 
-func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call) RunAndReturn(run func() (transaction.Transactioner, error)) *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call {
+func (_c *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call) RunAndReturn(run func() (providers.Transactioner, error)) *DBProviderInterfaceMock_GetRuntimeTransientDBTransactioner_Call {
 	_c.Call.Return(run)
 	return _c
 }

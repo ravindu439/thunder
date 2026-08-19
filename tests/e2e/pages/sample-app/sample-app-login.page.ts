@@ -1,33 +1,19 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Sample App Login Page Object
  *
- * Page Object Model for the React Vanilla Sample App login functionality.
- * Provides methods to interact with login form and verify authentication.
+ * Page Object Model for the React SDK Sample App login functionality. Home-page chrome
+ * (sign-in button, post-login landing) is specific to this app's SDK-rendered button; the login
+ * form is shared gate behavior, inherited from GateLoginPage. logout() is defined here
  */
 
-import { Page, expect } from "@playwright/test";
-import { BasePage } from "../base.page";
+import { Page, expect, Response } from "@playwright/test";
+import { GateLoginPage } from "../gate-login.page";
 import { Timeouts } from "../../constants/timeouts";
 
-export class SampleAppLoginPage extends BasePage {
+export class SampleAppLoginPage extends GateLoginPage {
   constructor(page: Page) {
     super(page);
   }
@@ -57,109 +43,67 @@ export class SampleAppLoginPage extends BasePage {
     await signInButton.click();
   }
 
-  async verifyLoginPageLoaded() {
-    await this.page.waitForSelector('input[name="username"], input[placeholder*="username" i]', {
-      timeout: Timeouts.NETWORK_IDLE,
-      state: "visible",
+  /**
+   * Click a "Continue with <provider>" social login trigger rendered by the auth flow.
+   * The browser navigates away to the provider's (or its mock's) authorize endpoint as a result.
+   * @param provider - Provider name as it appears on the button, e.g. "Google" or "GitHub"
+   */
+  async clickContinueWith(provider: string) {
+    const socialButton = this.page.locator(`button:has-text("Continue with ${provider}")`).first();
+    await socialButton.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
+    await socialButton.click();
+  }
+
+  /**
+   * Navigate to the sample app and click through to the sign-in form.
+   * @param url - Sample app URL
+   */
+  async gotoLoginPage(url: string) {
+    await this.goto(url);
+    await this.verifyHomePageLoaded();
+    await this.clickSignInButton();
+    await this.verifyLoginPageLoaded();
+  }
+
+  /**
+   * Drive the sample app through "Continue with <provider>", waiting for the flow-execute
+   * response that carries the final assertion rather than a post-login UI redirect - the
+   * browser round-trips through the provider's (or its mock's) authorize endpoint and back, and
+   * network-level assertion is robust to exactly when the SPA finishes re-rendering (see
+   * sample-app-mfa-login.spec.ts TC003 for the same rationale).
+   * @param provider - Provider name as it appears on the button, e.g. "Google" or "GitHub"
+   * @param url - Sample app URL
+   */
+  async loginWithProvider(provider: string, url: string): Promise<Response> {
+    await this.gotoLoginPage(url);
+
+    const [completionResponse] = await Promise.all([
+      this.page.waitForResponse(
+        async resp => {
+          if (!resp.url().includes("/flow/execute") || resp.request().method() !== "POST") return false;
+          try {
+            const body = await resp.json();
+            return body.flowStatus === "COMPLETE";
+          } catch {
+            return false;
+          }
+        },
+        { timeout: Timeouts.REDIRECT }
+      ),
+      this.clickContinueWith(provider),
+    ]);
+
+    return completionResponse;
+  }
+
+  /**
+   * Verify a sign-in-failed error is shown, e.g. after a social provider denies access.
+   */
+  async verifySignInError() {
+    const errorLocator = this.page.locator('.MuiAlert-colorError, [role="alert"]').first();
+    await expect(errorLocator, "an error must be shown when sign-in fails").toBeVisible({
+      timeout: Timeouts.REDIRECT,
     });
-  }
-
-  /**
-   * Fill in the login form
-   * @param username - Username to enter
-   * @param password - Password to enter
-   */
-  async fillLoginForm(username: string, password: string) {
-    // Fill username
-    const usernameInput = this.page.locator('input[name="username"], input[placeholder*="username" i]').first();
-    await usernameInput.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-    await usernameInput.fill(username);
-
-    // Fill password
-    const passwordInput = this.page.locator('input[name="password"], input[placeholder*="password" i]').first();
-    await passwordInput.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-    await passwordInput.fill(password);
-  }
-
-  /**
-   * Click the login/sign in button
-   */
-  async clickLogin() {
-    // Try multiple selector strategies for the login button
-    const loginButton = this.page
-      .locator(
-        'button[type="submit"], button:has-text("Sign In"), button:has-text("Login"), button:has-text("Sign in")'
-      )
-      .first();
-
-    await loginButton.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-    await loginButton.click();
-  }
-
-  /**
-   * Perform complete login flow
-   * @param username - Username to login with
-   * @param password - Password to login with
-   */
-  async login(username: string, password: string) {
-    await this.fillLoginForm(username, password);
-    await this.clickLogin();
-
-    // Wait for navigation/response after login
-    await this.page.waitForLoadState("networkidle");
-  }
-
-  /**
-   * Verify user is logged in successfully
-   * Checks for common indicators like avatar, profile information, or welcome message
-   */
-  async verifyLoggedIn() {
-    // Wait for login to complete - look for logged-in state indicators
-    await this.page.waitForLoadState("networkidle");
-
-    // Check for common logged-in indicators (adjust selectors based on your app)
-    const loggedInIndicators = [
-      'button[aria-haspopup="true"]', // Avatar menu button
-      'button:has(> div[class*="MuiAvatar"])', // Avatar button
-      '[role="menuitem"]:has-text("Sign Out")', // May be visible if menu is open
-      '[data-testid="user-profile"]',
-      "text=/welcome|hello/i",
-      ".user-profile",
-      ".logged-in",
-      ".token-container", // Token display container
-    ];
-
-    // Wait for at least one indicator to appear
-    let found = false;
-    for (const selector of loggedInIndicators) {
-      const element = this.page.locator(selector).first();
-      const count = await element.count();
-      if (count > 0) {
-        const isVisible = await element.isVisible().catch(() => false);
-        if (isVisible) {
-          found = true;
-          break;
-        }
-      }
-    }
-
-    // If none of the indicators are found, check if we're no longer on login page
-    if (!found) {
-      // Verify login form is no longer visible
-      const usernameInput = this.page.locator('input[name="username"], input[placeholder*="username" i]');
-      const usernameCount = await usernameInput.count();
-
-      if (usernameCount > 0) {
-        const isLoginFormVisible = await usernameInput
-          .first()
-          .isVisible()
-          .catch(() => false);
-        expect(isLoginFormVisible).toBe(false);
-      }
-    }
-
-    // Take a screenshot for verification
-    await this.screenshot("logged-in-state");
   }
 
   /**
@@ -171,56 +115,27 @@ export class SampleAppLoginPage extends BasePage {
   }
 
   /**
-   * Click logout button
-   * The logout option is in a dropdown menu accessed via Avatar button
+   * Click logout button, composed from GateLoginPage's shared primitives (there is no shared
+   * logout() to override - see gate-login.page.ts). This app's RP-initiated logout always shows
+   * the gate's sign-out confirmation screen before completing, so it's confirmed here.
    */
   async logout() {
-    // First, look for the avatar/menu button to open the menu
-    const avatarButton = this.page
-      .locator(
-        'button[aria-haspopup="true"], button[aria-controls="account-menu"], button:has(> div[class*="MuiAvatar"])'
-      )
-      .first();
+    await this.triggerSignOutFromAvatarMenu();
 
-    // Check if avatar button exists (indicates logged in state with menu)
-    const avatarCount = await avatarButton.count();
+    const confirmSignOutButton = this.page.getByRole("button", { name: "Sign out", exact: true });
+    await confirmSignOutButton.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
+    await confirmSignOutButton.click();
 
-    if (avatarCount > 0) {
-      // Click avatar to open menu
-      await avatarButton.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-      await avatarButton.click();
-
-      // Wait for menu to appear
-      await this.page.waitForSelector('#account-menu, [role="menu"]', {
-        state: "visible",
-        timeout: Timeouts.DEFAULT_ACTION,
-      });
-
-      // Click the Sign Out menu item
-      const signOutMenuItem = this.page
-        .locator('[role="menuitem"]:has-text("Sign Out"), [role="menuitem"]:has-text("Logout")')
-        .first();
-
-      await signOutMenuItem.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-      await signOutMenuItem.click();
-    } else {
-      // Fallback: Try direct logout button (for other app implementations)
-      const logoutButton = this.page
-        .locator('button:has-text("Logout"), button:has-text("Sign Out"), [data-testid="logout-button"]')
-        .first();
-
-      await logoutButton.waitFor({ state: "visible", timeout: Timeouts.DEFAULT_ACTION });
-      await logoutButton.click();
-    }
-
-    await this.page.waitForLoadState("networkidle");
+    await this.waitForRedirectAwayFromGate();
   }
 
   /**
    * Verify logout was successful
+   * RP-initiated logout redirects back to the app's post-logout redirect URI (the home page),
+   * not the login form.
    */
   async verifyLoggedOut() {
-    await this.verifyLoginPageLoaded();
+    await this.verifyHomePageLoaded();
   }
 
   /**
@@ -293,14 +208,24 @@ export class SampleAppLoginPage extends BasePage {
   }
 
   /**
-   * Complete OTP verification step
+   * Complete OTP verification step. Callers verify the result themselves (verifyLoggedIn(),
+   * getOTPErrorMessage(), etc.), so there's no wait here beyond the click.
    * @param otp - OTP code to verify
    */
   async verifyOTP(otp: string) {
     await this.fillOTP(otp);
     await this.clickVerifyOTP();
+  }
 
-    // Wait for navigation/response after OTP verification
-    await this.page.waitForLoadState("networkidle");
+  /**
+   * Returns the visible OTP error message text, or an empty string if none is present.
+   */
+  async getOTPErrorMessage(): Promise<string> {
+    const text = await this.page
+      .locator(".MuiAlert-message, .MuiAlert-colorError .MuiAlertTitle-root")
+      .first()
+      .textContent()
+      .catch(() => "");
+    return text?.trim() ?? "";
   }
 }

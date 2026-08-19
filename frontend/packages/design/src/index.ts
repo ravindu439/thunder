@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Theme API hooks
 export {default as useGetThemes} from './api/useGetThemes';
@@ -41,7 +26,7 @@ export {default as useGetDesignResolve} from './api/useGetDesignResolve';
 export {default as DesignQueryKeys} from './constants/design-query-keys';
 
 // Font constants
-export {BROWSER_SAFE_FONTS} from './constants/fonts';
+export {BROWSER_SAFE_FONTS, DEFAULT_FONT_STACK} from './constants/fonts';
 
 // Context
 export {default as DesignContext} from './contexts/Design/DesignContext';
@@ -61,8 +46,10 @@ export * from './models/responses';
 export * from './models/theme';
 
 // Components
-export {default as GoogleFontLoader} from './components/GoogleFontLoader';
-export type {GoogleFontLoaderProps} from './components/GoogleFontLoader';
+export {default as FontImporter} from './components/FontImporter';
+export type {FontImporterProps} from './components/FontImporter';
+
+export {default as useFontStylesheetLink} from './components/useFontStylesheetLink';
 
 export {default as QrCode} from './components/QrCode';
 export type {QrCodeProps} from './components/QrCode';
@@ -99,5 +86,8 @@ export {default as TimerAdapter} from './components/flow/adapters/TimerAdapter';
 // Utils
 export {default as extractLayoutFromDesign} from './utils/extractLayoutFromDesign';
 export {default as getIntegrationIcon} from './utils/getIntegrationIcon';
+export {default as getStackGridSx, parseStackItems, type StackGridInput} from './utils/getStackGridSx';
+export {default as mapEmbeddedFlowTextColor} from './utils/mapEmbeddedFlowTextColor';
 export {default as mapEmbeddedFlowTextVariant} from './utils/mapEmbeddedFlowTextVariant';
 export {sanitizeCss, isValidStylesheetUrl, isInsecureStylesheetUrl} from './utils/cssSanitizer';
+export {default as getCspNonce} from './utils/getCspNonce';

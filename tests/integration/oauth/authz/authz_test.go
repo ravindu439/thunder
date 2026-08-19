@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
@@ -220,6 +205,7 @@ func (ts *AuthzTestSuite) SetupSuite() {
 		"name":                      appName,
 		"description":               "Application for authorization integration tests",
 		"ouId":                      testOUID,
+		"type":                      "fullstack",
 		"authFlowId":                ts.authFlowID,
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"authz-test-person"},
@@ -1454,6 +1440,7 @@ func (ts *AuthzTestSuite) TestAuthorizationCodeFlow_IDToken_JWE() {
 		"name":                      "AuthzIDTokenJWETestApp",
 		"description":               "Test app for ID token JWE integration",
 		"ouId":                      testOUID,
+		"type":                      "fullstack",
 		"authFlowId":                ts.authFlowID,
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"authz-test-person"},
@@ -1613,6 +1600,141 @@ func (ts *AuthzTestSuite) TestAssertionBoundToAuthorizationRequest() {
 	code, err := testutils.ExtractAuthorizationCode(successResp.RedirectURI)
 	ts.Require().NoError(err, "Legitimate callback should issue an authorization code")
 	ts.NotEmpty(code, "Authorization code must be issued for the matching authId/assertion pair")
+}
+
+// TestFlowFailurePropagatesToClientRedirect verifies the end-to-end failure path: a flow that
+// terminates in ERROR mints a signed error assertion, and relaying that assertion to the callback
+// produces an RFC 6749 error redirect to the client instead of leaving the request to expire.
+//
+// The trigger is an invalid challenge token. The ChallengeTokenInterceptor runs PRE_REQUEST on every
+// flow, so this needs no special graph — and unlike a wrong password (which the credentials executor
+// turns into a re-prompt, never a terminal failure) it reliably reaches FlowStatusError.
+func (ts *AuthzTestSuite) TestFlowFailurePropagatesToClientRedirect() {
+	username := "flow_failure_user"
+	password := "testpass123"
+
+	user := testutils.User{
+		OUID: testOUID,
+		Type: "authz-test-person",
+		Attributes: json.RawMessage(`{
+			"username": "flow_failure_user",
+			"password": "testpass123",
+			"email": "flow_failure_user@example.com",
+			"given_name": "Flow",
+			"family_name": "Failure"
+		}`),
+	}
+	userID, err := testutils.CreateUser(user)
+	ts.Require().NoError(err, "Failed to create test user")
+	defer func() {
+		if err := testutils.DeleteUser(userID); err != nil {
+			ts.T().Logf("Warning: Failed to delete test user: %v", err)
+		}
+	}()
+
+	authID, errorAssertion := ts.runFlowToErrorAssertion(username, password, "failure_state_a")
+
+	authzResponse, err := testutils.CompleteAuthorization(authID, errorAssertion)
+	ts.Require().NoError(err, "Callback should return a redirect (200), not an HTTP error")
+
+	parsed, err := url.Parse(authzResponse.RedirectURI)
+	ts.Require().NoError(err, "Failed to parse client redirect URI")
+	ts.Equal("access_denied", parsed.Query().Get("error"),
+		"An end-user flow failure must reach the client as access_denied")
+	ts.Equal("failure_state_a", parsed.Query().Get("state"),
+		"The client's state must be echoed back on the error redirect")
+	ts.NotEmpty(parsed.Query().Get("iss"), "The error redirect must carry the issuer")
+	ts.Empty(parsed.Query().Get("code"), "No authorization code may be issued for a failed flow")
+	// The description comes from the flow's own error, not the fixed fallback message.
+	ts.Equal("The challenge token is missing or invalid", parsed.Query().Get("error_description"),
+		"The flow error description should be surfaced to the client")
+
+	// Positive control: the failure path must not have broken the success path on the same fixtures.
+	successAuthID, assertion := ts.runFlowToAssertion(username, password, "failure_state_ok")
+	successResp, err := testutils.CompleteAuthorization(successAuthID, assertion)
+	ts.Require().NoError(err, "Legitimate callback should succeed")
+	code, err := testutils.ExtractAuthorizationCode(successResp.RedirectURI)
+	ts.Require().NoError(err, "Legitimate callback should issue an authorization code")
+	ts.NotEmpty(code, "Authorization code must still be issued after a failed flow")
+}
+
+// TestErrorAssertionBoundToAuthorizationRequest verifies that an error assertion is non-transferable
+// and, crucially, that rejecting one does not consume the authorization request it was aimed at.
+// Verification runs before the request context is loaded precisely so a caller holding only a live
+// authId cannot destroy a pending authorization.
+func (ts *AuthzTestSuite) TestErrorAssertionBoundToAuthorizationRequest() {
+	username := "error_binding_user"
+	password := "testpass123"
+
+	user := testutils.User{
+		OUID: testOUID,
+		Type: "authz-test-person",
+		Attributes: json.RawMessage(`{
+			"username": "error_binding_user",
+			"password": "testpass123",
+			"email": "error_binding_user@example.com",
+			"given_name": "Error",
+			"family_name": "Binding"
+		}`),
+	}
+	userID, err := testutils.CreateUser(user)
+	ts.Require().NoError(err, "Failed to create test user")
+	defer func() {
+		if err := testutils.DeleteUser(userID); err != nil {
+			ts.T().Logf("Warning: Failed to delete test user: %v", err)
+		}
+	}()
+
+	// Flow A fails and yields an error assertion bound to authIDA. Flow B is a live, untouched request.
+	_, errorAssertionA := ts.runFlowToErrorAssertion(username, password, "error_binding_a")
+	authIDB, assertionB := ts.runFlowToAssertion(username, password, "error_binding_b")
+
+	// Aim A's error assertion at B's authId: the binding claim names authIDA, so it must be rejected.
+	rejected, err := testutils.CompleteAuthorization(authIDB, errorAssertionA)
+	ts.Require().NoError(err, "Callback should return a redirect (200), not an HTTP error")
+	parsed, err := url.Parse(rejected.RedirectURI)
+	ts.Require().NoError(err, "Failed to parse redirect URI")
+	ts.Empty(parsed.Query().Get("code"), "A mismatched error assertion must not issue a code")
+
+	// authIDB must have survived the rejection, so its own assertion still completes normally.
+	successResp, err := testutils.CompleteAuthorization(authIDB, assertionB)
+	ts.Require().NoError(err, "The untouched authorization request should still complete")
+	code, err := testutils.ExtractAuthorizationCode(successResp.RedirectURI)
+	ts.Require().NoError(err,
+		"A rejected error assertion must not consume the authorization request it targeted")
+	ts.NotEmpty(code, "Authorization code must be issued after the rejected error assertion")
+}
+
+// runFlowToErrorAssertion drives an OAuth2-initiated flow to a terminal failure and returns the authId
+// along with the signed error assertion minted for it.
+func (ts *AuthzTestSuite) runFlowToErrorAssertion(username, password, state string) (string, string) {
+	resp, err := testutils.InitiateAuthorizationFlow(clientID, redirectURI, "code", "openid", state)
+	ts.Require().NoError(err, "Failed to initiate authorization flow")
+	defer resp.Body.Close()
+
+	ts.Require().Equal(http.StatusFound, resp.StatusCode, "Expected redirect status")
+
+	authID, executionID, err := testutils.ExtractAuthData(resp.Header.Get("Location"))
+	ts.Require().NoError(err, "Failed to extract auth data from redirect")
+
+	_, err = testutils.ExecuteAuthenticationFlow(executionID, nil, "")
+	ts.Require().NoError(err, "Failed to initiate authentication flow")
+
+	// Submitting a bad challenge token fails the PRE_REQUEST interceptor, which has no onFailure
+	// target, so the flow terminates in ERROR rather than re-prompting.
+	flowStep, err := testutils.ExecuteAuthenticationFlow(executionID, map[string]string{
+		"username": username,
+		"password": password,
+	}, "action_001", "wrong-challenge-token")
+	ts.Require().NoError(err, "Flow step should be returned for an invalid challenge token")
+	ts.Require().Equal("ERROR", flowStep.FlowStatus, "Flow should terminate in ERROR")
+	ts.Require().NotNil(flowStep.Error, "Terminal failure should carry an error")
+	ts.Require().Equal("ICS-1002", flowStep.Error.Code, "Expected the invalid challenge token error")
+	ts.Require().NotEmpty(flowStep.ErrorAssertion,
+		"An OAuth-initiated flow failure must mint an error assertion")
+	ts.Require().Empty(flowStep.Assertion, "A failed flow must not produce an authentication assertion")
+
+	return authID, flowStep.ErrorAssertion
 }
 
 // runFlowToAssertion initiates an OAuth2 authorize flow, drives the authentication flow to

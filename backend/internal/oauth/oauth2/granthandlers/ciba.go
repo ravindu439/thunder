@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -27,6 +12,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/attributecache"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/ciba"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/resourceindicators"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
@@ -162,6 +148,11 @@ func (h *cibaGrantHandler) HandleGrant(ctx context.Context, tokenRequest *model.
 			Error:            constants.ErrorAccessDenied,
 			ErrorDescription: "The user denied the authentication request",
 		}
+	case ciba.CIBAStateFailed:
+		return nil, &model.ErrorResponse{
+			Error:            constants.ErrorServerError,
+			ErrorDescription: "Authentication could not be completed due to a server error",
+		}
 	case ciba.CIBAStateConsumed:
 		return nil, &model.ErrorResponse{
 			Error:            constants.ErrorInvalidGrant,
@@ -230,7 +221,7 @@ func (h *cibaGrantHandler) issueTokens(ctx context.Context, record *ciba.CIBAAut
 	}
 
 	userSubConfig := oauthApp.UserAccessTokenConfig()
-	accessToken, err := h.tokenBuilder.BuildAccessToken(ctx, &tokenservice.AccessTokenBuildContext{
+	accessTokenCtx := &tokenservice.AccessTokenBuildContext{
 		Subject:           record.UserID,
 		Audiences:         accessTokenAudiences,
 		ClientID:          oauthApp.ClientID,
@@ -240,7 +231,12 @@ func (h *cibaGrantHandler) issueTokens(ctx context.Context, record *ciba.CIBAAut
 		GrantType:         string(providers.GrantTypeCIBA),
 		OAuthApp:          oauthApp,
 		ValidityPeriod:    userSubConfig.ValidityPeriodOrZero(),
-	})
+		DPoPJkt:           dpop.GetJkt(ctx),
+	}
+	if oauthApp.ShouldAppendActorClaim() {
+		accessTokenCtx.ActorClaims = &tokenservice.SubjectTokenClaims{Sub: oauthApp.ID}
+	}
+	accessToken, err := h.tokenBuilder.BuildAccessToken(ctx, accessTokenCtx)
 	if err != nil {
 		h.logger.Error(ctx, "Failed to generate access token", log.Error(err))
 		return nil, &model.ErrorResponse{
@@ -297,8 +293,9 @@ func (h *cibaGrantHandler) issueTokens(ctx context.Context, record *ciba.CIBAAut
 
 // resolveIssuedAudiencesAndScopes derives the access-token audiences and scopes for a CIBA record.
 // A resource-bound record yields the RS identifier as the sole audience, with permission scopes
-// refiltered against that RS. An unbound OIDC-only record keeps the client audience; an unbound
-// record that unexpectedly carries permission scopes is rejected with invalid_grant.
+// refiltered against that RS. An unbound OIDC-only record uses the app's configured default
+// audience, falling back to the client_id; an unbound record that unexpectedly carries permission
+// scopes is rejected with invalid_grant.
 func (h *cibaGrantHandler) resolveIssuedAudiencesAndScopes(ctx context.Context,
 	record *ciba.CIBAAuthRequest, oauthApp *providers.OAuthClient, scopeStr string,
 ) ([]string, []string, *model.ErrorResponse) {
@@ -311,7 +308,7 @@ func (h *cibaGrantHandler) resolveIssuedAudiencesAndScopes(ctx context.Context,
 				ErrorDescription: "The authentication request is not bound to a resource server",
 			}
 		}
-		return []string{oauthApp.ClientID}, oidcScopes, nil
+		return []string{oauthApp.ResolveDefaultAudience(oauthApp.ClientID)}, oidcScopes, nil
 	}
 
 	resourceIdentifier := record.Resources[0]

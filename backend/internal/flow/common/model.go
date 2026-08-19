@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package common
 
@@ -67,20 +52,21 @@ type Prompt struct {
 
 // NodeResponse represents the response from a node execution
 type NodeResponse struct {
-	Status         NodeStatus              `json:"status"`
-	Type           NodeResponseType        `json:"type"`
-	Error          *tidcommon.ServiceError `json:"error,omitempty"`
-	Inputs         []providers.Input       `json:"inputs,omitempty"`
-	AdditionalData map[string]string       `json:"additionalData,omitempty"`
-	RedirectURL    string                  `json:"redirectUrl,omitempty"`
-	Actions        []Action                `json:"actions,omitempty"`
-	Meta           interface{}             `json:"meta,omitempty"`
-	NextNodeID     string                  `json:"nextNodeId,omitempty"`
-	RuntimeData    map[string]string       `json:"runtimeData,omitempty"`
-	ForwardedData  map[string]interface{}  `json:"forwardedData,omitempty"`
-	Assertion      string                  `json:"assertion,omitempty"`
-	FieldErrors    []FieldError            `json:"fieldErrors,omitempty"`
-	AuthUser       providers.AuthUser      `json:"-"`
+	Status            NodeStatus              `json:"status"`
+	Type              NodeResponseType        `json:"type"`
+	Error             *tidcommon.ServiceError `json:"error,omitempty"`
+	Inputs            []providers.Input       `json:"inputs,omitempty"`
+	AdditionalData    map[string]string       `json:"additionalData,omitempty"`
+	RedirectURL       string                  `json:"redirectUrl,omitempty"`
+	Actions           []Action                `json:"actions,omitempty"`
+	Meta              interface{}             `json:"meta,omitempty"`
+	NextNodeID        string                  `json:"nextNodeId,omitempty"`
+	RuntimeData       map[string]string       `json:"runtimeData,omitempty"`
+	SharedRuntimeData map[string]string       `json:"-"`
+	ForwardedData     map[string]interface{}  `json:"forwardedData,omitempty"`
+	Assertion         string                  `json:"assertion,omitempty"`
+	FieldErrors       []FieldError            `json:"fieldErrors,omitempty"`
+	AuthUser          providers.AuthUser      `json:"-"`
 	// EngineData carries executor output the engine consumes internally; never serialized to the client.
 	EngineData       map[string]string `json:"-"`
 	CallTargetFlowID string            `json:"callTargetFlowId,omitempty"`

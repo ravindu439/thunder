@@ -69,6 +69,78 @@ reviews:
         - <item 2>: <what needs to be documented and which file to update or create>
         - ..."
 
+    - path: "**/*_test.go"
+      instructions: |
+        Intermittent test failure detection. Scrutinize every changed test, helper, or setup
+        function for patterns that can cause non-deterministic (flaky) outcomes. Common patterns
+        include but are not limited to:
+
+        - **Encoding/decoding equivalence**: mutating a base64 (or hex, URL-encoding, etc.)
+          string in a position where the change does not alter the decoded bytes (e.g., flipping
+          the last character of a `base64.RawURLEncoding` string may produce identical decoded
+          output depending on input length and padding alignment).
+        - **Map iteration order**: relying on the order of `range` over a Go map, which is
+          randomized per iteration.
+        - **Time-dependent assertions**: comparing timestamps with `time.Now()` or fixed
+          durations without tolerance, sleeping for a fixed duration and asserting state, or
+          assuming wall-clock ordering across goroutines.
+        - **Port/resource conflicts**: hardcoded ports, temp file paths, or shared resources
+          that collide when tests run in parallel.
+        - **Goroutine races**: shared mutable state accessed from test goroutines without
+          synchronization, or `t.Parallel()` tests closing over loop variables.
+        - **Random/non-deterministic input**: using `rand` without a fixed seed, or generating
+          values that can collide (e.g., UUID-based names that are later asserted by position).
+        - **External service timing**: assertions that depend on an external server, database,
+          or network call completing within an implicit timeout.
+        - **Flaky cleanup**: `defer` cleanup that races with asynchronous operations, or
+          teardown that depends on creation having fully completed.
+
+        When any of these patterns is detected, flag it as a **critical issue** (not major,
+        not a suggestion) using this format:
+
+        "🔴 **Intermittent test failure**: <description of the non-deterministic pattern>.
+        This will pass most of the time but fail unpredictably in CI, wasting maintainer time
+        and eroding trust in the test suite."
+
+        Provide a concrete explanation of the failure scenario (inputs/state that trigger the
+        flake) and suggest a deterministic fix.
+
+    - path: "tests/**"
+      instructions: |
+        Intermittent test failure detection. Scrutinize every changed test, helper, or setup
+        function for patterns that can cause non-deterministic (flaky) outcomes. Common patterns
+        include but are not limited to:
+
+        - **Encoding/decoding equivalence**: mutating a base64 (or hex, URL-encoding, etc.)
+          string in a position where the change does not alter the decoded bytes (e.g., flipping
+          the last character of a `base64.RawURLEncoding` string may produce identical decoded
+          output depending on input length and padding alignment).
+        - **Map iteration order**: relying on the order of `range` over a Go map, which is
+          randomized per iteration.
+        - **Time-dependent assertions**: comparing timestamps with `time.Now()` or fixed
+          durations without tolerance, sleeping for a fixed duration and asserting state, or
+          assuming wall-clock ordering across goroutines.
+        - **Port/resource conflicts**: hardcoded ports, temp file paths, or shared resources
+          that collide when tests run in parallel.
+        - **Goroutine races**: shared mutable state accessed from test goroutines without
+          synchronization, or `t.Parallel()` tests closing over loop variables.
+        - **Random/non-deterministic input**: using `rand` without a fixed seed, or generating
+          values that can collide (e.g., UUID-based names that are later asserted by position).
+        - **External service timing**: assertions that depend on an external server, database,
+          or network call completing within an implicit timeout.
+        - **Flaky cleanup**: `defer` cleanup that races with asynchronous operations, or
+          teardown that depends on creation having fully completed.
+
+        When any of these patterns is detected, flag it as a **critical issue** (not major,
+        not a suggestion) using this format:
+
+        "🔴 **Intermittent test failure**: <description of the non-deterministic pattern>.
+        This will pass most of the time but fail unpredictably in CI, wasting maintainer time
+        and eroding trust in the test suite."
+
+        Provide a concrete explanation of the failure scenario (inputs/state that trigger the
+        flake) and suggest a deterministic fix.
+
     - path: "**/*.ts"
       instructions: |
         Scan for hardcoded occurrences of the string literals `Thunder` or `ThunderID` in this file.
@@ -101,6 +173,110 @@ reviews:
         `import('./lib/monaco-setup').then(() => import(...the page...))`. Flag a plain
         `lazy(() => import('...Page'))` for a Monaco-rendering page as a CDN-regression risk and ask
         for the `monaco-setup` gate.
+
+        Route destination guidance. Every route destination in this app must be resolved from that
+        app's `RouteConfig` (`src/configs/RouteConfig.ts`), never a literal path string. Flag any
+        `navigate(...)` call, `<Link to=...>`, or `<Route path=...>` built from a literal path string
+        (e.g. `navigate('/users')`, `` navigate(`/users/${id}`) ``, `<Link to="/users" />`) as a
+        **major issue**:
+
+        "🔴 **Hardcoded route**: resolve this destination from `RouteConfig` instead of a literal path
+        string, so the mounted route and this navigation call can't silently drift apart."
+
+        Do not flag:
+        - External URLs (`http://`, `https://`, `mailto:`) or same-page hash fragments.
+        - Code inside `src/configs/RouteConfig.ts` itself, which is the source of these paths.
+        - A relative path segment nested under a parent `<Route>` whose own path already comes from
+          `RouteConfig`/`ROUTE_SEGMENTS` (e.g. a plain `"validate"` child route, or a dynamic
+          `:paramName` segment) — only the domain's own top-level path needs to trace back to
+          `RouteConfig`.
+
+    - path: "frontend/packages/**/rolldown.config.js"
+      instructions: |
+        This file's `external` array is built from `Object.keys(pkg.dependencies)` and
+        `Object.keys(pkg.peerDependencies)`, which only matches a dependency's bare specifier. rolldown
+        matches `external` entries by exact string, so an import of a subpath of that dependency (e.g.
+        `@thunderid/logger/react`, `@hookform/resolvers/zod`) is NOT covered by the bare name and gets
+        inlined into this package's own `dist` output instead of staying external. For a dependency
+        backed by a React context, this silently creates a second `createContext()` instance inside this
+        package's bundle, causing a `use<Thing> must be used within a <Thing>Provider` crash that only
+        reproduces in production (dev aliases workspace packages to source, masking the bug).
+
+        Cross-reference this package's `package.json` `dependencies`/`peerDependencies` against every
+        subpath import actually used in `src/` (e.g. `grep -r "from '@thunderid/" src` or similar for
+        other scoped packages). For each dependency subpath imported, check that the exact subpath string
+        (e.g. `'@thunderid/logger/react'`) is listed as its own literal entry in the `external` array,
+        following the `// Peer dep subpaths are not matched by exact string - add them explicitly.`
+        convention established in `frontend/packages/configure-resource-servers/rolldown.config.js`.
+
+        Flag a missing subpath entry as a **major issue**:
+
+        "🔴 **Un-externalized dependency subpath**: `<subpath>` is imported in this package's source but
+        is not listed as an explicit string in `external`. Only the bare `<package>` name is covered by
+        the dependency-keys spread above, so this subpath will be inlined into this package's dist
+        output — for a context-providing dependency this creates a duplicate context instance and breaks
+        at runtime in production only. Add `'<subpath>'` to the `external` array."
+
+    - path: "frontend/packages/configure-*/**/*.{ts,tsx}"
+      instructions: |
+        Route destination guidance for reusable packages. A `@thunderid/configure-*` package must
+        never hardcode or assume the host application's URL structure. Flag any `navigate(...)` call
+        or `<Link to=...>` prop built from a literal path string instead of a `use<Domain>Routes()`
+        hook (built on `@thunderid/contexts`'s `useRoutes`, with a local default) as a **major issue**:
+
+        "🔴 **Hardcoded route in a reusable package**: resolve this destination through a
+        `use<Domain>Routes()` hook instead of a literal path string — otherwise a host application
+        cannot mount this package under a different URL without editing the package itself."
+
+        Do not flag:
+        - The package's own `routes/types.ts` (or equivalent) file defining its default paths.
+        - External URLs (`http://`, `https://`, `mailto:`).
+    - path: "frontend/**/pages/*EditPage.tsx"
+      instructions: |
+        Reset-key propagation check. Edit pages in this codebase track edits in a local `editedX`
+        state object and expose Save/Reset through `UnsavedChangesBar`. If this page renders a
+        child section component that keeps its OWN local/uncontrolled state derived from server
+        data (e.g. `useState` seeded from props, `react-hook-form` `defaultValues`, a
+        locally-managed list such as redirect URIs, or an in-place text-edit draft), calling
+        `setEditedX({})` alone does NOT reset that child's internal state on Save or Reset — the
+        section keeps showing stale edits even though the unsaved-changes bar disappears.
+
+        Check whether this page defines a reset-key state variable (commonly named
+        `sectionResetKey`, `attributesResetKey`, or `<name>ResetKey`) that is:
+        1. Incremented inside the `onReset` handler alongside `setEditedX({})`.
+        2. Incremented again after a successful save, but only AFTER the post-save `refetch()`
+           resolves (bumping it before refetch resolves risks passing stale data into the
+           remounted child).
+        3. Passed down as a prop (e.g. `sectionResetKey={sectionResetKey}`) to every child section
+           that holds such local state, so those children can use it (typically as a `key` or a
+           `useEffect` dependency) to reinitialize or remount cleanly.
+
+        If this page has stateful child sections but no reset-key prop reaches them, flag it as a
+        **major issue**: "This Edit page has child sections with local state but no reset-key
+        prop — Save/Reset may leave stale local state behind in `<section>`. See
+        `ApplicationEditPage.tsx` (`sectionResetKey`) or `UserEditPage.tsx`
+        (`attributesResetKey`) for the established pattern." Do not flag pages where all editing
+        happens through the single `editedX` object with no per-section local state — the
+        reset-key pattern is unnecessary there.
+
+    - path: "frontend/**/components/edit-*/**/*.tsx"
+      instructions: |
+        This is a child section component rendered inside an Edit page (see the
+        `sectionResetKey`/`attributesResetKey` reset-key pattern enforced on sibling
+        `*EditPage.tsx` files). If this component keeps its own local state initialized from
+        server-provided props (`useState`, `react-hook-form` defaults, a locally-managed
+        list/array, an in-place edit draft), check that it accepts a reset-key prop (e.g.
+        `sectionResetKey`) from its parent and actually uses it — typically as `key={sectionResetKey}`
+        on itself or an inner element, or as a dependency that re-syncs local state inside a
+        `useEffect` — so that a Save or Reset on the parent Edit page clears this component's
+        local state instead of leaving stale edits visible.
+
+        Flag as a **major issue** if the component has such local state but does not receive or
+        use a reset-key prop: "This section keeps local state derived from props but has no
+        reset-key mechanism — a Save/Reset on the parent Edit page will not clear it here." Do
+        not flag purely presentational components, or components whose only state is UI-only
+        (e.g. an "is editing" toggle, dropdown open/closed state) with nothing server-derived to
+        go stale.
 
     - path: "docs/**"
       instructions: |
@@ -154,6 +330,18 @@ reviews:
         - Flag any new CSS added to `docs/src/css/custom.css` unless it targets Scalar API reference
           elements or other third-party components where `sx`/`styled()` cannot reach. Ask:
           **"Can this style be applied via `sx` or `styled()` instead?"**
+        - For any component rendered inside actual doc content (an `.mdx` page under `docs/content/`
+          or `docs/versioned_docs/`) that builds a URL to `fetch()` a versioned static asset (e.g. a
+          file mirrored per-version under `static/docs/<versionPath>/...` or `static/api/<versionPath>/...`):
+          flag as a **major issue** if it derives the version by hardcoding a `/docs/next/...` literal
+          and rewriting it with `useDocsUrl()` (from `@site/src/hooks/useDocsUrl`). That hook is for
+          version-*less* contexts (footer links, homepage, custom pages) that fall back through the
+          site's global active/preferred/latest version state — it is the wrong tool for a component
+          embedded in a specific doc page, since that page already has its own authoritative version.
+          Require `useDocsVersion()` (from `@docusaurus/plugin-content-docs/client`) instead, mapping
+          `version === 'current' ? 'next' : version` to get the versionPath, matching the pattern in
+          `docs/src/components/ApiVersionReference.tsx`. `useDocsUrl()` remains correct for rewriting
+          `<Link>`/`href` navigation targets; this only applies to runtime `fetch()` URLs.
 
         Review documentation changes for:
         - Technical accuracy: do code examples and parameter descriptions match the actual implementation in this PR?

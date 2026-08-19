@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import Link from '@docusaurus/Link';
 import {Box, Chip, Typography, useTheme} from '@wso2/oxygen-ui';
 import {Bot, MonitorSmartphone, Server} from '@wso2/oxygen-ui-icons-react';
 import React from 'react';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 
 interface IntegrationType {
   icon: React.ReactElement;
@@ -34,7 +20,7 @@ const TYPES: IntegrationType[] = [
     icon: <MonitorSmartphone size={28} />,
     title: 'Application',
     description: 'Web, mobile, and desktop apps. React, Vue, Next.js, iOS, Android, and more.',
-    href: '/docs/next/guides/getting-started/connect-your-application',
+    href: '/docs/next/getting-started/connect-your-application',
   },
   {
     icon: <Bot size={28} />,
@@ -52,6 +38,7 @@ const TYPES: IntegrationType[] = [
 
 export default function IntegrationTypePicker(): React.ReactElement {
   const theme = useTheme();
+  const docsUrl = useDocsUrl();
 
   return (
     <Box
@@ -117,7 +104,7 @@ export default function IntegrationTypePicker(): React.ReactElement {
         return comingSoon ? (
           <div key={title}>{card}</div>
         ) : (
-          <Link key={title} to={href} style={{textDecoration: 'none', color: 'inherit'}}>
+          <Link key={title} to={href ? docsUrl(href) : href} style={{textDecoration: 'none', color: 'inherit'}}>
             {card}
           </Link>
         );

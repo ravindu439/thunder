@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package presentation
 
@@ -140,6 +125,35 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.vp.definition_invalid_ou_description",
 			DefaultValue: "A valid organization unit (ouId or ouHandle) is required",
+		},
+	}
+
+	// ErrorDefinitionEmptyClaimName indicates a requested claim was declared without a name.
+	ErrorDefinitionEmptyClaimName = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "VP-2008",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.vp.definition_empty_claim_name",
+			DefaultValue: "Invalid claim",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.vp.definition_empty_claim_name_description",
+			DefaultValue: "Claim names must not be empty",
+		},
+	}
+
+	// ErrorDefinitionDuplicateClaim indicates the same claim name was requested more than once,
+	// either twice within a list or as both a mandatory and an optional claim.
+	ErrorDefinitionDuplicateClaim = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "VP-2009",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.vp.definition_duplicate_claim",
+			DefaultValue: "Duplicate claim",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.vp.definition_duplicate_claim_description",
+			DefaultValue: "Claim name '{{param(claim)}}' is requested more than once",
 		},
 	}
 )

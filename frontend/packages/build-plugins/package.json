@@ -7,14 +7,13 @@
     "thunderid",
     "build",
     "plugins",
-    "vite",
-    "wso2"
+    "vite"
   ],
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/frontend/packages/build-plugins#readme",
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -42,18 +41,23 @@
     "clean:node_modules": "rimraf node_modules",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.lib.json"
   },
   "devDependencies": {
     "@thunderid/eslint-plugin": "workspace:^",
     "@thunderid/prettier-config": "workspace:^",
     "@types/node": "catalog:",
+    "@vitest/coverage-istanbul": "catalog:",
     "eslint": "catalog:",
     "prettier": "catalog:",
     "rimraf": "catalog:",
     "rolldown": "catalog:",
     "typescript": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "vite": ">=5.0.0"

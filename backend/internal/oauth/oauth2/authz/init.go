@@ -1,34 +1,16 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/thunder-id/thunderid/internal/flow/flowexec"
 	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/par"
-	"github.com/thunder-id/thunderid/internal/system/constants"
-	"github.com/thunder-id/thunderid/internal/system/database/provider"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/revocation"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
@@ -40,57 +22,30 @@ func Initialize(
 	jwtService jwt.JWTServiceInterface,
 	flowExecService flowexec.FlowExecServiceInterface,
 	parService par.PARServiceInterface,
+	criteriaRevoker revocation.CriteriaRevokerInterface,
 	cfg oauthconfig.Config,
+	storeProvider providers.RuntimeStoreProvider,
+	transactioner providers.Transactioner,
 ) (AuthorizeServiceInterface, error) {
-	authzCodeStore, authzReqStore, transactioner, err := initializeAuthorizationStores(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize authorization stores: %w", err)
-	}
+	authzCodeStore := newAuthorizationCodeStore(storeProvider)
+	authzReqStore := newAuthorizationRequestStore(storeProvider, cfg.OAuth.AuthorizationRequest.ValidityPeriod)
 
 	authzService := newAuthorizeService(
 		actorProvider, resourceService, jwtService, flowExecService,
-		authzCodeStore, authzReqStore, parService, transactioner, cfg,
+		authzCodeStore, authzReqStore, parService, transactioner, criteriaRevoker, cfg,
 	)
 	authzHandler := newAuthorizeHandler(authzService, cfg)
 	registerRoutes(mux, authzHandler)
 	return authzService, nil
 }
 
-// initializeAuthorizationStores creates the authorization code store, request store, and transactioner.
-func initializeAuthorizationStores(cfg oauthconfig.Config) (
-	AuthorizationCodeStoreInterface, authorizationRequestStoreInterface, transaction.Transactioner, error) {
-	if cfg.RuntimeTransientDBType == provider.DataSourceTypeRedis {
-		redisProvider := provider.GetRedisProvider()
-		return newRedisAuthorizationCodeStore(redisProvider, cfg.DeploymentID),
-			newRedisAuthorizationRequestStore(redisProvider, cfg.DeploymentID),
-			transaction.NewNoOpTransactioner(),
-			nil
-	}
-	dbProvider := provider.GetDBProvider()
-	transactioner, err := dbProvider.GetRuntimeTransientDBTransactioner()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return newAuthorizationCodeStore(cfg.DeploymentID),
-		newAuthorizationRequestStore(cfg.DeploymentID),
-		transactioner,
-		nil
-}
-
 // registerRoutes registers the GET /oauth2/authorize route. The POST /oauth2/auth/callback
 // route is registered by the callback package which dispatches by grant type.
+//
+// Clickjacking protection (X-Frame-Options and CSP frame-ancestors, per RFC 9700 §4.16) is applied
+// globally by the security-headers middleware rather than per route, so it is not wrapped here.
 func registerRoutes(mux *http.ServeMux, authzHandler AuthorizeHandlerInterface) {
 	// CORS MUST NOT be enabled on the authorization endpoint.
 	// The client redirects the user agent to it; it is not accessed directly via XHR/fetch.
-	mux.HandleFunc("GET /oauth2/authorize",
-		withFrameProtection(authzHandler.HandleAuthorizeGetRequest))
-}
-
-// withFrameProtection wraps an HTTP handler to prevent the page from being embedded in frames.
-func withFrameProtection(handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(constants.XFrameOptionsHeaderName, constants.XFrameOptionsDeny)
-		w.Header().Set(constants.ContentSecurityPolicyHeaderName, constants.ContentSecurityPolicyFrameAncestorsNone)
-		handler(w, r)
-	}
+	mux.HandleFunc("GET /oauth2/authorize", authzHandler.HandleAuthorizeGetRequest)
 }

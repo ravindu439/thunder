@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
 import {useResolveDisplayName} from '@thunderid/hooks';
@@ -38,16 +23,6 @@ type AttributeFormData = Record<string, unknown>;
 
 const filterAttributes = (data: AttributeFormData): AttributeFormData =>
   Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '' && v !== undefined && v !== null));
-
-// Order-independent equality check — the watched form values and the original attributes can
-// have their keys in different orders, which would make a plain JSON.stringify comparison
-// report a false difference even when nothing actually changed.
-const areAttributesEqual = (a: AttributeFormData, b: AttributeFormData): boolean => {
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (aKeys.length !== bKeys.length) return false;
-  return aKeys.every((key) => JSON.stringify(a[key]) === JSON.stringify(b[key]));
-};
 
 /**
  * Every field edit stages directly into the page's shared editedUser state via onFieldChange —
@@ -74,18 +49,17 @@ export default function EditUserAttributes({user, editedUser, onFieldChange}: Ed
   });
 
   const watchedValues = useWatch({control});
-  // Frozen at mount (the parent remounts this component via a `key` on Save/Reset) — the
-  // baseline every subsequent watched value is compared against to detect a real edit.
-  const baselineRef = useRef(filterAttributes(attributes));
+
+  // Staging re-renders the page, which can recreate onFieldChange. Keying the effect on the
+  // callback would restage and loop, so keep it keyed on the watched values only.
+  const onFieldChangeRef = useRef(onFieldChange);
+  useEffect(() => {
+    onFieldChangeRef.current = onFieldChange;
+  }, [onFieldChange]);
 
   useEffect(() => {
-    const filtered = filterAttributes(watchedValues);
-    // react-hook-form's useWatch fires again shortly after mount as each dynamically-rendered
-    // field registers, even without any user interaction — only propagate once the values
-    // actually diverge from the baseline, or the Save/Reset bar would show up unprompted.
-    if (areAttributesEqual(filtered, baselineRef.current)) return;
-    onFieldChange('attributes', filtered);
-  }, [watchedValues, onFieldChange]);
+    onFieldChangeRef.current('attributes', filterAttributes(watchedValues));
+  }, [watchedValues]);
 
   if (isLoading) {
     return (

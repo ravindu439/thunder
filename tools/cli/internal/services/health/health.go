@@ -1,19 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package health polls the ThunderID readiness endpoint and provides browser-launch helpers.
 package health
@@ -23,12 +9,14 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/thunder-id/thunderid/tools/cli/internal/product"
 )
 
 // DefaultPort is the port ThunderID listens on by default.
 const DefaultPort = 8090
 
-// ResolveBaseURL polls until Thunder responds on https or http, returning the
+// ResolveBaseURL polls until ThunderID responds on https or http, returning the
 // confirmed base URL and true. Returns ("", false) if neither scheme responds
 // within timeout. Each individual probe is capped to min(2s, remaining budget)
 // so the function never overruns its deadline.
@@ -54,7 +42,26 @@ func ResolveBaseURL(port int, timeout time.Duration) (string, bool) {
 	return "", false
 }
 
-// CheckReady returns true if Thunder is responding on the readiness endpoint.
+// IsReady reports whether ThunderID answers on the given port over either scheme.
+// It is the one-shot form of ResolveBaseURL, for callers that only need a yes or no.
+func IsReady(port int) bool {
+	for _, scheme := range []string{"https", "http"} {
+		if CheckReady(fmt.Sprintf("%s://localhost:%d", scheme, port)) {
+			return true
+		}
+	}
+	return false
+}
+
+// WaitReady waits until ThunderID answers on port or timeout expires.
+func WaitReady(port int, timeout time.Duration) error {
+	if _, ok := ResolveBaseURL(port, timeout); !ok {
+		return fmt.Errorf("%s did not become ready on port %d within %s", product.Name, port, timeout)
+	}
+	return nil
+}
+
+// CheckReady returns true if ThunderID is responding on the readiness endpoint.
 func CheckReady(baseURL string) bool {
 	return checkReadyIn(baseURL, 2*time.Second)
 }

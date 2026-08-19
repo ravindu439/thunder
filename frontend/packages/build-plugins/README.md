@@ -25,6 +25,22 @@ prismjs language files reference `Prism` as an implicit global with no import st
 `import Prism from 'prismjs'` to each language file so Rollup can see the dependency edge and evaluate the core module
 before any language file at bundle time.
 
+### `linkWorkspaceSource` · `@thunderid/build-plugins/vite`
+
+```ts
+import {linkWorkspaceSource} from '@thunderid/build-plugins/vite';
+import {defineConfig} from 'vite';
+
+export default defineConfig({
+  plugins: [linkWorkspaceSource()],
+});
+```
+
+During `vite serve` (never build, and never vitest, which also drives Vite in serve mode), this plugin redirects
+`@thunderid/*` workspace imports to each package's `src` instead of its prebuilt `dist/` output, so edits under
+`packages/*/src` hot-update in the consuming app. Pass `root` to override the app root used to resolve workspace
+dependencies; it defaults to the resolved Vite config root.
+
 ## Adding a New Plugin
 
 `<category>` is the build-tool context the plugin targets — it becomes the sub-path consumers import from. Use the tool

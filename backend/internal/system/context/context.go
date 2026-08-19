@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package context provides utilities for managing trace IDs (correlation IDs)
 package context
@@ -30,6 +15,9 @@ type contextKey string
 const (
 	// TraceIDKey is the context key for storing the trace ID (correlation ID).
 	TraceIDKey contextKey = "trace_id"
+
+	// CSPNonceKey is the context key for storing the per-request Content-Security-Policy nonce.
+	CSPNonceKey contextKey = "csp_nonce"
 )
 
 // ============================================================================
@@ -94,4 +82,27 @@ func EnsureTraceID(ctx context.Context) context.Context {
 	}
 
 	return ctx
+}
+
+// ============================================================================
+// CSP Nonce Functions
+// ============================================================================
+
+// GetCSPNonce retrieves the Content-Security-Policy nonce from the context. Returns "" if absent; it
+// does not generate one, since the nonce must be generated once per request by the middleware that
+// also emits it in the CSP header.
+func GetCSPNonce(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	nonce, _ := ctx.Value(CSPNonceKey).(string)
+	return nonce
+}
+
+// WithCSPNonce adds the Content-Security-Policy nonce to the context.
+func WithCSPNonce(ctx context.Context, nonce string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, CSPNonceKey, nonce)
 }

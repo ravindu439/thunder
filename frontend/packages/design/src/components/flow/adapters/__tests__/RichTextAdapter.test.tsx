@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 
-import {cleanup} from '@testing-library/react';
+import {cleanup, fireEvent} from '@testing-library/react';
 import {describe, it, expect, vi, afterEach} from 'vitest';
 import type {FlowComponent} from '../../../../models/flow';
 import renderWithProviders from '../../../../test/renderWithProviders';
@@ -33,10 +18,13 @@ afterEach(() => {
 
 vi.mock('@wso2/oxygen-ui', () => ({
   Alert: ({children}: any) => children,
-  Box: ({sx, dangerouslySetInnerHTML}: any) => (
+  Box: ({id, sx, onClick, dangerouslySetInnerHTML}: any) => (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <div
       data-testid="rich-text-box"
+      id={id}
       data-align={sx?.textAlign}
+      onClick={onClick}
       // eslint-disable-next-line react/no-danger
       dangerouslySetInnerHTML={dangerouslySetInnerHTML}
     />
@@ -136,53 +124,87 @@ describe('RichTextAdapter', () => {
   });
 
   describe('sign-up URL handling', () => {
-    const signUpLabel = '<p>Don\'t have an account? <a href="{{meta(application.sign_up_url)}}">Sign up</a></p>';
+    const signUpLabel =
+      '<p data-component-ref="self-sign-up-link">Don\'t have an account? <a href="#" data-action-ref="action_signup">Sign up</a></p>';
     const signUpComponent: FlowComponent = {
       id: 'signup-richtext',
       type: 'RICH_TEXT',
       label: signUpLabel,
+      action: {ref: 'action_signup'},
     };
 
     it('returns null when registration is disabled', () => {
       const resolve = (template: string | undefined) =>
         template?.includes('isRegistrationFlowEnabled') ? 'false' : template;
 
-      const {queryByTestId} = renderWithProviders(
-        <RichTextAdapter component={signUpComponent} resolve={resolve} signUpFallbackUrl="/signup" />,
-      );
+      const {queryByTestId} = renderWithProviders(<RichTextAdapter component={signUpComponent} resolve={resolve} />);
       expect(queryByTestId('rich-text-box')).not.toBeInTheDocument();
     });
 
     it('renders the sign-up link when registration is enabled and the server resolves the URL', () => {
       const resolve = (template: string | undefined) => {
         if (template?.includes('isRegistrationFlowEnabled')) return 'true';
-        return template?.replace('{{meta(application.sign_up_url)}}', '/custom/signup');
+        return template;
       };
 
       const {getByTestId} = renderWithProviders(<RichTextAdapter component={signUpComponent} resolve={resolve} />);
       const box = getByTestId('rich-text-box');
       expect(box).toBeInTheDocument();
-      expect(box.innerHTML).toContain('/custom/signup');
+      expect(box.innerHTML).toContain('Sign up');
     });
+  });
 
-    it('uses signUpFallbackUrl when the server does not resolve the sign-up URL template', () => {
-      const resolve = (template: string | undefined) =>
-        template?.includes('isRegistrationFlowEnabled') ? 'true' : template;
+  describe('recovery URL handling', () => {
+    const recoveryLabel =
+      '<p data-component-ref="recovery-link"><a href="#" data-action-ref="action_forgot_password">Forgot password?</a></p>';
+    const recoveryComponent: FlowComponent = {
+      id: 'recovery-richtext',
+      type: 'RICH_TEXT',
+      label: recoveryLabel,
+      action: {ref: 'action_forgot_password'},
+    };
+    const resolveRecovery = (enabled: boolean) => (template: string | undefined) =>
+      template?.includes('isRecoveryFlowEnabled') ? String(enabled) : template;
 
-      const {getByTestId} = renderWithProviders(
-        <RichTextAdapter component={signUpComponent} resolve={resolve} signUpFallbackUrl="/signup?client_id=abc" />,
+    it('returns null when the recovery flow is disabled', () => {
+      const {queryByTestId} = renderWithProviders(
+        <RichTextAdapter component={recoveryComponent} resolve={resolveRecovery(false)} />,
       );
-      expect(getByTestId('rich-text-box').innerHTML).toContain('/signup?client_id=abc');
+      expect(queryByTestId('rich-text-box')).not.toBeInTheDocument();
     });
 
-    it('renders sign-up content without href substitution when signUpFallbackUrl is not provided', () => {
-      const resolve = (template: string | undefined) =>
-        template?.includes('isRegistrationFlowEnabled') ? 'true' : template;
+    it('renders the recovery link when the recovery flow is enabled', () => {
+      const {getByTestId} = renderWithProviders(
+        <RichTextAdapter component={recoveryComponent} resolve={resolveRecovery(true)} />,
+      );
+      expect(getByTestId('rich-text-box').innerHTML).toContain('Forgot password?');
+    });
 
-      const {getByTestId} = renderWithProviders(<RichTextAdapter component={signUpComponent} resolve={resolve} />);
-      // Component renders (registration enabled) but no fallback URL is substituted
-      expect(getByTestId('rich-text-box')).toBeInTheDocument();
-      expect(getByTestId('rich-text-box').innerHTML).not.toContain('/signup?');
+    it('dispatches the synthesized action with the supplied values on click', () => {
+      const onSubmit = vi.fn();
+      const {getByTestId} = renderWithProviders(
+        <RichTextAdapter
+          component={recoveryComponent}
+          resolve={resolveRecovery(true)}
+          values={{username: 'alice'}}
+          onSubmit={onSubmit}
+        />,
+      );
+
+      fireEvent.click(getByTestId('rich-text-box').querySelector('a')!);
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({id: 'action_forgot_password', ref: 'action_forgot_password'}),
+        {username: 'alice'},
+      );
+    });
+
+    it('does not throw when clicked without an onSubmit handler', () => {
+      const {getByTestId} = renderWithProviders(
+        <RichTextAdapter component={recoveryComponent} resolve={resolveRecovery(true)} />,
+      );
+
+      expect(() => fireEvent.click(getByTestId('rich-text-box').querySelector('a')!)).not.toThrow();
     });
   });
 
@@ -200,18 +222,6 @@ describe('RichTextAdapter', () => {
 
       const {getByTestId} = renderWithProviders(<RichTextAdapter component={signInComponent} resolve={resolve} />);
       expect(getByTestId('rich-text-box').innerHTML).toContain('/custom/signin');
-    });
-
-    it('uses signInFallbackUrl when the server does not resolve the sign-in URL template', () => {
-      const {getByTestId} = renderWithProviders(
-        <RichTextAdapter
-          component={signInComponent}
-          resolve={(template: string | undefined) => template}
-          signInFallbackUrl="/signin?client_id=abc"
-        />,
-      );
-
-      expect(getByTestId('rich-text-box').innerHTML).toContain('/signin?client_id=abc');
     });
   });
 

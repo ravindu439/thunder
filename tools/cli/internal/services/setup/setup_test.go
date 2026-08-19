@@ -1,19 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package setup_test
 
@@ -28,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/thunder-id/thunderid/tools/cli/internal/services/health"
 	"github.com/thunder-id/thunderid/tools/cli/internal/services/setup"
 )
 
@@ -61,6 +48,29 @@ func TestLogFile_ContainsDate(t *testing.T) {
 func TestLogFile_HasLogExtension(t *testing.T) {
 	f := setup.LogFile("/tmp/test")
 	assert.True(t, strings.HasSuffix(f, ".log"), "expected .log suffix, got %q", f)
+}
+
+// A start that crosses midnight keeps writing to the file it truncated the day
+// before, so startup diagnostics must follow the newest log, not today's date.
+func TestLatestLogFile_PrefersTheNewestLog(t *testing.T) {
+	installPath := t.TempDir()
+	logs := setup.LogDir(installPath)
+	require.NoError(t, os.MkdirAll(logs, 0o755))
+
+	yesterday := filepath.Join(logs, "thunderid-2026-08-12.log")
+	require.NoError(t, os.WriteFile(yesterday, []byte("address already in use\n"), 0o644))
+	stale := filepath.Join(logs, "thunderid-2026-08-11.log")
+	require.NoError(t, os.WriteFile(stale, []byte("old\n"), 0o644))
+	old := time.Now().Add(-48 * time.Hour)
+	require.NoError(t, os.Chtimes(stale, old, old))
+
+	assert.Equal(t, yesterday, setup.LatestLogFile(installPath))
+	assert.Contains(t, setup.LogTail(installPath, 5), "address already in use")
+}
+
+func TestLatestLogFile_FallsBackToTodaysPath(t *testing.T) {
+	installPath := t.TempDir()
+	assert.Equal(t, setup.LogFile(installPath), setup.LatestLogFile(installPath))
 }
 
 func TestFindThunderRoot_ScriptAtRoot(t *testing.T) {
@@ -139,4 +149,216 @@ func TestUpdateServerPort_MissingConfig(t *testing.T) {
 	err := setup.UpdateServerPort(dir, 8091)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "deployment.yaml not found")
+}
+
+// writeDeployment writes a deployment.yaml at the install root and returns its path.
+func writeDeployment(t *testing.T, dir, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "deployment.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	return path
+}
+
+func TestReadServerPort_ReadsConfiguredPort(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  hostname: \"localhost\"\n  port: 8091\n\nother:\n  port: 9000\n")
+
+	assert.Equal(t, 8091, setup.ReadServerPort(dir))
+}
+
+// A port: belonging to a mapping nested under server: is a different setting and
+// must not be mistaken for server.port, even when it comes first.
+func TestReadServerPort_IgnoresPortNestedUnderServer(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  tls:\n    enabled: true\n    port: 9443\n  port: 8093\n")
+
+	assert.Equal(t, 8093, setup.ReadServerPort(dir))
+}
+
+func TestUpdateServerPort_LeavesPortNestedUnderServer(t *testing.T) {
+	dir := t.TempDir()
+	path := writeDeployment(t, dir, "server:\n  tls:\n    port: 9443\n  port: 8090\n")
+
+	require.NoError(t, setup.UpdateServerPort(dir, 8094))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "  port: 8094")
+	assert.Contains(t, string(data), "    port: 9443", "the nested port should be unchanged")
+}
+
+func TestReadServerPort_IgnoresInlineComment(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  port: 8095 # moved after a conflict\n")
+
+	assert.Equal(t, 8095, setup.ReadServerPort(dir))
+}
+
+func TestReadServerPort_NestedConfig(t *testing.T) {
+	dir := t.TempDir()
+	serverDir := filepath.Join(dir, "backend", "cmd", "server")
+	require.NoError(t, os.MkdirAll(serverDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(serverDir, "deployment.yaml"),
+		[]byte("server:\n  port: 8092\n"), 0o644))
+
+	assert.Equal(t, 8092, setup.ReadServerPort(dir))
+}
+
+func TestReadServerPort_UnknownReturnsZero(t *testing.T) {
+	assert.Equal(t, 0, setup.ReadServerPort(t.TempDir()), "no deployment.yaml")
+	assert.Equal(t, 0, setup.ReadServerPort(""), "no install path")
+
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  hostname: \"localhost\"\n")
+	assert.Equal(t, 0, setup.ReadServerPort(dir), "no server.port key")
+
+	other := t.TempDir()
+	writeDeployment(t, other, "server:\n  port: not-a-number\n")
+	assert.Equal(t, 0, setup.ReadServerPort(other), "unparseable port")
+}
+
+func TestEnsureServerPort_WritesRequestedPort(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  port: 8090\n")
+
+	require.NoError(t, setup.EnsureServerPort(dir, 8091))
+	assert.Equal(t, 8091, setup.ReadServerPort(dir))
+}
+
+func TestEnsureServerPort_NoOpWhenAlreadySet(t *testing.T) {
+	dir := t.TempDir()
+	// A comment on the port line survives only if the file is left untouched.
+	path := writeDeployment(t, dir, "server:\n  port: 8090 # keep me\n")
+
+	require.NoError(t, setup.EnsureServerPort(dir, 8090))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "# keep me")
+}
+
+func TestEnsureServerPort_ZeroKeepsConfiguredPort(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  port: 8093\n")
+
+	require.NoError(t, setup.EnsureServerPort(dir, 0))
+	assert.Equal(t, 8093, setup.ReadServerPort(dir))
+}
+
+func TestEnsureServerPort_MissingConfig(t *testing.T) {
+	err := setup.EnsureServerPort(t.TempDir(), 8091)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deployment.yaml not found")
+}
+
+func TestLogTail_ReturnsLastLines(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(setup.LogDir(dir), 0o755))
+	body := "first\nsecond\nthird\nfourth\n"
+	require.NoError(t, os.WriteFile(setup.LogFile(dir), []byte(body), 0o644))
+
+	assert.Equal(t, "third\nfourth", setup.LogTail(dir, 2), "the trailing newline must not become a blank line")
+	assert.Equal(t, "first\nsecond\nthird\nfourth", setup.LogTail(dir, 10))
+}
+
+func TestTailFile_KeepsInteriorBlankLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.log")
+	require.NoError(t, os.WriteFile(path, []byte("one\n\ntwo\r\n"), 0o644))
+
+	assert.Equal(t, []string{"one", "", "two"}, setup.TailFile(path, 10))
+}
+
+func TestTailFile_EmptyOrMissing(t *testing.T) {
+	assert.Empty(t, setup.TailFile(filepath.Join(t.TempDir(), "missing.log"), 5))
+
+	empty := filepath.Join(t.TempDir(), "empty.log")
+	require.NoError(t, os.WriteFile(empty, nil, 0o644))
+	assert.Empty(t, setup.TailFile(empty, 5))
+}
+
+func TestTailFile_NonPositiveCount(t *testing.T) {
+	assert.Nil(t, setup.TailFile(filepath.Join(t.TempDir(), "missing.log"), 0))
+	assert.Nil(t, setup.TailFile(filepath.Join(t.TempDir(), "missing.log"), -1))
+}
+
+func TestLogTail_MissingLog(t *testing.T) {
+	assert.Equal(t, "", setup.LogTail(t.TempDir(), 5))
+}
+
+func TestTailFileFollow_ReadsAppendedContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "follow.log")
+	require.NoError(t, os.WriteFile(path, []byte("one\ntwo\n"), 0o644))
+
+	lines, offset, ok := setup.TailFileFollow(path, 0)
+	require.True(t, ok)
+	assert.Equal(t, []string{"one", "two"}, lines)
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(t, err)
+	_, err = f.WriteString("three\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	lines, _, ok = setup.TailFileFollow(path, offset)
+	require.True(t, ok)
+	assert.Equal(t, []string{"three"}, lines, "a second call must only return what was appended since offset")
+}
+
+func TestTailFileFollow_KeepsIncompleteRecordPending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "follow.log")
+	require.NoError(t, os.WriteFile(path, []byte("part"), 0o644))
+
+	lines, offset, ok := setup.TailFileFollow(path, 0)
+	require.True(t, ok)
+	assert.Empty(t, lines, "an unterminated record must not be reported until it is complete")
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(t, err)
+	_, err = f.WriteString("ial\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	lines, _, ok = setup.TailFileFollow(path, offset)
+	require.True(t, ok)
+	assert.Equal(t, []string{"partial"}, lines, "the completed record must be reported whole, not split across reads")
+}
+
+func TestTailFileFollow_HandlesTruncation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "follow.log")
+	require.NoError(t, os.WriteFile(path, []byte("one\ntwo\nthree\n"), 0o644))
+
+	_, offset, ok := setup.TailFileFollow(path, 0)
+	require.True(t, ok)
+
+	require.NoError(t, os.WriteFile(path, []byte("new\n"), 0o644))
+
+	lines, _, ok := setup.TailFileFollow(path, offset)
+	require.True(t, ok)
+	assert.Equal(t, []string{"new"}, lines, "a file shorter than the offset must be re-read from the start")
+}
+
+func TestTailFileFollow_EmptyLogIsNotAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.log")
+	require.NoError(t, os.WriteFile(path, nil, 0o644))
+
+	lines, _, ok := setup.TailFileFollow(path, 0)
+	assert.True(t, ok, "a valid, empty log must still report ok so the caller enters follow mode")
+	assert.Empty(t, lines)
+}
+
+func TestTailFileFollow_MissingFileIsAnError(t *testing.T) {
+	_, _, ok := setup.TailFileFollow(filepath.Join(t.TempDir(), "missing.log"), 0)
+	assert.False(t, ok)
+}
+
+func TestServerPort_PrefersConfiguredPort(t *testing.T) {
+	dir := t.TempDir()
+	writeDeployment(t, dir, "server:\n  port: 8091\n")
+
+	assert.Equal(t, 8091, setup.ServerPort(dir))
+}
+
+func TestServerPort_FallsBackToDefault(t *testing.T) {
+	assert.Equal(t, health.DefaultPort, setup.ServerPort(t.TempDir()))
+	assert.Equal(t, health.DefaultPort, setup.ServerPort(""))
 }

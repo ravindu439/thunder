@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package security
 
@@ -388,6 +373,42 @@ func HasSufficientPermission(userPermissions []string, required string) bool {
 		}
 	}
 	return false
+}
+
+// ---- Permission set coverage ----
+
+// PermissionSet maps a resource server ID to the permissions granted on that resource server.
+type PermissionSet map[string][]string
+
+// Covers reports whether actor holds every permission in required, and answers "may this caller
+// confer these permissions on someone else?".
+//
+// Coverage is evaluated per resource server: a permission held on one never satisfies a
+// requirement on another. Within a resource server, matching is hierarchical, so "system:user"
+// covers "system:user:view" but not the reverse. Coverage is a partial order, not an ordering:
+// two sets can each hold what the other lacks.
+//
+// An empty required set is covered. A required permission that is empty, or keyed under an empty
+// resource server ID, is never covered, since approving a malformed grant would be unsafe.
+func Covers(actor, required PermissionSet) bool {
+	for resourceServerID, requiredPerms := range required {
+		if len(requiredPerms) == 0 {
+			continue
+		}
+		if resourceServerID == "" {
+			return false
+		}
+		heldPerms := actor[resourceServerID]
+		for _, requiredPerm := range requiredPerms {
+			if requiredPerm == "" {
+				return false
+			}
+			if !HasSufficientPermission(heldPerms, requiredPerm) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ResolveActionPermission returns the minimum permission required to perform the given

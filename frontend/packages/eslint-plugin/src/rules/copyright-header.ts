@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {SourceCode, Rule} from 'eslint';
 import {Comment} from 'estree';
@@ -27,29 +12,14 @@ interface CopyrightHeaderOptions {
 
 const CURRENT_YEAR = new Date().getFullYear();
 
-const REQUIRED_COPYRIGHT_HEADER = `/**
- * Copyright (c) ${CURRENT_YEAR}, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */`;
+const REQUIRED_COPYRIGHT_HEADER = `// Copyright ${CURRENT_YEAR} The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0`;
 
 const copyrightHeaderRule: Rule.RuleModule = {
   meta: {
     type: 'layout',
     docs: {
-      description: 'Enforce WSO2 Apache 2.0 copyright header in all source files',
+      description: 'Enforce the Apache 2.0 SPDX copyright header in all source files',
     },
     fixable: 'code',
     schema: [
@@ -71,7 +41,7 @@ const copyrightHeaderRule: Rule.RuleModule = {
       },
     ],
     messages: {
-      missingHeader: 'Missing WSO2 Apache 2.0 copyright header',
+      missingHeader: 'Missing Apache 2.0 SPDX copyright header',
       incorrectHeader: 'Incorrect copyright header format',
     },
   },
@@ -101,10 +71,39 @@ const copyrightHeaderRule: Rule.RuleModule = {
         const shebangComment = hasShebang ? allComments[0] : undefined;
         const comments: Comment[] = hasShebang ? allComments.slice(1) : allComments;
 
-        // Check if first comment is the copyright header
         const firstComment: Comment | undefined = comments[0];
 
-        if (firstComment?.type !== 'Block') {
+        // Collect the leading comment region: the run of consecutive leading line
+        // comments (the SPDX header is two `//` lines), or a single leading block
+        // comment (a legacy header to be replaced).
+        const region: Comment[] = [];
+        if (firstComment?.type === 'Line') {
+          for (const comment of comments) {
+            if (comment.type !== 'Line') {
+              break;
+            }
+            region.push(comment);
+          }
+        } else if (firstComment?.type === 'Block') {
+          region.push(firstComment);
+        }
+
+        const regionText: string = region.map((comment: Comment) => comment.value).join('\n');
+        const normalized: string = regionText.replace(/\s+/g, ' ').trim();
+
+        // The year is intentionally not validated, so historical years pass unchanged.
+        if (
+          normalized.includes('The ThunderID Authors') &&
+          normalized.includes('SPDX-License-Identifier: Apache-2.0')
+        ) {
+          return;
+        }
+
+        // Only treat the leading comment as a stale header when it looks like one,
+        // so unrelated leading comments are never clobbered.
+        const isHeaderLike: boolean = region.length > 0 && /copyright|license|spdx/i.test(regionText);
+
+        if (!isHeaderLike) {
           context.report({
             // @ts-expect-error TODO: Update to the latest ESLint and remove `@types/eslint`.
             node,
@@ -121,20 +120,15 @@ const copyrightHeaderRule: Rule.RuleModule = {
           return;
         }
 
-        // Normalize the comment text for comparison
-        const commentText = `/*${firstComment.value}*/`;
-        const normalizedComment: string = commentText.replace(/\s+/g, ' ').trim();
-
-        if (!normalizedComment.includes('WSO2 LLC') || !normalizedComment.includes('Apache License')) {
-          context.report({
-            node: firstComment,
-            messageId: 'incorrectHeader',
-            fix(fixer: Rule.RuleFixer) {
-              // @ts-expect-error TODO: Update to the latest ESLint and remove `@types/eslint`.
-              return fixer.replaceText(firstComment, template);
-            },
-          });
-        }
+        context.report({
+          node: region[0],
+          messageId: 'incorrectHeader',
+          fix(fixer: Rule.RuleFixer) {
+            const start: number = region[0].range?.[0] ?? 0;
+            const end: number = region[region.length - 1].range?.[1] ?? 0;
+            return fixer.replaceTextRange([start, end], template);
+          },
+        });
       },
     };
   },

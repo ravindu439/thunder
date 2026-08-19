@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
@@ -57,6 +42,50 @@ type groupStoreInterface interface {
 	GetGroupsByIDs(ctx context.Context, groupIDs []string) ([]GroupBasicDAO, error)
 	IsGroupDeclarative(ctx context.Context, id string) (bool, error)
 	GetTransitiveGroupsForEntity(ctx context.Context, entityID string) ([]providers.EntityGroup, error)
+	GetDirectGroupParents(ctx context.Context, groupIDs []string) ([]string, error)
+}
+
+// maxGroupNestingDepth bounds the ancestor walk so a pathologically deep chain cannot turn an
+// authorization check into an unbounded sequence of queries. Cycles are handled by the visited set.
+const maxGroupNestingDepth = 32
+
+// resolveTransitiveGroupAncestors returns the IDs of all groups containing groupID, directly or
+// through further nesting. groupID itself is excluded.
+//
+// The walk proceeds one level at a time so the composite store can union both stores at each hop,
+// which is what makes a nesting chain that crosses the database and declarative stores resolvable.
+// The result must be complete, since callers rely on it for an authorization decision.
+func resolveTransitiveGroupAncestors(
+	ctx context.Context, store groupStoreInterface, groupID string,
+) ([]string, error) {
+	visited := map[string]bool{groupID: true}
+	ancestors := make([]string, 0)
+	frontier := []string{groupID}
+
+	for depth := 0; depth < maxGroupNestingDepth && len(frontier) > 0; depth++ {
+		parents, err := store.GetDirectGroupParents(ctx, frontier)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve group ancestors: %w", err)
+		}
+
+		next := make([]string, 0, len(parents))
+		for _, parentID := range parents {
+			if visited[parentID] {
+				continue
+			}
+			visited[parentID] = true
+			ancestors = append(ancestors, parentID)
+			next = append(next, parentID)
+		}
+		frontier = next
+	}
+
+	if len(frontier) > 0 {
+		return nil, fmt.Errorf("group nesting exceeds the maximum supported depth of %d",
+			maxGroupNestingDepth)
+	}
+
+	return ancestors, nil
 }
 
 // groupStore is the default implementation of groupStoreInterface.
@@ -610,6 +639,35 @@ func (s *groupStore) GetTransitiveGroupsForEntity(
 		groups = append(groups, providers.EntityGroup{ID: groupID, Name: name, OUID: ouID})
 	}
 	return groups, nil
+}
+
+// GetDirectGroupParents retrieves the IDs of database groups directly containing any of the given
+// groups.
+func (s *groupStore) GetDirectGroupParents(ctx context.Context, groupIDs []string) ([]string, error) {
+	if len(groupIDs) == 0 {
+		return []string{}, nil
+	}
+
+	dbClient, err := s.dbProvider.GetEntityDBClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get database client: %w", err)
+	}
+
+	query, args := buildGetDirectGroupParentsQuery(groupIDs, s.deploymentID)
+	results, err := dbClient.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get direct group parents: %w", err)
+	}
+
+	parents := make([]string, 0, len(results))
+	for _, row := range results {
+		parentID, ok := row["group_id"].(string)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse group_id as string")
+		}
+		parents = append(parents, parentID)
+	}
+	return parents, nil
 }
 
 // buildGroupFromResultRow constructs a GroupDAO from a database result row.

@@ -1,29 +1,15 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {QueryErrorNotice} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
+import {getErrorMessage} from '@thunderid/utils';
 import {
   Chip,
   IconButton,
   Tooltip,
   Typography,
-  Snackbar,
   Alert,
   ListingTable,
   Dialog,
@@ -40,6 +26,7 @@ import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import useDeleteUserType from '../api/useDeleteUserType';
 import useGetUserTypes from '../api/useGetUserTypes';
+import useUserTypeRoutes from '../hooks/useUserTypeRoutes';
 import type {UserTypeListItem} from '../types/user-types';
 
 type GridColDef<R extends DataGrid.GridValidRowModel = DataGrid.GridValidRowModel> = DataGrid.GridColDef<R>;
@@ -50,29 +37,14 @@ export default function UserTypesList() {
   const navigate = useNavigate();
   const {t} = useTranslation();
   const logger = useLogger('UserTypesList');
+  const routes = useUserTypeRoutes();
   const dataGridLocaleText = useDataGridLocaleText();
 
-  const {data: userTypesData, isLoading, error: userTypesRequestError} = useGetUserTypes();
+  const {data: userTypesData, isLoading, error: userTypesRequestError, refetch} = useGetUserTypes();
   const deleteUserTypeMutation = useDeleteUserType();
 
-  const error = userTypesRequestError;
-
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [selectedUserTypeId, setSelectedUserTypeId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  // Show snackbar when error occurs
-  const [prevError, setPrevError] = useState<typeof error>(null);
-  if (prevError !== error) {
-    setPrevError(error);
-    if (error) {
-      setSnackbarOpen(true);
-    }
-  }
-
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
-  };
 
   const handleDeleteClick = useCallback((userTypeId: string): void => {
     setSelectedUserTypeId(userTypeId);
@@ -82,12 +54,12 @@ export default function UserTypesList() {
   const handleViewClick = useCallback(
     (userTypeId: string): void => {
       (async (): Promise<void> => {
-        await navigate(`/user-types/${userTypeId}`);
+        await navigate(routes.detail(userTypeId));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to user type', {error: _error, userTypeId});
       });
     },
-    [logger, navigate],
+    [logger, navigate, routes],
   );
 
   const handleDeleteCancel = () => {
@@ -203,6 +175,18 @@ export default function UserTypesList() {
     [t, handleDeleteClick, handleViewClick],
   );
 
+  if (userTypesRequestError) {
+    return (
+      <QueryErrorNotice
+        error={userTypesRequestError}
+        t={(key, options) => t(key.includes(':') ? key : `userTypes:${key}`, options)}
+        variant="block"
+        title={t('userTypes:listing.error', 'Failed to load user types')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+
   return (
     <>
       <ListingTable.Provider variant="data-grid-card" loading={isLoading}>
@@ -221,6 +205,8 @@ export default function UserTypesList() {
             }}
             pageSizeOptions={[5, 10, 25, 50]}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             autoHeight
             sx={{
@@ -240,7 +226,12 @@ export default function UserTypesList() {
           {deleteUserTypeMutation.error && (
             <Alert severity="error" sx={{mt: 2}}>
               <Typography variant="body2" sx={{fontWeight: 'bold'}}>
-                {deleteUserTypeMutation.error.message}
+                {getErrorMessage(
+                  deleteUserTypeMutation.error,
+                  (key, options) => t(key.includes(':') ? key : `userTypes:${key}`, options),
+                  'delete.error',
+                  'Failed to delete user type. Please try again.',
+                )}
               </Typography>
             </Alert>
           )}
@@ -263,17 +254,6 @@ export default function UserTypesList() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
-      >
-        <Alert onClose={handleCloseSnackbar} severity="error" sx={{width: '100%'}}>
-          {error?.message ?? t('common:messages.saveError')}
-        </Alert>
-      </Snackbar>
     </>
   );
 }

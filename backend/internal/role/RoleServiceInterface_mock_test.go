@@ -8,6 +8,8 @@ import (
 	"context"
 
 	mock "github.com/stretchr/testify/mock"
+	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
+	"github.com/thunder-id/thunderid/internal/system/security"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 )
 
@@ -36,6 +38,78 @@ type RoleServiceInterfaceMock_Expecter struct {
 
 func (_m *RoleServiceInterfaceMock) EXPECT() *RoleServiceInterfaceMock_Expecter {
 	return &RoleServiceInterfaceMock_Expecter{mock: &_m.Mock}
+}
+
+// CascadeDeleteDependencies provides a mock function for the type RoleServiceInterfaceMock
+func (_mock *RoleServiceInterfaceMock) CascadeDeleteDependencies(ctx context.Context, resourceType string, id string) (int, error) {
+	ret := _mock.Called(ctx, resourceType, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CascadeDeleteDependencies")
+	}
+
+	var r0 int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (int, error)); ok {
+		return returnFunc(ctx, resourceType, id)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) int); ok {
+		r0 = returnFunc(ctx, resourceType, id)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, resourceType, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// RoleServiceInterfaceMock_CascadeDeleteDependencies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CascadeDeleteDependencies'
+type RoleServiceInterfaceMock_CascadeDeleteDependencies_Call struct {
+	*mock.Call
+}
+
+// CascadeDeleteDependencies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceType string
+//   - id string
+func (_e *RoleServiceInterfaceMock_Expecter) CascadeDeleteDependencies(ctx interface{}, resourceType interface{}, id interface{}) *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call {
+	return &RoleServiceInterfaceMock_CascadeDeleteDependencies_Call{Call: _e.mock.On("CascadeDeleteDependencies", ctx, resourceType, id)}
+}
+
+func (_c *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call) Run(run func(ctx context.Context, resourceType string, id string)) *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call) Return(n int, err error) *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call) RunAndReturn(run func(ctx context.Context, resourceType string, id string) (int, error)) *RoleServiceInterfaceMock_CascadeDeleteDependencies_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // CreateRole provides a mock function for the type RoleServiceInterfaceMock
@@ -167,6 +241,82 @@ func (_c *RoleServiceInterfaceMock_DeleteRole_Call) RunAndReturn(run func(ctx co
 	return _c
 }
 
+// GetAllPermissions provides a mock function for the type RoleServiceInterfaceMock
+func (_mock *RoleServiceInterfaceMock) GetAllPermissions(ctx context.Context, entityID string, groupIDs []string) (security.PermissionSet, *common.ServiceError) {
+	ret := _mock.Called(ctx, entityID, groupIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetAllPermissions")
+	}
+
+	var r0 security.PermissionSet
+	var r1 *common.ServiceError
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string) (security.PermissionSet, *common.ServiceError)); ok {
+		return returnFunc(ctx, entityID, groupIDs)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string) security.PermissionSet); ok {
+		r0 = returnFunc(ctx, entityID, groupIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(security.PermissionSet)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []string) *common.ServiceError); ok {
+		r1 = returnFunc(ctx, entityID, groupIDs)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*common.ServiceError)
+		}
+	}
+	return r0, r1
+}
+
+// RoleServiceInterfaceMock_GetAllPermissions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAllPermissions'
+type RoleServiceInterfaceMock_GetAllPermissions_Call struct {
+	*mock.Call
+}
+
+// GetAllPermissions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - entityID string
+//   - groupIDs []string
+func (_e *RoleServiceInterfaceMock_Expecter) GetAllPermissions(ctx interface{}, entityID interface{}, groupIDs interface{}) *RoleServiceInterfaceMock_GetAllPermissions_Call {
+	return &RoleServiceInterfaceMock_GetAllPermissions_Call{Call: _e.mock.On("GetAllPermissions", ctx, entityID, groupIDs)}
+}
+
+func (_c *RoleServiceInterfaceMock_GetAllPermissions_Call) Run(run func(ctx context.Context, entityID string, groupIDs []string)) *RoleServiceInterfaceMock_GetAllPermissions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_GetAllPermissions_Call) Return(permissionSet security.PermissionSet, serviceError *common.ServiceError) *RoleServiceInterfaceMock_GetAllPermissions_Call {
+	_c.Call.Return(permissionSet, serviceError)
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_GetAllPermissions_Call) RunAndReturn(run func(ctx context.Context, entityID string, groupIDs []string) (security.PermissionSet, *common.ServiceError)) *RoleServiceInterfaceMock_GetAllPermissions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetAuthorizedPermissionsByResourceServer provides a mock function for the type RoleServiceInterfaceMock
 func (_mock *RoleServiceInterfaceMock) GetAuthorizedPermissionsByResourceServer(ctx context.Context, entityID string, groups []string, resourceServerID string, requestedPermissions []string) ([]string, *common.ServiceError) {
 	ret := _mock.Called(ctx, entityID, groups, resourceServerID, requestedPermissions)
@@ -251,6 +401,80 @@ func (_c *RoleServiceInterfaceMock_GetAuthorizedPermissionsByResourceServer_Call
 }
 
 func (_c *RoleServiceInterfaceMock_GetAuthorizedPermissionsByResourceServer_Call) RunAndReturn(run func(ctx context.Context, entityID string, groups []string, resourceServerID string, requestedPermissions []string) ([]string, *common.ServiceError)) *RoleServiceInterfaceMock_GetAuthorizedPermissionsByResourceServer_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetResourceDependencies provides a mock function for the type RoleServiceInterfaceMock
+func (_mock *RoleServiceInterfaceMock) GetResourceDependencies(ctx context.Context, resourceType string, id string) ([]resourcedependency.ResourceDependency, error) {
+	ret := _mock.Called(ctx, resourceType, id)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetResourceDependencies")
+	}
+
+	var r0 []resourcedependency.ResourceDependency
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]resourcedependency.ResourceDependency, error)); ok {
+		return returnFunc(ctx, resourceType, id)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []resourcedependency.ResourceDependency); ok {
+		r0 = returnFunc(ctx, resourceType, id)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]resourcedependency.ResourceDependency)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, resourceType, id)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// RoleServiceInterfaceMock_GetResourceDependencies_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResourceDependencies'
+type RoleServiceInterfaceMock_GetResourceDependencies_Call struct {
+	*mock.Call
+}
+
+// GetResourceDependencies is a helper method to define mock.On call
+//   - ctx context.Context
+//   - resourceType string
+//   - id string
+func (_e *RoleServiceInterfaceMock_Expecter) GetResourceDependencies(ctx interface{}, resourceType interface{}, id interface{}) *RoleServiceInterfaceMock_GetResourceDependencies_Call {
+	return &RoleServiceInterfaceMock_GetResourceDependencies_Call{Call: _e.mock.On("GetResourceDependencies", ctx, resourceType, id)}
+}
+
+func (_c *RoleServiceInterfaceMock_GetResourceDependencies_Call) Run(run func(ctx context.Context, resourceType string, id string)) *RoleServiceInterfaceMock_GetResourceDependencies_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_GetResourceDependencies_Call) Return(resourceDependencys []resourcedependency.ResourceDependency, err error) *RoleServiceInterfaceMock_GetResourceDependencies_Call {
+	_c.Call.Return(resourceDependencys, err)
+	return _c
+}
+
+func (_c *RoleServiceInterfaceMock_GetResourceDependencies_Call) RunAndReturn(run func(ctx context.Context, resourceType string, id string) ([]resourcedependency.ResourceDependency, error)) *RoleServiceInterfaceMock_GetResourceDependencies_Call {
 	_c.Call.Return(run)
 	return _c
 }

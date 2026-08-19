@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package tokenservice provides centralized token generation and validation services for OAuth2.
 package tokenservice
@@ -71,6 +56,9 @@ type AccessTokenBuildContext struct {
 	// subject (used by the jwt-bearer/ID-JAG grant). It is emitted as the `idp` claim so downstream
 	// consumers can distinguish a federated principal from a local one.
 	SourceIDP string
+	// TokenFamilyID, when set, is stamped as the `tfid` claim so the token can be revoked as part of
+	// its authorization grant's family. It is constant across refresh rotation.
+	TokenFamilyID string
 }
 
 // RefreshTokenBuildContext contains all the information needed to build a refresh token.
@@ -86,6 +74,13 @@ type RefreshTokenBuildContext struct {
 	ClaimsLocales        string
 	DPoPJkt              string
 	ActorSub             string
+	// TokenFamilyID, when set, is stamped as the `tfid` claim on the refresh token. It is copied
+	// unchanged across rotation so every token of the grant shares one family id.
+	TokenFamilyID string
+	// ExpiresAt, when set, is the Unix expiry the rotated token inherits from the token it replaces,
+	// so a grant cannot outlive its original issuance window. Zero starts a fresh validity period,
+	// which is what first issuance does.
+	ExpiresAt int64
 }
 
 // IDJAGBuildContext contains all the information needed to build an ID-JAG (Identity Assertion
@@ -117,6 +112,7 @@ type IDTokenBuildContext struct {
 // RefreshTokenClaims represents the validated claims from a refresh token.
 type RefreshTokenClaims struct {
 	Sub              string
+	ClientID         string
 	Audiences        []string
 	GrantType        string
 	Scopes           []string
@@ -131,6 +127,11 @@ type RefreshTokenClaims struct {
 	// Exp is the refresh token's expiry (exp claim); used to bound the deny-list entry when the token
 	// is revoked on rotation.
 	Exp int64
+	// TokenFamilyID is the token family id (tfid) carried on the refresh token. It is copied onto the
+	// tokens minted during rotation so the family stays intact, and used to revoke the whole family on
+	// reuse. Empty for pre-rollout tokens.
+	TokenFamilyID string
+	Claims        map[string]interface{}
 }
 
 // SubjectTokenClaims represents the validated claims from a subject token (for token exchange).
@@ -147,6 +148,9 @@ type SubjectTokenClaims struct {
 	// JTI is the subject token's unique identifier, populated only for self-issued tokens and used
 	// for deny-list (revocation) enforcement. Empty for externally-issued subject tokens.
 	JTI string
+	// TokenFamilyID is the subject token's token family id (tfid), if any. Token exchange may inherit
+	// it onto the exchanged token so the two share a revocation family.
+	TokenFamilyID string
 }
 
 // IDJAGAssertionClaims represents the validated claims from an ID-JAG assertion presented on the
@@ -158,8 +162,8 @@ type IDJAGAssertionClaims struct {
 	// Resources holds the RFC 8707 `resource` claim values carried by the assertion, when present.
 	// Empty when the assertion carries no resource claim.
 	Resources []string
-	// JTI is the assertion's unique identifier. It is required by the draft and validated for presence;
-	// one-time-use (replay) caching keyed on it is deferred to a future version.
+	// JTI is the assertion's unique identifier, required by the draft. Enforced as single-use via
+	// the JTI replay cache; a replayed assertion is rejected.
 	JTI string
 }
 

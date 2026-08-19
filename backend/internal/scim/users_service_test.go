@@ -36,7 +36,10 @@ func TestGetUser_Success(t *testing.T) {
 	}
 	mockUserService.On("GetUser", mock.Anything, "user-123", false).Return(internalUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
+
 	).Return([]entitytype.AttributeInfo{{Attribute: "password"}}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.GetUser(context.Background(), "user-123", testBaseURL)
@@ -61,7 +64,8 @@ func TestGetUser_CredentialKeyLookupFailure_DoesNotLeakAttributes(t *testing.T) 
 	}
 	mockUserService.On("GetUser", mock.Anything, "user-123", false).Return(internalUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return(nil, &tidcommon.ServiceError{Code: "SVC-500", Type: tidcommon.ServerErrorType})
 
 	scimUser, err := service.GetUser(context.Background(), "user-123", testBaseURL)
@@ -184,7 +188,8 @@ func TestListUsers_Success(t *testing.T) {
 			Users:        []user.User{internalUser},
 		}, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	resp, err := service.ListUsers(context.Background(), 1, 20, nil, testBaseURL)
@@ -223,10 +228,12 @@ func TestListUsers_UnresolvableUserType_OmitsUserButReturnsRest(t *testing.T) {
 			Users:        []user.User{ghostUser, goodUser},
 		}, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUnknownUserType, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUnknownUserType,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return(nil, &tidcommon.ServiceError{Code: "USRS-1002", Type: tidcommon.ClientErrorType})
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	resp, err := service.ListUsers(context.Background(), 1, 20, nil, testBaseURL)
@@ -361,7 +368,8 @@ func TestCreateUser_Success(t *testing.T) {
 		return u.Type == testUserTypeEmployee && u.OUID == testOUID
 	})).Return(createdUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.CreateUser(context.Background(), payload, testBaseURL)
@@ -580,7 +588,8 @@ func TestCreateUser_MatchingCoreAndCustomValue_Succeeds(t *testing.T) {
 		return u.Type == testUserTypeEmployee && u.OUID == testOUID
 	})).Return(createdUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.CreateUser(context.Background(), payload, testBaseURL)
@@ -623,7 +632,8 @@ func TestCreateUser_CoreOnly_SingleUserType_DefaultsToType(t *testing.T) {
 		return u.Type == testUserTypeEmployee && u.OUID == testOUID
 	})).Return(createdUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.CreateUser(context.Background(), payload, testBaseURL)
@@ -837,7 +847,8 @@ func TestReplaceUser_Success(t *testing.T) {
 		return u.ID == "user-123" && u.Type == testUserTypeEmployee
 	})).Return(updatedUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.ReplaceUser(context.Background(), "user-123", payload, "", testBaseURL, false)
@@ -881,7 +892,8 @@ func TestReplaceUser_IsSelf_UsesUpdateUserAttributes(t *testing.T) {
 		"UpdateUserAttributes", mock.Anything, "user-123", json.RawMessage(`{"given_name":"Charlie"}`),
 	).Return(updatedUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.ReplaceUser(context.Background(), "user-123", payload, "", testBaseURL, true)
@@ -920,7 +932,8 @@ func TestReplaceUser_CoreOnly_NoExtensionURN_DefaultsToExistingType(t *testing.T
 		return u.ID == "user-123" && u.Type == testUserTypeEmployee
 	})).Return(updatedUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.ReplaceUser(context.Background(), "user-123", payload, "", testBaseURL, false)
@@ -1148,7 +1161,8 @@ func TestReplaceUser_IfMatch_Match(t *testing.T) {
 		Return(&user.User{ID: "user-123", Type: testUserTypeEmployee, Attributes: []byte(`{"given_name":"Charlie"}`)},
 			(*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
-		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee, true, false, false,
+		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
+		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
 	).Return([]entitytype.AttributeInfo{}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.ReplaceUser(context.Background(), "user-123", payload, currentVersion, testBaseURL, false)

@@ -1,32 +1,22 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package sample downloads and launches use-case sample applications.
 package sample
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/thunder-id/thunderid/tools/cli/internal/product"
@@ -42,7 +32,15 @@ type Options struct {
 	Config    map[string]string // key/value pairs to write into the target service's .env
 	EnvTarget string            // sample sub-dir to write the .env into (e.g. "ai-agent")
 	Features  []string          // feature tags, e.g. ["ai"] — drive optional services and frontend flags
+	Port      int               // port the running product is bound to; 0 = the default port
+	// ConfirmPorts is asked before the sample's dev ports are freed, so a process that
+	// is not ours is never stopped silently. Returning false cancels the run. nil means
+	// the caller already asked, which is what the REPL does before it launches.
+	ConfirmPorts func(holders []setup.PortHolder) bool
 }
+
+// errPortsCancelled is returned when the operator declines to free the sample's ports.
+var errPortsCancelled = errors.New("cancelled: the ports the sample needs are still in use")
 
 // hasFeature reports whether tag is present in opts.Features.
 func hasFeature(opts Options, tag string) bool {
@@ -181,6 +179,7 @@ func runWithResult(
 	if !ok {
 		return nil, "", "", fmt.Errorf("unknown sample %q — available: %s", sampleName, availableList())
 	}
+	beginRun()
 
 	if err := checkNodeVersion(); err != nil {
 		return nil, "", "", err
@@ -221,10 +220,17 @@ func runWithResult(
 		return nil, "", "", fmt.Errorf("could not read env file: %w", err)
 	}
 
-	// Stop the product.
+	// Stop the product. The REPL may have moved it off the default port after a
+	// conflict, so every port operation below follows opts.Port when it is set, and
+	// otherwise the configured port — the one the server actually binds.
+	port := opts.Port
+	if port <= 0 {
+		port = setup.ServerPort(installPath)
+	}
 	progress("Stopping " + product.Name + "...")
-	setup.KillPort(health.DefaultPort)
-	setup.WaitForPortFree(health.DefaultPort, 15*time.Second)
+	if err := setup.FreePort(port, 15*time.Second); err != nil {
+		return nil, "", "", fmt.Errorf("could not stop %s on port %d: %w", product.Name, port, err)
+	}
 
 	// Find ThunderID root and write resource files.
 	thunderRoot, err := setup.FindThunderRoot(installPath)
@@ -238,13 +244,13 @@ func runWithResult(
 
 	// Start the product.
 	progress("Starting " + product.Name + "...")
-	proc, err := setup.StartBackground(installPath, false)
+	proc, err := setup.StartBackgroundOnPort(installPath, false, opts.Port)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("could not start %s: %w", product.Name, err)
 	}
 
 	// Wait for the product to be ready.
-	serverURL, ready := health.ResolveBaseURL(health.DefaultPort, 60*time.Second)
+	serverURL, ready := health.ResolveBaseURL(port, 60*time.Second)
 	if !ready {
 		return proc, meta.sampleURL, "",
 			fmt.Errorf("%s did not become ready within 60 seconds — check logs at %s",
@@ -263,21 +269,13 @@ func runWithResult(
 		}
 	}
 
-	// Seed database on first run.
-	if _, err := os.Stat(filepath.Join(sampleDir, "backend", "wayfinder.sqlite")); os.IsNotExist(err) {
-		progress("Seeding database...")
-		seedCmd := exec.Command("npm", "run", "seed")
-		seedCmd.Dir = filepath.Join(sampleDir, "backend")
-		if out, seedErr := seedCmd.CombinedOutput(); seedErr != nil {
-			return proc, meta.sampleURL, serverURL,
-				fmt.Errorf("seed failed: %w\n%s", seedErr, out)
-		}
-	}
-
 	// Write service .env files so each process starts with the right credentials.
 	aiEnabled := hasFeature(opts, "ai")
-	if err := writeFrontendEnv(sampleDir, serverURL, aiEnabled); err != nil {
+	if err := writeFrontendEnv(sampleDir, serverURL, vars, aiEnabled); err != nil {
 		return proc, meta.sampleURL, serverURL, fmt.Errorf("could not write frontend env: %w", err)
+	}
+	if err := writeBaseURLEnvs(sampleDir, serverURL); err != nil {
+		return proc, meta.sampleURL, serverURL, fmt.Errorf("could not write service env: %w", err)
 	}
 	if aiEnabled && opts.EnvTarget != "" {
 		if err := writeServiceEnv(sampleDir, serverURL, vars, opts); err != nil {
@@ -288,9 +286,15 @@ func runWithResult(
 	// Free ports held by a previous run's sample services before restarting. A
 	// stale frontend still bound to 5173, for example, would otherwise push the
 	// new dev server to another port while the browser keeps hitting the old one.
+	// The holder may just as well be an unrelated app, so confirm before signaling it.
 	ports := sampleServicePorts(aiEnabled)
+	if opts.ConfirmPorts != nil {
+		if holders := setup.PortHolders(ports...); len(holders) > 0 && !opts.ConfirmPorts(holders) {
+			return proc, meta.sampleURL, serverURL, errPortsCancelled
+		}
+	}
 	for _, p := range ports {
-		setup.KillPort(p)
+		_ = setup.KillPort(p)
 	}
 	for _, p := range ports {
 		setup.WaitForPortFree(p, 10*time.Second)
@@ -299,7 +303,18 @@ func runWithResult(
 	// Start sample services.
 	progress("Starting " + sampleName + " services...")
 	if err := startSampleServices(sampleDir, aiEnabled); err != nil {
+		if errors.Is(err, errStoppedDuringStart) {
+			return proc, meta.sampleURL, serverURL, err
+		}
 		return proc, meta.sampleURL, serverURL, fmt.Errorf("could not start sample: %w", err)
+	}
+
+	// `npm run dev` keeps running when a single workspace exits, so a crashed
+	// service is invisible to the parent process. Confirm each one is accepting
+	// connections before reporting the sample as ready.
+	progress("Waiting for " + sampleName + " services...")
+	if err := waitForSampleServices(sampleDir, aiEnabled, sampleReadyTimeout); err != nil {
+		return proc, meta.sampleURL, serverURL, err
 	}
 
 	return proc, meta.sampleURL, serverURL, nil
@@ -366,22 +381,11 @@ func SampleDir(installPath, sampleName string) string {
 	return filepath.Join(filepath.Dir(installPath), "samples", sampleName)
 }
 
-// ReadServiceEnv reads key/value pairs from <sampleDir>/<envTarget>/.env.
-// Returns an empty map if the file does not exist.
-// Provider-specific API keys (ANTHROPIC_API_KEY, GOOGLE_API_KEY) are reverse-mapped
-// to the generic LLM_API_KEY so the REPL can pre-populate the prompt on subsequent runs.
+// ReadServiceEnv reads key/value pairs from <sampleDir>/<envTarget>/.env so the
+// REPL can pre-populate its prompts on subsequent runs. Returns an empty map if
+// the file does not exist.
 func ReadServiceEnv(sampleDir, envTarget string) map[string]string {
 	vals, _ := parseEnvFile(filepath.Join(sampleDir, envTarget, ".env"))
-	if _, ok := vals["LLM_API_KEY"]; !ok {
-		provider := strings.ToLower(vals["LLM_PROVIDER"])
-		if provider == "gemini" || provider == "google" {
-			if v := vals["GOOGLE_API_KEY"]; v != "" {
-				vals["LLM_API_KEY"] = v
-			}
-		} else if v := vals["ANTHROPIC_API_KEY"]; v != "" {
-			vals["LLM_API_KEY"] = v
-		}
-	}
 	return vals
 }
 
@@ -397,7 +401,7 @@ func writeResources(yamlPath string, vars map[string]string, thunderRoot string)
 	content := substituteVars(string(raw), vars)
 	docs := splitYAML(content)
 
-	reResourceType := regexp.MustCompile(`(?m)^#\s*resource_type:\s*(\S+)`)
+	reResourceType := regexp.MustCompile(`(?m)^resource_type:\s*(\S+)`)
 	reID := regexp.MustCompile(`(?m)^(?:id|handle):\s*(\S+)`)
 
 	for i, doc := range docs {
@@ -468,44 +472,111 @@ func splitYAML(content string) []string {
 	return docs
 }
 
-// writeFrontendEnv writes frontend/.env with Thunder client config and the
+// writeFrontendEnv updates frontend/.env with ThunderID client config and the
 // VITE_AI_FEATURES_ENABLED flag so the React dev server picks up the right mode.
-func writeFrontendEnv(sampleDir, thunderURL string, aiEnabled bool) error {
-	enabled := "false"
-	if aiEnabled {
-		enabled = "true"
+// Keys the sample ships (VITE_THUNDER_APP_ID, VITE_AUTH_IS_REDIRECT_BASED, ...)
+// are preserved.
+func writeFrontendEnv(sampleDir, baseURL string, vars map[string]string, aiEnabled bool) error {
+	path := filepath.Join(sampleDir, "frontend", ".env")
+	env, err := parseEnvFile(path)
+	if err != nil {
+		return err
 	}
-	content := "VITE_THUNDER_CLIENT_ID=WAYFINDER\n" +
-		"VITE_THUNDER_BASE_URL=" + thunderURL + "\n" +
-		"VITE_AI_FEATURES_ENABLED=" + enabled + "\n"
-	return os.WriteFile(filepath.Join(sampleDir, "frontend", ".env"), []byte(content), 0o644)
+	clientID := vars["WAYFINDER_CLIENT_ID"]
+	if clientID == "" {
+		clientID = "WAYFINDER"
+	}
+	env["VITE_THUNDER_CLIENT_ID"] = clientID
+	env["VITE_THUNDER_BASE_URL"] = baseURL
+	env["VITE_AI_FEATURES_ENABLED"] = strconv.FormatBool(aiEnabled)
+	return writeEnvFile(path, env)
 }
 
-// writeServiceEnv writes <opts.EnvTarget>/.env combining standard Thunder
-// credentials (from the thunderid.env vars map) with every key/value in opts.Config.
-func writeServiceEnv(sampleDir, thunderURL string, vars map[string]string, opts Options) error {
-	var b strings.Builder
-	b.WriteString("THUNDER_BASE_URL=" + thunderURL + "\n")
-	if v := vars["AGENT_CLIENT_ID"]; v != "" {
-		b.WriteString("AGENT_ID=" + v + "\n")
-	}
-	if v := vars["AGENT_CLIENT_SECRET"]; v != "" {
-		b.WriteString("AGENT_SECRET=" + v + "\n")
-	}
-	b.WriteString("AGENT_REDIRECT_URI=http://localhost:5173/agent-callback\n")
-	b.WriteString("AGENT_ACCESS_SCOPE=agent:access\n")
-	for k, v := range opts.Config {
-		if k == "LLM_API_KEY" {
-			provider := strings.ToLower(opts.Config["LLM_PROVIDER"])
-			if provider == "gemini" || provider == "google" {
-				k = "GOOGLE_API_KEY"
-			} else {
-				k = "ANTHROPIC_API_KEY"
-			}
+// baseURLServices are sample services whose .env ships with the default
+// ThunderID URL baked in. They need rewriting whenever the product runs on a
+// different port, or their token validation points at the wrong server.
+var baseURLServices = []string{"backend", "lounge"}
+
+// writeBaseURLEnvs points every such service at the URL the product actually
+// came up on. Services the sample does not ship are skipped.
+func writeBaseURLEnvs(sampleDir, baseURL string) error {
+	for _, service := range baseURLServices {
+		path := filepath.Join(sampleDir, service, ".env")
+		if _, err := os.Stat(path); err != nil {
+			continue
 		}
-		b.WriteString(k + "=" + v + "\n")
+		env, err := parseEnvFile(path)
+		if err != nil {
+			return err
+		}
+		env["THUNDER_BASE_URL"] = baseURL
+		if err := writeEnvFile(path, env); err != nil {
+			return err
+		}
 	}
-	return os.WriteFile(filepath.Join(sampleDir, opts.EnvTarget, ".env"), []byte(b.String()), 0o644)
+	return nil
+}
+
+// writeServiceEnv updates <opts.EnvTarget>/.env with the ThunderID credentials from
+// the thunderid.env vars map plus every key/value in opts.Config. Keys are written
+// under the names the sample reads; keys already in the file that the CLI has no
+// value for (MCP_SERVER_URL, UPGRADE_SCHEDULER_ENABLED, ...) are preserved.
+func writeServiceEnv(sampleDir, baseURL string, vars map[string]string, opts Options) error {
+	path := filepath.Join(sampleDir, opts.EnvTarget, ".env")
+	env, err := parseEnvFile(path)
+	if err != nil {
+		return err
+	}
+
+	env["THUNDER_BASE_URL"] = baseURL
+	setIfNotEmpty(env, "AGENT_ID", vars["AGENT_CLIENT_ID"])
+	setIfNotEmpty(env, "AGENT_SECRET", vars["AGENT_CLIENT_SECRET"])
+	setIfNotEmpty(env, "UPGRADE_AGENT_ID", vars["UPGRADE_AGENT_CLIENT_ID"])
+	setIfNotEmpty(env, "UPGRADE_AGENT_SECRET", vars["UPGRADE_AGENT_CLIENT_SECRET"])
+	env["AGENT_REDIRECT_URI"] = "http://localhost:5173/agent-callback"
+	env["AGENT_ACCESS_SCOPE"] = "agent:access"
+
+	// The upgrade scheduler polls for pending upgrades over CIBA, which needs the
+	// email or SMS flow configured. A try-out has neither, so it stays off unless
+	// the operator turned it on themselves.
+	if _, ok := env["UPGRADE_SCHEDULER_ENABLED"]; !ok {
+		env["UPGRADE_SCHEDULER_ENABLED"] = "false"
+	}
+
+	for k, v := range opts.Config {
+		env[k] = v
+	}
+	return writeEnvFile(path, env)
+}
+
+// setIfNotEmpty assigns value to key only when the source variable was populated,
+// so a missing entry in thunderid.env leaves any existing value alone.
+func setIfNotEmpty(env map[string]string, key, value string) {
+	if value != "" {
+		env[key] = value
+	}
+}
+
+// writeEnvFile writes KEY=VALUE lines sorted by key, so repeated runs produce an
+// identical file instead of reshuffling with Go's map iteration order.
+func writeEnvFile(path string, env map[string]string) error {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k + "=" + env[k] + "\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// ServicePorts returns the localhost ports the sample's dev services bind for the
+// given feature set, so a caller can check them before a run starts.
+func ServicePorts(features []string) []int {
+	return sampleServicePorts(hasFeature(Options{Features: features}, "ai"))
 }
 
 // sampleServicePorts returns the localhost ports the sample's dev services bind,
@@ -523,6 +594,116 @@ func sampleServicePorts(aiEnabled bool) []int {
 		ports = append(ports, 8790) // ai-agent
 	}
 	return ports
+}
+
+// sampleReadyTimeout bounds how long the sample's services get to bind their
+// ports. A cold `npm run dev` builds the frontend first, so this is generous.
+const sampleReadyTimeout = 120 * time.Second
+
+// serviceCheck is one readiness probe: the port a service binds and the name to
+// report when it never opens.
+type serviceCheck struct {
+	port int
+	name string
+}
+
+// readinessChecks returns the services that must be up for the sample's
+// walkthroughs to work. The SMTP inbox and lounge kiosk are optional extras, so
+// they are started but not gated on.
+func readinessChecks(aiEnabled bool) []serviceCheck {
+	checks := []serviceCheck{
+		{port: 5173, name: "frontend"},
+		{port: 8787, name: "backend API"},
+	}
+	if aiEnabled {
+		checks = append(checks, serviceCheck{port: 8790, name: "ai-agent"})
+	}
+	return checks
+}
+
+// waitForSampleServices blocks until every required service accepts connections.
+func waitForSampleServices(sampleDir string, aiEnabled bool, timeout time.Duration) error {
+	logPath := filepath.Join(sampleDir, "logs", "sample.log")
+	return waitForServices(readinessChecks(aiEnabled), logPath, timeout)
+}
+
+// waitForServices polls each check until its port opens, and reports the offending
+// service with the tail of its log once the shared deadline passes.
+func waitForServices(checks []serviceCheck, logPath string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for _, check := range checks {
+		for !setup.IsPortInUse(check.port) {
+			if time.Now().After(deadline) {
+				return fmt.Errorf("%s did not start on port %d — see %s\n%s",
+					check.name, check.port, logPath, tailLog(logPath, 20))
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	return nil
+}
+
+// running tracks the sample's npm process so the CLI can stop it on shutdown.
+// startSampleServices writes it from RunAsync's goroutine while the REPL reads
+// it from Update, so it is mutex-guarded.
+var running struct {
+	sync.Mutex
+	cmd      *exec.Cmd
+	stopping bool // shutdown began; a sample that starts after it must not survive
+}
+
+// errStoppedDuringStart is returned when the CLI shuts down while the sample is
+// still starting; the freshly started process is terminated before it returns.
+var errStoppedDuringStart = errors.New("sample startup stopped: shutting down")
+
+// beginRun stops a sample left running by an earlier request and clears the
+// shutdown latch for the new one. Without the stop, trackRunning would replace
+// the tracked handle and the earlier process group would never be signaled.
+func beginRun() {
+	StopServices()
+	running.Lock()
+	defer running.Unlock()
+	running.stopping = false
+}
+
+// trackRunning records the started sample process for StopServices. It reports
+// false when shutdown already began, in which case the caller must stop the
+// process it just started.
+func trackRunning(cmd *exec.Cmd) bool {
+	running.Lock()
+	defer running.Unlock()
+	if running.stopping {
+		return false
+	}
+	running.cmd = cmd
+	return true
+}
+
+// clearRunning drops the recorded handle if it is still cmd.
+func clearRunning(cmd *exec.Cmd) {
+	running.Lock()
+	defer running.Unlock()
+	if running.cmd == cmd {
+		running.cmd = nil
+	}
+}
+
+// StopServices terminates the sample services started by this CLI process by
+// signaling the sample's process group: npm plus every service it spawned. The
+// sample's ports are deliberately not swept, because a listener still on one of
+// them after the group is gone belongs to something we did not start. It is safe
+// to call when nothing was started, and calling it twice is a no-op.
+func StopServices() {
+	running.Lock()
+	cmd := running.cmd
+	running.cmd = nil
+	// Latch shutdown: a sample still starting on RunAsync's goroutine registers
+	// after this point, and trackRunning must refuse it rather than leave it
+	// running past the CLI's exit.
+	running.stopping = true
+	running.Unlock()
+
+	killProcessGroup(cmd)
 }
 
 // startSampleServices launches the sample services in the background via npm.
@@ -554,8 +735,15 @@ func startSampleServices(sampleDir string, aiEnabled bool) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile // never write to os.Stderr — it corrupts the Bubble Tea display
 	cmd.Stdin = nil
+	// Own process group, so StopServices can signal npm and every service it
+	// spawns as a unit.
+	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if !trackRunning(cmd) {
+		killProcessGroup(cmd)
+		return errStoppedDuringStart
 	}
 
 	// Detect immediate failures (e.g. missing npm script) before returning.
@@ -563,6 +751,7 @@ func startSampleServices(sampleDir string, aiEnabled bool) error {
 	go func() { done <- cmd.Wait() }()
 	select {
 	case err := <-done:
+		clearRunning(cmd)
 		tail := tailLog(logPath, 10)
 		if err != nil {
 			return fmt.Errorf("sample services failed to start:\n%s", tail)
@@ -575,20 +764,16 @@ func startSampleServices(sampleDir string, aiEnabled bool) error {
 
 // tailLog returns the last n lines of the file at path, or a fallback message.
 func tailLog(path string, n int) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
+	lines := setup.TailFile(path, n)
+	if len(lines) == 0 {
 		return "(no log available)"
-	}
-	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
 }
 
-func printSummary(sampleName, thunderURL, sampleURL string, features []string) {
+func printSummary(sampleName, baseURL, sampleURL string, features []string) {
 	fmt.Println()
-	fmt.Printf("  ✓ %s is ready at %s\n", product.Name, thunderURL)
+	fmt.Printf("  ✓ %s is ready at %s\n", product.Name, baseURL)
 	fmt.Printf("  ✓ Wayfinder is running at %s\n", sampleURL)
 	fmt.Println()
 
@@ -596,15 +781,14 @@ func printSummary(sampleName, thunderURL, sampleURL string, features []string) {
 		fmt.Println("  Try these walkthroughs:")
 		fmt.Println()
 		if hasFeature(Options{Features: features}, "ai") {
-			fmt.Println("    AI Concierge        → click the chat bubble and ask about flights")
-			fmt.Println("    Book via Agent      → ask the concierge to book a flight — approve the consent prompt")
-			fmt.Println("    Agent Identity      → open " + sampleURL + "/signin-as-agent")
+			fmt.Println("    Protect the Agent   → sign in as john.doe, then jane.smith, and compare chat access")
+			fmt.Println("    Browse with Agent   → ask the concierge about flights (M2M, no consent prompt)")
+			fmt.Println("    Book on Behalf      → ask the concierge to book a flight — approve the consent prompt")
 		} else {
-			fmt.Println("    Login               → sign in as john.doe / john.doe")
+			fmt.Println("    Sign-In             → sign in as john.doe / john.doe, then open the Profile tab")
 			fmt.Println("    Self Sign-Up        → create a new account at the frontend")
-			fmt.Println("    View Profile        → sign in, open the Profile tab")
 			fmt.Println("    Account Recovery    → click \"Forgot password?\" (requires SMTP in deployment.yaml)")
-			fmt.Println("    Onboard Users       → sign in as alex.carter / alex.carter (Admin)")
+			fmt.Println("    Staff Sign-Up       → invite a staff member from the ThunderID Console")
 		}
 	}
 	fmt.Println()

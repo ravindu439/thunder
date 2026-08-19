@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {getErrorMessage} from '@thunderid/utils';
 import {Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button, Alert} from '@wso2/oxygen-ui';
 import {useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
@@ -49,7 +35,7 @@ export default function ApplicationDeleteDialog({
   onClose,
   onSuccess = undefined,
 }: ApplicationDeleteDialogProps): JSX.Element {
-  const {t} = useTranslation();
+  const {t} = useTranslation('applications');
   const deleteApplication = useDeleteApplication();
   const [error, setError] = useState<string | null>(null);
 
@@ -62,6 +48,7 @@ export default function ApplicationDeleteDialog({
   const handleConfirm = (): void => {
     if (!applicationId) return;
 
+    setError(null);
     deleteApplication.mutate(applicationId, {
       onSuccess: (): void => {
         setError(null);
@@ -69,18 +56,23 @@ export default function ApplicationDeleteDialog({
         onSuccess?.();
       },
       onError: (err: Error) => {
-        setError(err.message ?? t('applications:delete.error', 'Failed to delete application. Please try again.'));
+        setError(getErrorMessage(err, t, 'delete.error', 'Failed to delete application. Please try again.'));
       },
     });
   };
 
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>{t('applications:delete.title')}</DialogTitle>
+      <DialogTitle>{t('delete.title', 'Delete Application')}</DialogTitle>
       <DialogContent>
-        <DialogContentText sx={{mb: 2}}>{t('applications:delete.message')}</DialogContentText>
+        <DialogContentText sx={{mb: 2}}>
+          {t('delete.message', 'Are you sure you want to delete this application? This action cannot be undone.')}
+        </DialogContentText>
         <Alert severity="warning" sx={{mb: 2}}>
-          {t('applications:delete.disclaimer')}
+          {t(
+            'delete.disclaimer',
+            'Warning: All associated data, configurations, and access tokens will be permanently removed.',
+          )}
         </Alert>
         {error && (
           <Alert severity="error" sx={{mt: 2}}>

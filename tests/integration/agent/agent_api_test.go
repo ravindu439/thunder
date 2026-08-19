@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -89,7 +74,6 @@ var (
 
 var (
 	testOUID          string
-	agentSchemaID     string
 	defaultAuthFlowID string
 
 	// IDs set during SetupSuite for the primary agent used across multiple tests.
@@ -101,6 +85,7 @@ var (
 // OAuth CC token issuance, tree-path endpoints, group membership, and error paths.
 type AgentAPITestSuite struct {
 	suite.Suite
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
 }
 
 func TestAgentAPITestSuite(t *testing.T) {
@@ -114,10 +99,15 @@ func (ts *AgentAPITestSuite) SetupSuite() {
 	ts.Require().NoError(err, "Failed to create test organization unit")
 	testOUID = ouID
 
+	// The `default` agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at this suite's OU, so teardown can put it back before that OU is deleted.
+	snapshot, err := testutils.SnapshotAgentType()
+	ts.Require().NoError(err, "Failed to snapshot the default agent type")
+	ts.agentTypeSnapshot = snapshot
+
 	agentSchema.OUID = testOUID
-	schemaID, err := testutils.CreateAgentType(agentSchema)
+	_, err = testutils.CreateAgentType(agentSchema)
 	ts.Require().NoError(err, "Failed to create agent schema (user type)")
-	agentSchemaID = schemaID
 
 	defaultAuthFlowID, err = testutils.GetFlowIDByHandle("default-flow", "AUTHENTICATION")
 	ts.Require().NoError(err, "Failed to get default auth flow ID")
@@ -138,9 +128,11 @@ func (ts *AgentAPITestSuite) TearDownSuite() {
 			ts.T().Logf("Failed to delete primary agent during teardown: %v", err)
 		}
 	}
-	if agentSchemaID != "" {
-		if err := testutils.DeleteAgentType(agentSchemaID); err != nil {
-			ts.T().Logf("Failed to delete agent schema during teardown: %v", err)
+	// Restore the shared agent type before deleting the OU it points at, or the singleton is left
+	// referencing a deleted OU and a later suite's restore fails.
+	if ts.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(ts.agentTypeSnapshot); err != nil {
+			ts.T().Errorf("teardown: failed to restore the default agent type: %v", err)
 		}
 	}
 	if testOUID != "" {
@@ -755,8 +747,8 @@ var (
 // AgentAttributesTestSuite covers custom attribute CRUD and filter operations on agents.
 type AgentAttributesTestSuite struct {
 	suite.Suite
-	ouID     string
-	schemaID string
+	ouID              string
+	agentTypeSnapshot *testutils.AgentTypeSnapshot
 }
 
 func TestAgentAttributesTestSuite(t *testing.T) {
@@ -768,15 +760,24 @@ func (ts *AgentAttributesTestSuite) SetupSuite() {
 	ts.Require().NoError(err, "Failed to create test organization unit")
 	ts.ouID = ouID
 
+	// The `default` agent type is a singleton shared with every other suite. Snapshot it before
+	// pointing it at this suite's OU, so teardown can put it back before that OU is deleted.
+	snapshot, err := testutils.SnapshotAgentType()
+	ts.Require().NoError(err, "Failed to snapshot the default agent type")
+	ts.agentTypeSnapshot = snapshot
+
 	attrAgentSchema.OUID = ts.ouID
-	schemaID, err := testutils.CreateAgentType(attrAgentSchema)
+	_, err = testutils.CreateAgentType(attrAgentSchema)
 	ts.Require().NoError(err, "Failed to create agent schema")
-	ts.schemaID = schemaID
 }
 
 func (ts *AgentAttributesTestSuite) TearDownSuite() {
-	if ts.schemaID != "" {
-		_ = testutils.DeleteAgentType(ts.schemaID)
+	// Restore the shared agent type before deleting the OU it points at, or the singleton is left
+	// referencing a deleted OU and a later suite's restore fails.
+	if ts.agentTypeSnapshot != nil {
+		if err := testutils.RestoreAgentType(ts.agentTypeSnapshot); err != nil {
+			ts.T().Errorf("teardown: failed to restore the default agent type: %v", err)
+		}
 	}
 	if ts.ouID != "" {
 		_ = testutils.DeleteOrganizationUnit(ts.ouID)
@@ -860,7 +861,8 @@ func (ts *AgentAttributesTestSuite) TestAgentAttributes_UpdateAttributes() {
 }
 
 // TestAgentAttributes_FilterByAttribute verifies that GET /agents?filter=attr eq "value"
-// returns only matching agents.
+// returns exactly the matching agents. The result set is pinned by count and by ID, so a filter
+// that silently widened to every agent would fail rather than still finding the expected one.
 func (ts *AgentAttributesTestSuite) TestAgentAttributes_FilterByAttribute() {
 	idA, err := createAgent(Agent{
 		OUID:       ts.ouID,
@@ -890,14 +892,11 @@ func (ts *AgentAttributesTestSuite) TestAgentAttributes_FilterByAttribute() {
 	var listResp AgentListResponse
 	ts.Require().NoError(json.NewDecoder(resp.Body).Decode(&listResp))
 
-	found := false
-	for _, a := range listResp.Agents {
-		if a.ID == idA {
-			found = true
-		}
-		ts.Assert().NotEqual(idB, a.ID, "Beta agent must not appear in filtered results")
-	}
-	ts.Assert().True(found, "Alpha agent must appear in filtered results")
+	ts.Assert().Equal(1, listResp.TotalResults, "filter must match exactly the alpha agent")
+	ts.Assert().Equal(1, listResp.Count)
+	ts.Require().Len(listResp.Agents, 1)
+	ts.Assert().Equal(idA, listResp.Agents[0].ID,
+		"the single match must be the alpha agent, which also proves beta was excluded")
 }
 
 // TestAgentAttributes_NullifyAttributes verifies that omitting attributes on update

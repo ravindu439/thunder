@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,11 +18,10 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
-	"github.com/thunder-id/thunderid/internal/resource"
+	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 	"github.com/thunder-id/thunderid/tests/mocks/oauth/oauth2/tokenservicemock"
 	"github.com/thunder-id/thunderid/tests/mocks/resourcemock"
-	"github.com/thunder-id/thunderid/tests/mocks/serverconfigmock"
 )
 
 const testAssertion = "test-id-jag-assertion" //nolint:gosec // Test assertion, not a real credential
@@ -53,7 +38,6 @@ type JWTBearerGrantHandlerTestSuite struct {
 	mockTokenBuilder    *tokenservicemock.TokenBuilderInterfaceMock
 	mockTokenValidator  *tokenservicemock.TokenValidatorInterfaceMock
 	mockResourceService *resourcemock.ResourceServiceInterfaceMock
-	mockServerConfigSvc *serverconfigmock.ServerConfigServiceMock
 	handler             *jwtBearerGrantHandler
 	oauthApp            *providers.OAuthClient
 }
@@ -66,20 +50,17 @@ func (suite *JWTBearerGrantHandlerTestSuite) SetupTest() {
 	suite.mockTokenBuilder = tokenservicemock.NewTokenBuilderInterfaceMock(suite.T())
 	suite.mockTokenValidator = tokenservicemock.NewTokenValidatorInterfaceMock(suite.T())
 	suite.mockResourceService = resourcemock.NewResourceServiceInterfaceMock(suite.T())
-	suite.mockServerConfigSvc = serverconfigmock.NewServerConfigServiceMock(suite.T())
-	// A request that resolves no explicit resource falls back to the deployment default RS.
-	suite.mockServerConfigSvc.On("GetMergedConfig", mock.Anything, "defaultResourceServer").
-		Return(resource.DefaultResourceServerConfig{ResourceServerID: testJWTBearerDefaultRSID}, nil).Maybe()
-	suite.mockResourceService.On("GetResourceServer", mock.Anything, testJWTBearerDefaultRSID).
+	// A request that resolves no explicit resource (empty identifier) falls back to the deployment
+	// default RS, as the default-aware provider does.
+	suite.mockResourceService.On("GetResourceServerByIdentifier", mock.Anything, "").
 		Return(&providers.ResourceServer{
 			ID:         testJWTBearerDefaultRSID,
 			Identifier: testJWTBearerDefaultRSAudience,
 		}, nil).Maybe()
 	suite.handler = &jwtBearerGrantHandler{
-		tokenBuilder:        suite.mockTokenBuilder,
-		tokenValidator:      suite.mockTokenValidator,
-		resourceService:     suite.mockResourceService,
-		serverConfigService: suite.mockServerConfigSvc,
+		tokenBuilder:    suite.mockTokenBuilder,
+		tokenValidator:  suite.mockTokenValidator,
+		resourceService: suite.mockResourceService,
 	}
 
 	suite.oauthApp = &providers.OAuthClient{
@@ -99,7 +80,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) SetupTest() {
 
 func (suite *JWTBearerGrantHandlerTestSuite) TestNewJWTBearerGrantHandler() {
 	handler := newJWTBearerGrantHandler(suite.mockTokenBuilder, suite.mockTokenValidator,
-		suite.mockResourceService, suite.mockServerConfigSvc)
+		suite.mockResourceService)
 	assert.NotNil(suite.T(), handler)
 	assert.Implements(suite.T(), (*GrantHandlerInterface)(nil), handler)
 }
@@ -163,7 +144,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_Success() {
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,
@@ -209,7 +190,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_DPoPProof_Propagate
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,
@@ -245,7 +226,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_InvalidAssertion() 
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(nil, errors.New("assertion audience does not match server issuer"))
 
 	result, errResp := suite.handler.HandleGrant(context.Background(), tokenRequest, suite.oauthApp)
@@ -254,6 +235,58 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_InvalidAssertion() 
 	assert.NotNil(suite.T(), errResp)
 	assert.Equal(suite.T(), constants.ErrorInvalidGrant, errResp.Error)
 	assert.Equal(suite.T(), "Invalid assertion", errResp.ErrorDescription)
+}
+
+// The reasons the validator attributes are reported so a client can tell an expired assertion from
+// an IdP that was never registered for ID-JAG.
+func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_AssertionRejectionReasonIsReported() {
+	testCases := []struct {
+		name                string
+		validationErr       error
+		expectedDescription string
+	}{
+		{
+			name:                "Expired",
+			validationErr:       tokenservice.ErrTokenExpired,
+			expectedDescription: "The assertion has expired",
+		},
+		{
+			name:                "UntrustedIssuer",
+			validationErr:       fmt.Errorf("%w: unknown issuer", tokenservice.ErrIssuerNotTrusted),
+			expectedDescription: "The assertion issuer is not registered as a trusted ID-JAG issuer",
+		},
+		{
+			name:                "AudienceNotAccepted",
+			validationErr:       fmt.Errorf("%w: audience mismatch", tokenservice.ErrAudienceNotAccepted),
+			expectedDescription: "The assertion audience must be exactly this server's issuer",
+		},
+		{
+			name:                "UnattributedFailureKeepsGenericDescription",
+			validationErr:       errors.New("something else went wrong"),
+			expectedDescription: "Invalid assertion",
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			suite.SetupTest()
+
+			tokenRequest := &model.TokenRequest{
+				GrantType: string(providers.GrantTypeJWTBearer),
+				ClientID:  testClientID,
+				Assertion: testAssertion,
+			}
+			suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
+				Return(nil, tc.validationErr)
+
+			result, errResp := suite.handler.HandleGrant(context.Background(), tokenRequest, suite.oauthApp)
+
+			assert.Nil(suite.T(), result)
+			assert.NotNil(suite.T(), errResp)
+			assert.Equal(suite.T(), constants.ErrorInvalidGrant, errResp.Error)
+			assert.Equal(suite.T(), tc.expectedDescription, errResp.ErrorDescription)
+		})
+	}
 }
 
 // Granted scopes are the intersection of the assertion scopes and the request scope parameter. The
@@ -269,7 +302,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_ScopeIntersection()
 
 	// Assertion carries [read write], request narrows to [read admin]. Only "read" survives the
 	// intersection; "write" was not requested, "admin" was not asserted.
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,
@@ -309,7 +342,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_EmptyAppScopes_Asse
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,
@@ -348,7 +381,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_AssertionResource_A
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:       testUserID,
 			Iss:       testCustomIssuer,
@@ -385,14 +418,13 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_AssertionResource_A
 // no defaultResourceServer is configured, there is no target to bind to and the request is rejected
 // with invalid_target.
 func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_AssertionNoResource_NoDefault_InvalidTarget() {
-	scfg := serverconfigmock.NewServerConfigServiceMock(suite.T())
-	scfg.On("GetMergedConfig", mock.Anything, "defaultResourceServer").
-		Return(resource.DefaultResourceServerConfig{ResourceServerID: ""}, nil)
+	rsvc := resourcemock.NewResourceServiceInterfaceMock(suite.T())
+	rsvc.On("GetResourceServerByIdentifier", mock.Anything, "").
+		Return(nil, &tidcommon.ServiceError{Type: tidcommon.ClientErrorType, Code: "RES-1003"})
 	handler := &jwtBearerGrantHandler{
-		tokenBuilder:        suite.mockTokenBuilder,
-		tokenValidator:      suite.mockTokenValidator,
-		resourceService:     suite.mockResourceService,
-		serverConfigService: scfg,
+		tokenBuilder:    suite.mockTokenBuilder,
+		tokenValidator:  suite.mockTokenValidator,
+		resourceService: rsvc,
 	}
 
 	tokenRequest := &model.TokenRequest{
@@ -401,7 +433,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_AssertionNoResource
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,
@@ -427,7 +459,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_RequestResourceNarr
 		Resources: []string{testRS01URI},
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:       testUserID,
 			Iss:       testCustomIssuer,
@@ -467,7 +499,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_RequestResourceNotI
 		Resources: []string{"https://not-granted.example.com"},
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:       testUserID,
 			Iss:       testCustomIssuer,
@@ -489,7 +521,7 @@ func (suite *JWTBearerGrantHandlerTestSuite) TestHandleGrant_TokenBuildError() {
 		Assertion: testAssertion,
 	}
 
-	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion, testClientID).
+	suite.mockTokenValidator.On("ValidateIDJAGAssertion", mock.Anything, testAssertion).
 		Return(&tokenservice.IDJAGAssertionClaims{
 			Sub:    testUserID,
 			Iss:    testCustomIssuer,

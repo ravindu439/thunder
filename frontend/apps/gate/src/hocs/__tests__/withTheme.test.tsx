@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -37,12 +22,15 @@ vi.mock('@thunder/contexts', () => ({
 
 // Create mock for useDesign
 const mockUseDesign = vi.fn();
+const mockGetCspNonce = vi.fn<() => string | undefined>();
 vi.mock('@thunderid/design', () => ({
   // eslint-disable-next-line @typescript-eslint/no-unsafe-return
   useDesign: () => mockUseDesign(),
   StylesheetInjector: () => null,
-  GoogleFontLoader: () => null,
+  FontImporter: () => null,
+  getFontImportURL: () => undefined,
   DefaultTheme: {},
+  getCspNonce: () => mockGetCspNonce(),
 }));
 
 const mockUseConfig = vi.hoisted(() => vi.fn());
@@ -118,6 +106,7 @@ describe('withTheme', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     capturedThemeProviderProps = undefined;
+    mockGetCspNonce.mockReturnValue(undefined);
     mockUseDesign.mockReturnValue({
       transformedTheme: null,
       isLoading: false,
@@ -297,6 +286,18 @@ describe('withTheme', () => {
   it('renders Head', () => {
     render(<WithThemeComponent />);
     expect(screen.getByTestId('head')).toBeInTheDocument();
+  });
+
+  it('forwards the csp nonce to OxygenUIThemeProvider', () => {
+    mockGetCspNonce.mockReturnValue('abc123');
+
+    render(<WithThemeComponent />);
+    expect(capturedThemeProviderProps?.nonce).toBe('abc123');
+  });
+
+  it('passes undefined nonce to OxygenUIThemeProvider when none is available', () => {
+    render(<WithThemeComponent />);
+    expect(capturedThemeProviderProps?.nonce).toBeUndefined();
   });
 
   it('includes custom object themes from config in the theme list', () => {

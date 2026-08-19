@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/non-nullable-type-assertion-style */
 
@@ -63,11 +48,51 @@ describe('RichTextActionFields', () => {
     expect(screen.queryByTestId('rich-text-action-ref')).not.toBeInTheDocument();
   });
 
-  it('turning the toggle on writes an empty action ref via onChange', () => {
+  it('turning the toggle on falls back to the component id when the label has no sentinel', () => {
+    // A label with no data-action-ref dispatches on any anchor click, so the component id is a
+    // safe ref. An empty one would serialise as `{"ref": ""}` and never dispatch.
     render(<RichTextActionFields resource={makeResource()} onChange={onChange} />);
     const toggle = screen.getByTestId('rich-text-action-enabled').querySelector('input') as HTMLInputElement;
     fireEvent.click(toggle);
-    expect(onChange).toHaveBeenCalledWith('action', {ref: ''}, expect.anything());
+    expect(onChange).toHaveBeenCalledWith('action', {ref: 'rt-1'}, expect.anything());
+  });
+
+  it("turning the toggle on adopts the label anchor's sentinel", () => {
+    const resource = makeResource({
+      label: '<p><a href="#" data-action-ref="action_recovery">Forgot password?</a></p>',
+    } as unknown as Partial<Resource>);
+    render(<RichTextActionFields resource={resource} onChange={onChange} />);
+    const toggle = screen.getByTestId('rich-text-action-enabled').querySelector('input') as HTMLInputElement;
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith('action', {ref: 'action_recovery'}, resource);
+  });
+
+  it('turning the toggle back on drops a ref no anchor carries', () => {
+    // Flows saved before the ref and the sentinel were kept in sync hold a target node id in
+    // `action.ref`. Re-seeding it would keep the link dead; the label is authoritative.
+    const resource = makeResource({
+      action: {ref: 'recovery_call_g0v6'},
+      label: '<p><a href="#" data-action-ref="action_recovery">Forgot password?</a></p>',
+    } as unknown as Partial<Resource>);
+    render(<RichTextActionFields resource={resource} onChange={onChange} />);
+    const toggle = screen.getByTestId('rich-text-action-enabled').querySelector('input') as HTMLInputElement;
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenLastCalledWith('action', {ref: 'action_recovery'}, resource);
+  });
+
+  it('keeps a ref that matches a later anchor in a multi-link label', () => {
+    const resource = makeResource({
+      action: {ref: 'action_signup'},
+      label:
+        '<p><a href="#" data-action-ref="action_recovery">Forgot password?</a>' +
+        '<a href="#" data-action-ref="action_signup">Sign up</a></p>',
+    } as unknown as Partial<Resource>);
+    render(<RichTextActionFields resource={resource} onChange={onChange} />);
+    const toggle = screen.getByTestId('rich-text-action-enabled').querySelector('input') as HTMLInputElement;
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenLastCalledWith('action', {ref: 'action_signup'}, resource);
   });
 
   it('preserves an existing action ref when the toggle is turned back on', () => {

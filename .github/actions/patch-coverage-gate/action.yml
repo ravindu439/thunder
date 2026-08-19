@@ -1,0 +1,106 @@
+name: Patch Coverage Gate
+description: >-
+  Enforces patch coverage for the current diff from the most authoritative source
+  available, and always names the source it used. It mirrors the codecov/patch
+  check run first, falls back to Codecov's compare API when that check reports no
+  verdict, and computes patch coverage locally from the archived coverage
+  artifacts when Codecov gives nothing at all, so the gate always reports a
+  result and can never hang on Codecov's backend.
+inputs:
+  codecov-config:
+    description: >-
+      Path to codecov.yml. The patch coverage threshold and the ignored paths
+      are read from it so the fallbacks enforce the same rules as Codecov.
+    required: false
+    default: 'codecov.yml'
+  github-token:
+    description: 'Token used to read the codecov/patch check run'
+    required: true
+  pr-number:
+    description: >-
+      Pull request number used to query the Codecov compare API. Leave empty to
+      skip that fallback and compute locally instead.
+    required: false
+    default: ''
+  head-sha:
+    description: 'Commit SHA whose Codecov verdict and report are read'
+    required: true
+  base-ref:
+    description: 'Git ref or SHA the diff is compared against'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # Exports FAIL_UNDER, CODECOV_IGNORE_FILE and CODECOV_FLAG_PATHS_FILE for the
+    # steps below, all derived from codecov.yml.
+    - name: 📖 Read the patch coverage rules from codecov.yml
+      shell: bash
+      env:
+        CODECOV_CONFIG: ${{ inputs.codecov-config }}
+      run: bash "${{ github.action_path }}/read-codecov-config.sh"
+
+    # Nothing in the diff can produce coverage, so no source has anything to
+    # measure. Checked here rather than trusting Codecov's patch totals, which
+    # can report lines from outside this diff.
+    - name: 🔍 Check whether the diff can affect coverage
+      id: coverable
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: |
+        set -euo pipefail
+        CHANGES=$(bash "${{ github.action_path }}/list-coverable-changes.sh")
+        if [ -z "$CHANGES" ]; then
+          echo "coverable=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "✅ Patch coverage: not applicable, no percentage measured."
+            echo "   Nothing in this diff can report coverage, so no source was consulted:"
+            echo "   compared against ${BASE_REF}, it changes no file under any path that a"
+            echo "   coverage flag in codecov.yml covers, once codecov.yml's ignores are applied."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+        echo "coverable=true" >> "$GITHUB_OUTPUT"
+        echo "$(printf '%s\n' "$CHANGES" | wc -l | tr -d ' ') file(s) in this diff can affect patch coverage:"
+        printf '%s\n' "$CHANGES" | sed 's/^/  /'
+
+    # Source 1: Codecov's own verdict. A pass or fail here is final and the
+    # composite stops; only the absence of a verdict continues to source 2.
+    - name: 1️⃣ Mirror the codecov/patch verdict
+      id: codecov-check
+      if: steps.coverable.outputs.coverable == 'true'
+      shell: bash
+      env:
+        HEAD_SHA: ${{ inputs.head-sha }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: bash "${{ github.action_path }}/mirror-codecov-check.sh"
+
+    # Source 2: Codecov's data through the compare API, which is a different
+    # measurement from the check run and so is only consulted when there is no
+    # verdict to mirror.
+    - name: 2️⃣ Fall back to the Codecov compare API
+      id: codecov-api
+      if: steps.coverable.outputs.coverable == 'true' && steps.codecov-check.outputs.resolved != 'true'
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+        BASE_REF: ${{ inputs.base-ref }}
+      run: bash "${{ github.action_path }}/check-codecov-api.sh"
+
+    - name: 📥 Download coverage artifacts
+      if: steps.coverable.outputs.coverable == 'true' && steps.codecov-check.outputs.resolved != 'true' && (steps.codecov-api.outcome == 'skipped' || steps.codecov-api.outputs.resolved != 'true')
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        pattern: "*coverage*"
+        path: coverage-artifacts
+
+    # Source 3: computed here from the archived reports. Deterministic and always
+    # scoped to this diff, but not identical to Codecov, so it is the last resort.
+    - name: 3️⃣ Compute patch coverage locally
+      if: steps.coverable.outputs.coverable == 'true' && steps.codecov-check.outputs.resolved != 'true' && (steps.codecov-api.outcome == 'skipped' || steps.codecov-api.outputs.resolved != 'true')
+      shell: bash
+      env:
+        BASE_REF: ${{ inputs.base-ref }}
+      run: bash "${{ github.action_path }}/compute-local-patch-coverage.sh"

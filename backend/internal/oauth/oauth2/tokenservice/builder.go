@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package tokenservice
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
@@ -96,6 +82,7 @@ func (tb *tokenBuilder) BuildAccessToken(
 		Audiences:        tokenCtx.Audiences,
 		ClaimsRequest:    tokenCtx.ClaimsRequest,
 		ClaimsLocales:    tokenCtx.ClaimsLocales,
+		TokenFamilyID:    tokenCtx.TokenFamilyID,
 	}
 
 	token, iat, err := tb.jwtService.GenerateJWT(
@@ -241,6 +228,10 @@ func (tb *tokenBuilder) buildAccessTokenClaims(
 
 	dpop.SetCnfJkt(claims, ctx.DPoPJkt)
 
+	if ctx.TokenFamilyID != "" {
+		claims[constants.ClaimTokenFamilyID] = ctx.TokenFamilyID
+	}
+
 	return claims, nil
 }
 
@@ -272,13 +263,23 @@ func (tb *tokenBuilder) BuildRefreshToken(
 
 	tokenConfig := ResolveTokenConfig(tb.cfg, tokenCtx.OAuthApp, TokenTypeRefresh, 0)
 
+	// A rotated token inherits the expiry of the token it replaces, so refreshing extends access
+	// but never the grant's lifetime. First issuance carries no expiry and starts a fresh period.
+	validityPeriod := tokenConfig.ValidityPeriod
+	if tokenCtx.ExpiresAt > 0 {
+		validityPeriod = tokenCtx.ExpiresAt - time.Now().Unix()
+		if validityPeriod <= 0 {
+			return nil, fmt.Errorf("refresh token grant has reached its expiry")
+		}
+	}
+
 	claims, claimsErr := tb.buildRefreshTokenClaims(tokenCtx)
 	if claimsErr != nil {
 		return nil, fmt.Errorf("failed to build refresh token claims: %w", claimsErr)
 	}
 
 	tokenDTO := &oauth2model.TokenDTO{
-		ExpiresIn:     tokenConfig.ValidityPeriod,
+		ExpiresIn:     validityPeriod,
 		Scopes:        tokenCtx.Scopes,
 		ClientID:      tokenCtx.ClientID,
 		Subject:       tokenCtx.AccessTokenSubject,
@@ -292,7 +293,7 @@ func (tb *tokenBuilder) BuildRefreshToken(
 		ctx,
 		tokenCtx.ClientID,
 		tokenConfig.Issuer,
-		tokenConfig.ValidityPeriod,
+		validityPeriod,
 		claims,
 		jwt.TokenTypeJWT,
 		"",
@@ -346,6 +347,10 @@ func (tb *tokenBuilder) buildRefreshTokenClaims(ctx *RefreshTokenBuildContext) (
 
 	if ctx.DPoPJkt != "" {
 		claims[constants.ClaimDPoPJkt] = ctx.DPoPJkt
+	}
+
+	if ctx.TokenFamilyID != "" {
+		claims[constants.ClaimTokenFamilyID] = ctx.TokenFamilyID
 	}
 
 	return claims, nil
@@ -406,8 +411,8 @@ func (tb *tokenBuilder) BuildIDToken(
 			}
 			// cty="JWT" indicates a nested JWT (signed JWS payload encrypted as JWE per OIDC spec)
 			encrypted, svcErr := tb.jweService.Encrypt(ctx,
-				[]byte(token), rpKey,
-				jwe.KeyEncAlgorithm(idTokenCfg.EncryptionAlg),
+				[]byte(token), &providers.KeyRef{PublicKeyJWK: rpKey},
+				idTokenCfg.EncryptionAlg,
 				jwe.ContentEncAlgorithm(idTokenCfg.EncryptionEnc),
 				"JWT", rpKID,
 			)

@@ -1,0 +1,391 @@
+# Copyright 2026 The ThunderID Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# ThunderID declarative resources for the ThunderID Agent Identity Playground.
+#
+# Import this file into a running ThunderID instance (Console -> Import, or POST /import).
+# Import is upsert by id, so re-importing, or importing the per-tab slices the app offers, is safe.
+#
+# The cast is a travel-booking one: a Concierge agent, a worker agent it delegates to, and a
+# customer named John Doe. Everything here is prefixed `agent-identity-` and uses its own resource
+# identifiers, so it never collides with anything else in the same instance.
+#
+#   self  : the Concierge recommends flights on its own      sub = agent, no act
+#   obo   : John asks the Concierge to book a trip           sub = John,  act = Concierge
+#   chain : the Concierge delegates flight search to a worker sub = John, act = worker -> Concierge
+#
+# Scopes are narrowed to what these three tabs need.
+
+# --- resource servers ------------------------------------------------------
+#
+# Two protected APIs. `agent:access` decides who may use the Concierge at all, and the booking
+# scopes decide what may be done with it. Registering them is what makes scopes real: a token can
+# only carry a scope that some resource server defines and that the principal has been granted.
+
+resource_type: resource_server
+id: agent-identity-agent-rs
+name: Agent Access
+description: Controls who may use the Concierge
+identifier: https://agent.travel.example
+ouHandle: default
+delimiter: ":"
+resources:
+  - name: Agent
+    handle: agent
+    actions:
+      - name: Access
+        handle: access
+        description: Grants access to the Concierge
+
+---
+# --- booking resource server -----------------------------------------------
+
+resource_type: resource_server
+id: agent-identity-booking-rs
+name: Booking API
+description: The booking API the Concierge and its worker agents call
+identifier: https://api.travel.example/booking
+ouHandle: default
+delimiter: ":"
+resources:
+  - name: Booking
+    handle: booking
+    actions:
+      - name: Read
+        handle: read
+        description: Search flights and read bookings
+      - name: Create
+        handle: create
+        description: Make a booking
+      - name: Recommend
+        handle: recommend
+        description: Surface flight recommendations
+
+---
+# --- the consent flow ------------------------------------------------------
+#
+# The login the Concierge sends John through:
+#
+#   credentials -> authorization_check (agent:access) -> consent_check -> Allow / Deny -> assert
+#
+# The authorization_check is why John, who holds Chat User, gets in. A user without agent:access is
+# rejected before the consent screen, which is the "Protect the Agent" behaviour from the docs.
+
+resource_type: flow
+id: 0193b0a1-2001-7000-8000-000000000001
+name: Agent Identity Playground Authentication Flow
+handle: agent-identity-agent-auth-flow
+flowType: AUTHENTICATION
+nodes:
+  - id: start
+    type: START
+    onSuccess: prompt_credentials
+  - id: prompt_credentials
+    type: PROMPT
+    meta:
+      components:
+        - alt: "{{ t(signin:images.app_logo.alt) }}"
+          category: DISPLAY
+          height: "60"
+          id: image
+          resourceType: ELEMENT
+          src: "{{ meta(application.logoUrl) }}"
+          type: IMAGE
+          width: ""
+        - align: center
+          type: TEXT
+          id: text_001
+          label: "{{ t(signin:forms.credentials.title) }}"
+          variant: HEADING_1
+        - type: BLOCK
+          id: block_001
+          components:
+            - id: input_001
+              ref: username
+              type: TEXT_INPUT
+              label: "{{ t(signin:forms.credentials.fields.username.label) }}"
+              required: true
+              placeholder: "{{ t(signin:forms.credentials.fields.username.placeholder) }}"
+            - id: input_002
+              ref: password
+              type: PASSWORD_INPUT
+              label: "{{ t(signin:forms.credentials.fields.password.label) }}"
+              required: true
+              placeholder: "{{ t(signin:forms.credentials.fields.password.placeholder) }}"
+            - type: ACTION
+              id: action_001
+              label: "{{ t(signin:forms.credentials.actions.submit.label) }}"
+              variant: PRIMARY
+              eventType: SUBMIT
+    prompts:
+      - inputs:
+          - ref: input_001
+            identifier: username
+            type: TEXT_INPUT
+            required: true
+          - ref: input_002
+            identifier: password
+            type: PASSWORD_INPUT
+            required: true
+        action:
+          ref: action_001
+          nextNode: basic_auth
+  - id: basic_auth
+    type: TASK_EXECUTION
+    executor:
+      name: CredentialsAuthExecutor
+    onSuccess: authorization_check
+    onIncomplete: prompt_credentials
+  - id: authorization_check
+    type: TASK_EXECUTION
+    executor:
+      name: AuthorizationExecutor
+    onSuccess: consent_check
+  - id: consent_check
+    type: TASK_EXECUTION
+    executor:
+      name: ConsentExecutor
+    onSuccess: auth_assert
+    onIncomplete: prompt_consent
+  - id: prompt_consent
+    type: PROMPT
+    meta:
+      components:
+        - alt: "{{ t(signin:images.app_logo.alt) }}"
+          category: DISPLAY
+          height: "60"
+          id: consent_image
+          resourceType: ELEMENT
+          src: "{{ meta(application.logoUrl) }}"
+          type: IMAGE
+          width: ""
+        - align: center
+          type: TEXT
+          id: consent_heading
+          label: "{{ meta(application.name) }} is requesting access"
+          variant: HEADING_1
+        - type: BLOCK
+          id: consent_block
+          components:
+            - id: consent_input
+              ref: consent_decisions
+              type: CONSENT_INPUT
+              required: true
+            - type: ACTION
+              id: consent_action_deny
+              label: Deny
+              variant: SECONDARY
+              eventType: SUBMIT
+            - type: ACTION
+              id: consent_action_allow
+              label: Allow
+              variant: PRIMARY
+              eventType: SUBMIT
+    prompts:
+      - inputs:
+          - ref: consent_input
+            identifier: consent_decisions
+            type: CONSENT_INPUT
+            required: true
+        action:
+          ref: consent_action_allow
+          nextNode: consent_check
+      - inputs:
+          - ref: consent_input
+            identifier: consent_decisions
+            type: CONSENT_INPUT
+            required: true
+        action:
+          ref: consent_action_deny
+          nextNode: consent_check
+  - id: auth_assert
+    type: TASK_EXECUTION
+    executor:
+      name: AuthAssertExecutor
+    onSuccess: end
+  - id: end
+    type: END
+
+---
+# --- the customer ----------------------------------------------------------
+#
+# The customer the Concierge works for. He belongs to the built-in `Person` user type, so no user
+# type has to be created. His password is here in the clear because this runs locally.
+
+resource_type: user
+id: agent-identity-john
+type: Person
+ouHandle: default
+attributes:
+  username: johndoe
+  email: john.doe@travel.example
+  given_name: John
+  family_name: Doe
+credentials:
+  password: "Travel@123"
+
+---
+# --- the Concierge ---------------------------------------------------------
+#
+# One agent covers two of the three tabs, which is the point: the same principal produces a
+# different token shape depending on the grant it uses.
+#
+#   client_credentials : its own token, subject = the Concierge, no actor   (the "self" tab)
+#   authorization_code : John's token, subject = John, actor = Concierge    (the "obo" tab)
+#   refresh_token      : reissues that token, actor preserved
+#   token-exchange     : narrows it, and feeds the delegation chain         (the "chain" tab)
+#
+# authFlowHandle points at the consent flow above, so signing in prompts for credentials, checks
+# the user holds agent:access, and then asks John to allow or deny.
+
+resource_type: agent
+id: agent-identity-concierge
+name: Concierge
+description: The in-app travel assistant that books trips for customers
+ouHandle: default
+type: default
+logoUrl: "emoji:🧭"
+authFlowHandle: agent-identity-agent-auth-flow
+attributes:
+  model: claude-sonnet-5
+  modelProvider: anthropic
+  function: assistant
+# The user types the Concierge works with: who may sign up through it, and whose schema the user
+# attributes in the tokens below are validated against.
+allowedUserTypes:
+  - Person
+inboundAuthConfig:
+  - type: oauth2
+    config:
+      clientId: agent-identity-concierge-id
+      clientSecret: agent-identity-concierge-secret
+      # One per tab that signs a customer in. Each tab owns its own callback so it can be walked
+      # from the top without depending on another tab having been visited first.
+      redirectUris:
+        - http://localhost:8082/callback
+        - http://localhost:8082/chain/callback
+      grantTypes:
+        - client_credentials
+        - authorization_code
+        - refresh_token
+        - urn:ietf:params:oauth:grant-type:token-exchange
+      responseTypes:
+        - code
+      tokenEndpointAuthMethod: client_secret_basic
+      publicClient: false
+      # The Console's Delegated mode turns PKCE on, and the app always sends S256, so require it.
+      pkceRequired: true
+      token:
+        accessToken:
+          clientConfig:
+            validityPeriod: 3600
+            attributes:
+              - name
+              - owner
+              - ouId
+              - ouName
+              - ouHandle
+              - model
+              - modelProvider
+              - function
+          userConfig:
+            validityPeriod: 3600
+            attributes:
+              - email
+              - username
+        idToken:
+          validityPeriod: 3600
+        refreshToken:
+          validityPeriod: 86400
+
+---
+# --- the worker agent ------------------------------------------------------
+#
+# The specialist the Concierge hands the flight-search sub-task to. It holds only booking:read, so
+# a token delegated to it can never carry booking:create no matter what the Concierge asks for.
+
+resource_type: agent
+id: agent-identity-flight-search
+name: Flight Search Agent
+description: Worker agent that runs the delegated flight-search sub-task
+ouHandle: default
+type: default
+logoUrl: "emoji:✈️"
+attributes:
+  model: claude-sonnet-5
+  modelProvider: anthropic
+  function: sub-agent
+inboundAuthConfig:
+  - type: oauth2
+    config:
+      clientId: agent-identity-flight-search-id
+      clientSecret: agent-identity-flight-search-secret
+      grantTypes:
+        - client_credentials
+        - urn:ietf:params:oauth:grant-type:token-exchange
+      tokenEndpointAuthMethod: client_secret_basic
+      publicClient: false
+
+---
+# --- roles -----------------------------------------------------------------
+#
+# Roles are what turn a requested scope into an issued one. A token carries a scope only if the
+# principal holds a role granting it, so these are what make the downscoping on the chain tab real
+# rather than cosmetic.
+
+resource_type: role
+id: agent-identity-chat-user
+name: Chat User
+description: Grants access to use the Concierge at all
+ouHandle: default
+permissions:
+  - resourceServerId: agent-identity-agent-rs
+    permissions:
+      - agent:access
+assignments:
+  - id: agent-identity-john
+    type: user
+
+---
+resource_type: role
+id: agent-identity-booking-user
+name: Booking User
+description: Grants John the booking permissions the Concierge acts with on his behalf
+ouHandle: default
+permissions:
+  - resourceServerId: agent-identity-booking-rs
+    permissions:
+      - booking:read
+      - booking:create
+assignments:
+  - id: agent-identity-john
+    type: user
+
+---
+resource_type: role
+id: agent-identity-recommender
+name: Recommender
+description: What the Concierge may do on its own behalf, with no user involved
+ouHandle: default
+permissions:
+  - resourceServerId: agent-identity-booking-rs
+    permissions:
+      - booking:read
+      - booking:recommend
+assignments:
+  - id: agent-identity-concierge
+    type: agent
+
+---
+resource_type: role
+id: agent-identity-flight-searcher
+name: Flight Searcher
+description: The worker's entire authority, deliberately narrower than the Concierge's
+ouHandle: default
+permissions:
+  - resourceServerId: agent-identity-booking-rs
+    permissions:
+      - booking:read
+assignments:
+  - id: agent-identity-flight-search
+    type: agent

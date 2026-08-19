@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   Alert,
@@ -34,6 +19,7 @@ import {useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import useDeleteUser from '../api/useDeleteUser';
 import useGetUserUsages from '../api/useGetUserUsages';
+import getUserErrorMessage from '../utils/getUserErrorMessage';
 
 const MAX_VISIBLE_USAGES = 5;
 
@@ -53,7 +39,7 @@ export default function UserDeleteDialog({
   onClose,
   onSuccess = undefined,
 }: UserDeleteDialogProps): JSX.Element {
-  const {t} = useTranslation();
+  const {t} = useTranslation('users');
   const deleteUser = useDeleteUser();
   const [error, setError] = useState<string | null>(null);
 
@@ -68,6 +54,7 @@ export default function UserDeleteDialog({
   const handleCancel = (): void => {
     if (deleteUser.isPending) return;
     setError(null);
+    deleteUser.reset();
     onClose();
   };
 
@@ -82,32 +69,32 @@ export default function UserDeleteDialog({
         onSuccess?.();
       },
       onError: (err: Error) => {
-        setError(err.message ?? t('users:delete.error', 'Failed to delete user'));
+        setError(getUserErrorMessage(err, t, 'delete.error', 'Failed to delete user. Please try again.'));
       },
     });
   };
 
   return (
     <Dialog open={open} onClose={handleCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>{t('users:delete.title', 'Delete User')}</DialogTitle>
+      <DialogTitle>{t('delete.title', 'Delete User')}</DialogTitle>
       <DialogContent>
         <DialogContentText sx={{mb: 2}}>
-          {t('users:delete.message', 'Are you sure you want to delete this user? This action cannot be undone.')}
+          {t('delete.message', 'Are you sure you want to delete this user? This action cannot be undone.')}
         </DialogContentText>
 
         {isLoadingUsages ? (
           <Alert severity="info" icon={<CircularProgress size={16} />} sx={{mb: 2}}>
-            {t('users:delete.usages.loading', 'Checking affected resources…')}
+            {t('delete.usages.loading', 'Checking affected resources…')}
           </Alert>
         ) : !usagesKnown ? (
           <Alert severity="warning" sx={{mb: 2}}>
-            {t('users:delete.disclaimer', 'All associated data will be permanently removed.')}
+            {t('delete.disclaimer', 'All associated data will be permanently removed.')}
           </Alert>
         ) : hasBlockingUsages ? (
           <Alert severity="error" sx={{mb: 2}}>
             <Typography variant="body2" sx={{mb: 1}}>
               {t(
-                'users:delete.blocking.title',
+                'delete.blocking.title',
                 'This user cannot be deleted until the following agents are reassigned or removed:',
               )}
             </Typography>
@@ -122,7 +109,7 @@ export default function UserDeleteDialog({
                   <ListItemText
                     primary={
                       <Typography variant="body2" color="text.secondary">
-                        {t('users:delete.usages.more', {count: hiddenBlockingCount, defaultValue: '+{{count}} more'})}
+                        {t('delete.usages.more', {count: hiddenBlockingCount, defaultValue: '+{{count}} more'})}
                       </Typography>
                     }
                   />
@@ -132,7 +119,7 @@ export default function UserDeleteDialog({
           </Alert>
         ) : (
           <Alert severity="info" sx={{mb: 2}}>
-            {t('users:delete.usages.none', 'No agents currently list this user as their owner.')}
+            {t('delete.usages.none', 'No agents currently list this user as their owner.')}
           </Alert>
         )}
 

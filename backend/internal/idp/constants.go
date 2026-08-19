@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package idp
 
@@ -30,13 +15,28 @@ const (
 	PropTokenEndpoint         = "token_endpoint"
 	PropUserInfoEndpoint      = "userinfo_endpoint"
 	PropUserEmailEndpoint     = "user_email_endpoint"
-	PropLogoutEndpoint        = "logout_endpoint"
 	PropJwksEndpoint          = "jwks_endpoint"
 	PropPrompt                = "prompt"
 	PropIssuer                = "issuer"
 	PropTokenExchangeEnabled  = "token_exchange_enabled"
 	PropTrustedTokenAudience  = "trusted_token_audience"
 	PropIDJagEnabled          = "id_jag_enabled"
+)
+
+// Claims and scopes shared by the OIDC-style providers. A claim is what the provider emits; a scope
+// only asks for it.
+const (
+	emailClaim        = "email"
+	emailScope        = "email"
+	defaultOIDCScopes = "openid,email,profile"
+)
+
+// Local attribute names, as declared by user type schemas.
+// TODO: Drop these once schemas can declare attribute types (EMAIL, MOBILE, ...) as a first class
+// concept, so the attribute carrying an email can be found rather than named here.
+const (
+	defaultAccountLinkingAttribute = "email"
+	localUsernameAttribute         = "username"
 )
 
 // Known endpoints for Google OAuth2/OIDC.
@@ -47,12 +47,17 @@ const (
 	googleJwksEndpoint          = "https://www.googleapis.com/oauth2/v3/certs"
 )
 
-// Known endpoints for GitHub OAuth.
+// Known endpoints, claims and scopes for GitHub OAuth.
 const (
 	gitHubAuthorizationEndpoint = "https://github.com/login/oauth/authorize"
 	gitHubTokenEndpoint         = "https://github.com/login/oauth/access_token" // #nosec G101
 	gitHubUserInfoEndpoint      = "https://api.github.com/user"
 	gitHubUserEmailEndpoint     = "https://api.github.com/user/emails"
+
+	gitHubLoginClaim     = "login"
+	gitHubUserScope      = "user"
+	gitHubUserEmailScope = "user:email"
+	defaultGitHubScopes  = gitHubUserEmailScope
 )
 
 // idpPropertyConfig defines the required and optional properties for an IDP type,
@@ -72,11 +77,10 @@ var idpPropertyConfigs = map[providers.IDPType]idpPropertyConfig{
 			PropRedirectURI,
 			PropAuthorizationEndpoint,
 			PropTokenEndpoint,
-			PropUserInfoEndpoint,
 		},
 		Optional: []string{
 			PropScopes,
-			PropLogoutEndpoint,
+			PropUserInfoEndpoint,
 			PropPrompt,
 		},
 		Defaults: map[string]string{},
@@ -92,7 +96,6 @@ var idpPropertyConfigs = map[providers.IDPType]idpPropertyConfig{
 		Optional: []string{
 			PropScopes,
 			PropUserInfoEndpoint,
-			PropLogoutEndpoint,
 			PropJwksEndpoint,
 			PropPrompt,
 			PropIssuer,
@@ -113,7 +116,6 @@ var idpPropertyConfigs = map[providers.IDPType]idpPropertyConfig{
 			PropTokenEndpoint,
 			PropScopes,
 			PropUserInfoEndpoint,
-			PropLogoutEndpoint,
 			PropJwksEndpoint,
 			PropPrompt,
 			PropIssuer,
@@ -138,7 +140,6 @@ var idpPropertyConfigs = map[providers.IDPType]idpPropertyConfig{
 			PropUserInfoEndpoint,
 			PropUserEmailEndpoint,
 			PropScopes,
-			PropLogoutEndpoint,
 			PropPrompt,
 		},
 		Defaults: map[string]string{

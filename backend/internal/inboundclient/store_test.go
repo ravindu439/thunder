@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package inboundclient
 
@@ -97,8 +82,9 @@ func (suite *InboundClientStoreTestSuite) TestBuildInboundClientFromRow_Success(
 		LoginConsent: &inboundmodel.LoginConsentConfig{
 			ValidityPeriod: 5400,
 		},
-		AllowedUserTypes: []string{"admin", "user"},
-		Properties:       map[string]interface{}{"template": "spa"},
+		AllowedUserTypes:      []string{"admin", "user"},
+		PasskeyAllowedOrigins: []string{"https://app.example.com"},
+		Properties:            map[string]interface{}{"template": "spa"},
 	}
 	blobBytes, _ := json.Marshal(blob)
 
@@ -131,8 +117,46 @@ func (suite *InboundClientStoreTestSuite) TestBuildInboundClientFromRow_Success(
 	suite.NotNil(result.LoginConsent)
 	suite.Equal(int64(5400), result.LoginConsent.ValidityPeriod)
 	suite.Equal([]string{"admin", "user"}, result.AllowedUserTypes)
+	suite.Equal([]string{"https://app.example.com"}, result.PasskeyAllowedOrigins)
 	suite.NotNil(result.Properties)
 	suite.Equal("spa", result.Properties["template"])
+}
+
+func (suite *InboundClientStoreTestSuite) TestPasskeyAllowedOrigins_RoundTrip() {
+	origins := []string{"https://app.example.com", "https://mobile.example.com"}
+
+	blob := inboundClientJSONBlob{
+		PasskeyAllowedOrigins: origins,
+	}
+	blobBytes, _ := json.Marshal(blob)
+
+	row := map[string]interface{}{
+		"entity_id":  testEntityID,
+		"properties": string(blobBytes),
+	}
+	result, err := buildInboundClientFromRow(context.Background(), row)
+
+	suite.NoError(err)
+	suite.NotNil(result)
+	suite.Equal(origins, result.PasskeyAllowedOrigins)
+}
+
+func (suite *InboundClientStoreTestSuite) TestBuildInboundClientFromRow_NoPasskeyAllowedOrigins() {
+	blob := inboundClientJSONBlob{
+		AllowedUserTypes: []string{"user"},
+	}
+	blobBytes, _ := json.Marshal(blob)
+
+	row := map[string]interface{}{
+		"entity_id":  "app1",
+		"properties": string(blobBytes),
+	}
+
+	result, err := buildInboundClientFromRow(context.Background(), row)
+
+	suite.NoError(err)
+	suite.NotNil(result)
+	suite.Nil(result.PasskeyAllowedOrigins)
 }
 
 func (suite *InboundClientStoreTestSuite) TestBuildInboundClientFromRow_InvalidID() {
@@ -839,4 +863,23 @@ func (suite *InboundClientStoreTestSuite) TestGetEntityIDsByReference_UnknownTyp
 	suite.Equal(0, total)
 	suite.Empty(ids)
 	suite.mockDBProvider.AssertNotCalled(suite.T(), "GetConfigDBClient")
+}
+
+func (suite *InboundClientStoreTestSuite) TestSubjectAttribute_RoundTrip() {
+	mapping := map[string]string{"employee": "email", "customer": "username"}
+
+	propertiesBytes, _, _, _, _, _, _, _, err := marshalInboundClient(inboundmodel.InboundClient{
+		SubjectAttribute: mapping,
+	})
+	suite.Require().NoError(err)
+
+	row := map[string]interface{}{
+		"entity_id":  testEntityID,
+		"properties": propertiesBytes,
+	}
+	result, err := buildInboundClientFromRow(context.Background(), row)
+
+	suite.NoError(err)
+	suite.Require().NotNil(result)
+	suite.Equal(mapping, result.SubjectAttribute)
 }

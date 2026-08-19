@@ -1,33 +1,20 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package thunderidengine provides the core engine for the Thunder ID platform.
 package thunderidengine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/thunder-id/thunderid/internal/attestation"
 	"github.com/thunder-id/thunderid/internal/attributecache"
 	"github.com/thunder-id/thunderid/internal/authn/assert"
+	authnprovidermgr "github.com/thunder-id/thunderid/internal/authnprovider/manager"
 	flowconfig "github.com/thunder-id/thunderid/internal/flow/config"
 	"github.com/thunder-id/thunderid/internal/flow/core"
 	"github.com/thunder-id/thunderid/internal/flow/executor"
@@ -37,8 +24,13 @@ import (
 	"github.com/thunder-id/thunderid/internal/flow/interceptor"
 	"github.com/thunder-id/thunderid/internal/oauth"
 	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/jti"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/revocation"
 	"github.com/thunder-id/thunderid/internal/runtimestore"
 	"github.com/thunder-id/thunderid/internal/system/cache"
+	systemconfig "github.com/thunder-id/thunderid/internal/system/config"
+	"github.com/thunder-id/thunderid/internal/system/cors"
 	"github.com/thunder-id/thunderid/internal/system/jose"
 	joseconfig "github.com/thunder-id/thunderid/internal/system/jose/config"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwe"
@@ -46,6 +38,7 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/kmprovider"
 	"github.com/thunder-id/thunderid/internal/system/kmprovider/defaultkm/pki"
 	"github.com/thunder-id/thunderid/internal/system/log"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
@@ -73,14 +66,32 @@ func New(mux *http.ServeMux, opts ...Option) *Engine {
 
 	// Initialize the cache manager.
 	engineCtx.cacheManager = cache.Initialize(engineCtx.cacheConfig, engineCtx.serverConfig.Identifier)
-	// Load the server's private key for signing JWTs.
-	pkiService, err := pki.Initialize()
-	if err != nil {
-		logger.Fatal(ctx, "Failed to initialize certificate service", log.Error(err))
+
+	sysConfig := systemconfig.Config{
+		GateClient: engineCtx.gateClientConfig,
+		Crypto: systemconfig.CryptoConfig{
+			Keys:       engineCtx.keyConfigs,
+			Encryption: engineCtx.encryptionConfig,
+		},
+		AttributeCache: engineCtx.attributeCacheConfig,
 	}
-	engineCtx.runtimeCryptoSvc, _, err = kmprovider.Initialize(pkiService)
+
+	err = systemconfig.InitializeServerRuntime(engineCtx.serverHome, &sysConfig)
 	if err != nil {
-		logger.Fatal(ctx, "Failed to initialize key manager provider", log.Error(err))
+		logger.Fatal(ctx, "Failed to initialize Server Runtime", log.Error(err))
+	}
+
+	if engineCtx.runtimeCryptoSvc == nil {
+		logger.Debug(ctx, "runtimeCryptoSvc is not set, Starting to Initialize ThunderID defaultkm")
+		// Load the server's private key for signing JWTs.
+		pkiService, err := pki.Initialize()
+		if err != nil {
+			logger.Fatal(ctx, "Failed to initialize certificate service", log.Error(err))
+		}
+		engineCtx.runtimeCryptoSvc, _, err = kmprovider.Initialize(pkiService)
+		if err != nil {
+			logger.Fatal(ctx, "Failed to initialize key manager provider", log.Error(err))
+		}
 	}
 
 	// Initialize JOSE services for JWT and JWE handling.
@@ -90,14 +101,23 @@ func New(mux *http.ServeMux, opts ...Option) *Engine {
 		logger.Fatal(ctx, "Failed to initialize JOSE services", log.Error(err))
 	}
 
-	runtimeStoreProvider, transactioner, err := runtimestore.Initialize(engineCtx.runtimeTransientDBType,
-		engineCtx.serverConfig.Identifier)
-	if err != nil {
-		logger.Fatal(ctx, "Failed to initialize runtime store", log.Error(err))
+	if engineCtx.runtimeStoreProvider == nil {
+		engineCtx.runtimeStoreProvider, engineCtx.transactioner, err = runtimestore.Initialize(
+			engineCtx.runtimeTransientDBType, engineCtx.serverConfig.Identifier)
+		if err != nil {
+			logger.Fatal(ctx, "Failed to initialize runtime store", log.Error(err))
+		}
 	}
 
-	attributeCacheService := attributecache.Initialize(runtimeStoreProvider)
+	engineCtx.attributeCacheService = attributecache.Initialize(engineCtx.runtimeStoreProvider,
+		engineCtx.runtimeCryptoSvc, systemconfig.GetServerRuntime().Config.AttributeCache.Encryption.Enabled)
 	engineCtx.authAssertGen = assert.Initialize()
+
+	authnProviderManager, err := authnprovidermgr.Initialize(
+		engineCtx.defaultAuthnProvider, engineCtx.customAuthnProviders)
+	if err != nil {
+		logger.Fatal(ctx, "Failed to initialize authn provider manager", log.Error(err))
+	}
 
 	// Initialize flow metadata service
 	_ = flowmeta.Initialize(mux, engineCtx.actorProvider, engineCtx.ouProvider,
@@ -111,15 +131,17 @@ func New(mux *http.ServeMux, opts ...Option) *Engine {
 	engineCtx.flowFactory = flowFactory
 	execDeps := executor.ExecutorDependencies{
 		FlowFactory:       engineCtx.flowFactory,
-		AttributeCacheSvc: attributeCacheService,
+		AttributeCacheSvc: engineCtx.attributeCacheService,
 		AuthZService:      engineCtx.authzProvider,
 		ConsentEnforcer:   engineCtx.consentProvider,
-		AuthnProvider:     engineCtx.authnProvider,
+		AuthnProvider:     authnProviderManager,
 		JWTService:        engineCtx.jwtService,
 		AuthAssertGen:     engineCtx.authAssertGen,
+		ResourceService:   engineCtx.resourceProvider,
 	}
 	interceptorDeps := interceptor.InterceptorDependencies{
-		FlowFactory: engineCtx.flowFactory,
+		FlowFactory:    engineCtx.flowFactory,
+		CaptchaService: engineCtx.captchaValidationProvider,
 	}
 
 	engineCtx.execRegistry, err = executor.Initialize(execDeps, flowConfig.Flow)
@@ -139,14 +161,10 @@ func New(mux *http.ServeMux, opts ...Option) *Engine {
 	engineCtx.graphBuilder = graphbuilder.Initialize(engineCtx.flowFactory, engineCtx.execRegistry,
 		engineCtx.interceptorRegistry, graphCache)
 
-	attestationProvider, err := attestation.Initialize(engineCtx.runtimeCryptoSvc)
-	if err != nil {
-		logger.Fatal(ctx, "Failed to initialize attestation provider", log.Error(err))
-	}
-	flowExecService, err := flowexec.Initialize(mux, engineCtx.flowProvider, engineCtx.actorProvider,
+	engineCtx.flowExecService, err = flowexec.Initialize(mux, engineCtx.flowProvider, engineCtx.actorProvider,
 		engineCtx.execRegistry, engineCtx.interceptorRegistry, engineCtx.observabilitySvc,
-		engineCtx.runtimeCryptoSvc, attestationProvider, engineCtx.graphBuilder, runtimeStoreProvider,
-		transactioner, flowConfig)
+		engineCtx.runtimeCryptoSvc, engineCtx.attestationProvider, engineCtx.graphBuilder,
+		engineCtx.jwtService, engineCtx.runtimeStoreProvider, engineCtx.transactioner, nil, flowConfig)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to initialize flow execution service", log.Error(err))
 	}
@@ -159,15 +177,50 @@ func New(mux *http.ServeMux, opts ...Option) *Engine {
 		OAuth:                  engineCtx.oauthConfig,
 		GateClient:             engineCtx.gateClientConfig,
 	}
-	// The embedded engine has no server-config store, so no default resource server is available.
-	// Implicit no-resource requests that carry permission scopes are rejected; OIDC-only or
+
+	engineCtx.dpopVerifier = dpop.Initialize(oauthConfig, jti.Initialize(engineCtx.runtimeStoreProvider),
+		engineCtx.runtimeCryptoSvc)
+	tokenFamilyRevocationTTL := time.Duration(engineCtx.oauthConfig.RefreshToken.ValidityPeriod) * time.Second
+	revocationEnforcer, revocationService := revocation.Initialize(engineCtx.jwtService,
+		engineCtx.observabilitySvc, tokenFamilyRevocationTTL,
+		engineCtx.oauthConfig.Revocation.TokenFamily.OnExplicitRevokeEnabled())
+
+	// CORS origins come from the engine's static OriginConfig; unlike the full server there is no
+	// server-config store to back a dynamic matcher. An empty config leaves CORS disabled (matcher
+	// reset to nil, so every cross-origin request to the routes registered below is denied). The
+	// matcher is global, so it must be reset explicitly rather than left as whatever a previous
+	// engine installed.
+	originReader, err := buildOriginReader(engineCtx.originConfig)
+	if err != nil {
+		logger.Fatal(ctx, "Invalid origin configuration", log.Error(err))
+	}
+	cors.InitializeDynamicMatcher(originReader)
+
+	// The embedded engine has no server-config store, so no default resource server is available: the
+	// resource provider is passed undecorated. Implicit no-resource requests that carry permission
+	// scopes are rejected (the provider resolves no server for an empty identifier); OIDC-only or
 	// scopeless requests do not need resource-server binding.
-	err = oauth.Initialize(mux, engineCtx.actorProvider, engineCtx.authnProvider, engineCtx.jwtService,
-		engineCtx.jweService, flowExecService, engineCtx.observabilitySvc, engineCtx.runtimeCryptoSvc,
-		engineCtx.ouProvider, attributeCacheService, engineCtx.authzProvider, engineCtx.resourceProvider,
-		nil, engineCtx.i18nProvider, engineCtx.idpProvider, nil, runtimeStoreProvider, oauthConfig)
+	_, err = oauth.Initialize(mux, engineCtx.actorProvider, authnProviderManager, engineCtx.jwtService,
+		engineCtx.jweService, engineCtx.flowExecService, engineCtx.observabilitySvc, engineCtx.runtimeCryptoSvc,
+		engineCtx.ouProvider, engineCtx.attributeCacheService, engineCtx.authzProvider, engineCtx.resourceProvider,
+		engineCtx.i18nProvider, engineCtx.idpProvider, engineCtx.dpopVerifier, engineCtx.runtimeStoreProvider,
+		engineCtx.transactioner, revocationEnforcer, revocationService, oauthConfig)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to initialize OAuth services", log.Error(err))
+	}
+
+	if engineCtx.logConfig.Level != "" {
+		if err := logger.SetLevel(engineCtx.logConfig.Level); err != nil {
+			logger.Fatal(ctx, "invalid log level in LogConfig", log.Error(err))
+		}
+	}
+	if engineCtx.logConfig.Format != "" {
+		if err := logger.Configure(log.OutputOptions{
+			ConsoleEnabled: true,
+			Format:         engineCtx.logConfig.Format,
+		}); err != nil {
+			logger.Fatal(ctx, "failed to configure logger", log.Error(err))
+		}
 	}
 
 	return &Engine{
@@ -188,6 +241,33 @@ func validateEngineContext(ctx *engineContext) error {
 	}
 	if ctx.authzProvider == nil {
 		return errors.New("thunderidengine: authorization provider is not set")
+	}
+	if ctx.actorProvider == nil {
+		return errors.New("thunderidengine: actor provider is not set")
+	}
+	if ctx.resourceProvider == nil {
+		return errors.New("thunderidengine: resource server provider is not set")
+	}
+	if ctx.ouProvider == nil {
+		return errors.New("thunderidengine: organization unit provider is not set")
+	}
+	if ctx.designResolveProvider == nil {
+		return errors.New("thunderidengine: design provider is not set")
+	}
+	if ctx.flowProvider == nil {
+		return errors.New("thunderidengine: flow provider is not set")
+	}
+	if ctx.i18nProvider == nil {
+		return errors.New("thunderidengine: i18n provider is not set")
+	}
+	if ctx.idpProvider == nil {
+		return errors.New("thunderidengine: idp provider is not set")
+	}
+	if ctx.consentProvider == nil {
+		return errors.New("thunderidengine: consent provider is not set")
+	}
+	if ctx.defaultAuthnProvider == nil {
+		return errors.New("thunderidengine: default authentication provider is not set")
 	}
 	return nil
 }
@@ -219,16 +299,57 @@ func (e *engineContext) applyCustomExecutors() error {
 	return nil
 }
 
+// buildOriginReader validates cfg and, if it carries any allowed origins, returns a
+// cors.ServerConfigReader that serves them as a static read-only layer with no writable layer.
+// An empty cfg returns a nil reader and no error: the caller then leaves the CORS dynamic matcher
+// uninstalled, which denies every cross-origin request.
+func buildOriginReader(cfg engineconfig.OriginConfig) (cors.ServerConfigReader, error) {
+	if len(cfg.AllowedOrigins) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("thunderidengine: failed to encode origin configuration: %w", err)
+	}
+	decoded, err := cors.OriginHandler{}.Decode(raw)
+	if err != nil {
+		return nil, fmt.Errorf("thunderidengine: invalid origin configuration: %w", err)
+	}
+	if err := (cors.OriginHandler{}).Validate(decoded, nil, nil); err != nil {
+		return nil, fmt.Errorf("thunderidengine: invalid origin configuration: %w", err)
+	}
+	return staticOriginReader{config: decoded.(cors.OriginConfig)}, nil
+}
+
+// staticOriginReader implements cors.ServerConfigReader over a fixed origin list supplied via
+// WithOriginConfig. It has no writable layer: origins can only change by restarting the engine
+// with a new OriginConfig.
+type staticOriginReader struct {
+	config cors.OriginConfig
+}
+
+// GetReadOnlyConfig returns the engine's static origin configuration.
+func (r staticOriginReader) GetReadOnlyConfig(_ context.Context, _ string) (any, *common.ServiceError) {
+	return r.config, nil
+}
+
+// GetWritableConfig returns an empty configuration: staticOriginReader has no writable layer.
+func (r staticOriginReader) GetWritableConfig(_ context.Context, _ string) (any, *common.ServiceError) {
+	return cors.OriginConfig{}, nil
+}
+
 type engineContext struct {
-	cacheManager        cache.CacheManagerInterface
-	jwtService          jwt.JWTServiceInterface
-	jweService          jwe.JWEServiceInterface
-	runtimeCryptoSvc    kmprovider.RuntimeCryptoProvider
-	flowFactory         core.FlowFactoryInterface
-	execRegistry        executor.ExecutorRegistryInterface
-	interceptorRegistry interceptor.InterceptorRegistryInterface
-	graphBuilder        graphbuilder.GraphBuilderInterface
-	authAssertGen       assert.AuthAssertGeneratorInterface
+	cacheManager          cache.CacheManagerInterface
+	jwtService            jwt.JWTServiceInterface
+	jweService            jwe.JWEServiceInterface
+	flowFactory           core.FlowFactoryInterface
+	execRegistry          executor.ExecutorRegistryInterface
+	interceptorRegistry   interceptor.InterceptorRegistryInterface
+	graphBuilder          graphbuilder.GraphBuilderInterface
+	authAssertGen         assert.AuthAssertGeneratorInterface
+	dpopVerifier          dpop.VerifierInterface
+	flowExecService       flowexec.FlowExecServiceInterface
+	attributeCacheService attributecache.AttributeCacheServiceInterface
 
 	serverHome             string
 	runtimeTransientDBType string
@@ -239,19 +360,31 @@ type engineContext struct {
 	cacheConfig            engineconfig.CacheConfig
 	observabilityConfig    engineconfig.ObservabilityConfig
 	gateClientConfig       engineconfig.GateClientConfig
+	keyConfigs             []engineconfig.KeyConfig
+	encryptionConfig       engineconfig.EncryptionConfig
+	logConfig              engineconfig.LogConfig
+	attributeCacheConfig   engineconfig.AttributeCacheConfig
+	originConfig           engineconfig.OriginConfig
 
-	actorProvider         providers.ActorProvider
-	authnProvider         providers.AuthnProviderManager
-	resourceProvider      providers.ResourceServerProvider
-	ouProvider            providers.OrganizationUnitProvider
-	designResolveProvider providers.DesignProvider
-	flowProvider          providers.FlowProvider
-	i18nProvider          providers.I18nProvider
-	idpProvider           providers.IDPProvider
-	consentProvider       providers.ConsentProvider
-	customExecutors       map[string]providers.Executor
-	observabilitySvc      providers.ObservabilityProvider
-	authzProvider         providers.AuthorizationProvider
+	actorProvider             providers.ActorProvider
+	defaultAuthnProvider      providers.AuthnProviderInterface
+	customAuthnProviders      map[string]providers.CustomAuthnProvider
+	resourceProvider          providers.ResourceServerProvider
+	ouProvider                providers.OrganizationUnitProvider
+	designResolveProvider     providers.DesignProvider
+	flowProvider              providers.FlowProvider
+	i18nProvider              providers.I18nProvider
+	idpProvider               providers.IDPProvider
+	consentProvider           providers.ConsentProvider
+	customExecutors           map[string]providers.Executor
+	observabilitySvc          providers.ObservabilityProvider
+	authzProvider             providers.AuthorizationProvider
+	attestationProvider       providers.AttestationProvider
+	captchaValidationProvider providers.CaptchaValidationProvider
+
+	transactioner        providers.Transactioner
+	runtimeStoreProvider providers.RuntimeStoreProvider
+	runtimeCryptoSvc     kmprovider.RuntimeCryptoProvider
 }
 
 // Option configures engine initialization.
@@ -263,6 +396,34 @@ func WithServerHome(serverHome string) Option {
 	return func(c *engineContext) { c.serverHome = serverHome }
 }
 
+// WithRuntimeTransientDBType supplies the RuntimeStore DB type.
+func WithRuntimeTransientDBType(runtimeTransientDBType string) Option {
+	return func(c *engineContext) { c.runtimeTransientDBType = runtimeTransientDBType }
+}
+
+// WithKeyConfigs supplies the keyconfigs.
+func WithKeyConfigs(keyConfigs []engineconfig.KeyConfig) Option {
+	return func(c *engineContext) { c.keyConfigs = keyConfigs }
+}
+
+// WithEncryptionConfig supplies the encryption configs.
+func WithEncryptionConfig(encryptionConfig engineconfig.EncryptionConfig) Option {
+	return func(c *engineContext) { c.encryptionConfig = encryptionConfig }
+}
+
+// WithAttributeCacheConfig supplies the attribute cache configuration.
+func WithAttributeCacheConfig(config engineconfig.AttributeCacheConfig) Option {
+	return func(c *engineContext) { c.attributeCacheConfig = config }
+}
+
+// WithOriginConfig supplies the allowed cross-origin origins for the engine's CORS-enabled
+// endpoints (well-known discovery, JWKS, token, userinfo, and the rest of the OAuth surface).
+// Omitting this option leaves CORS disabled: no cross-origin request is allowed to read a
+// response from those endpoints.
+func WithOriginConfig(config engineconfig.OriginConfig) Option {
+	return func(c *engineContext) { c.originConfig = config }
+}
+
 // WithServerConfig supplies the server configuration.
 func WithServerConfig(config engineconfig.ServerConfig) Option {
 	return func(c *engineContext) { c.serverConfig = config }
@@ -271,6 +432,11 @@ func WithServerConfig(config engineconfig.ServerConfig) Option {
 // WithCacheConfig supplies the cache configuration.
 func WithCacheConfig(config engineconfig.CacheConfig) Option {
 	return func(c *engineContext) { c.cacheConfig = config }
+}
+
+// WithGateClientConfig supplies the gate client configuration.
+func WithGateClientConfig(config engineconfig.GateClientConfig) Option {
+	return func(c *engineContext) { c.gateClientConfig = config }
 }
 
 // WithOAuthConfig supplies the OAuth configuration.
@@ -298,9 +464,19 @@ func WithActorProvider(provider providers.ActorProvider) Option {
 	return func(c *engineContext) { c.actorProvider = provider }
 }
 
-// WithAuthnProvider supplies the authentication provider manager.
-func WithAuthnProvider(provider providers.AuthnProviderManager) Option {
-	return func(c *engineContext) { c.authnProvider = provider }
+// WithDefaultAuthnProvider supplies the default authentication provider.
+func WithDefaultAuthnProvider(provider providers.AuthnProviderInterface) Option {
+	return func(c *engineContext) { c.defaultAuthnProvider = provider }
+}
+
+// WithCustomAuthnProvider supplies a custom authentication provider with its associated credential keys.
+func WithCustomAuthnProvider(name string, provider providers.CustomAuthnProvider) Option {
+	return func(c *engineContext) {
+		if c.customAuthnProviders == nil {
+			c.customAuthnProviders = make(map[string]providers.CustomAuthnProvider)
+		}
+		c.customAuthnProviders[name] = provider
+	}
 }
 
 // WithResourceProvider supplies the resource provider.
@@ -328,6 +504,11 @@ func WithI18nProvider(provider providers.I18nProvider) Option {
 	return func(c *engineContext) { c.i18nProvider = provider }
 }
 
+// WithIDPProvider supplies the IDP provider.
+func WithIDPProvider(provider providers.IDPProvider) Option {
+	return func(c *engineContext) { c.idpProvider = provider }
+}
+
 // WithConsentProvider supplies the consent provider.
 func WithConsentProvider(provider providers.ConsentProvider) Option {
 	return func(c *engineContext) { c.consentProvider = provider }
@@ -353,4 +534,36 @@ func WithObservabilityProvider(provider providers.ObservabilityProvider) Option 
 // WithAuthorizationProvider supplies the authorization provider.
 func WithAuthorizationProvider(provider providers.AuthorizationProvider) Option {
 	return func(c *engineContext) { c.authzProvider = provider }
+}
+
+// WithRuntimeStoreProvider supplies the RuntimeStore provider.
+func WithRuntimeStoreProvider(provider providers.RuntimeStoreProvider) Option {
+	return func(c *engineContext) { c.runtimeStoreProvider = provider }
+}
+
+// WithLogConfig supplies the log level and format configuration.
+func WithLogConfig(config engineconfig.LogConfig) Option {
+	return func(ctx *engineContext) {
+		ctx.logConfig = config
+	}
+}
+
+// WithAttestationProvider supplies the Attestation provider.
+func WithAttestationProvider(provider providers.AttestationProvider) Option {
+	return func(c *engineContext) { c.attestationProvider = provider }
+}
+
+// WithTransactioner supplies the Transactioner.
+func WithTransactioner(provider providers.Transactioner) Option {
+	return func(c *engineContext) { c.transactioner = provider }
+}
+
+// WithCaptchaValidationProvider supplies the CaptchaValidationProvider.
+func WithCaptchaValidationProvider(provider providers.CaptchaValidationProvider) Option {
+	return func(c *engineContext) { c.captchaValidationProvider = provider }
+}
+
+// WithRuntimeCryptoProvider supplies the RuntimeCryptoProvider.
+func WithRuntimeCryptoProvider(provider kmprovider.RuntimeCryptoProvider) Option {
+	return func(c *engineContext) { c.runtimeCryptoSvc = provider }
 }

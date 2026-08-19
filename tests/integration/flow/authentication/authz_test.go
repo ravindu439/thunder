@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authentication
 
@@ -23,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
 	"github.com/thunder-id/thunderid/tests/integration/flow/common"
 	"github.com/thunder-id/thunderid/tests/integration/testutils"
-	"github.com/stretchr/testify/suite"
 )
 
 var (
@@ -345,8 +330,9 @@ func (ts *FlowAuthzTestSuite) TearDownSuite() {
 func (ts *FlowAuthzTestSuite) TestAuthorizationFlow_UserWithDirectRoleAssignment() {
 	// Initiate authentication flow with requested permissions
 	inputs := map[string]string{
-		"applicationId":         authzTestAppID,
-		"requested_permissions": "read write",
+		"applicationId":              authzTestAppID,
+		"requested_permissions":      "read write",
+		"resource_server_identifier": "document-mgmt",
 	}
 
 	flowStep, err := common.InitiateAuthenticationFlow(authzTestAppID, false, inputs, "")
@@ -390,8 +376,9 @@ func (ts *FlowAuthzTestSuite) TestAuthorizationFlow_UserWithDirectRoleAssignment
 func (ts *FlowAuthzTestSuite) TestAuthorizationFlow_UserWithNoRole() {
 	// Initiate authentication flow with requested permissions
 	inputs := map[string]string{
-		"applicationId":         authzTestAppID,
-		"requested_permissions": "read write",
+		"applicationId":              authzTestAppID,
+		"requested_permissions":      "read write",
+		"resource_server_identifier": "document-mgmt",
 	}
 
 	flowStep, err := common.InitiateAuthenticationFlow(authzTestAppID, false, inputs, "")
@@ -427,8 +414,9 @@ func (ts *FlowAuthzTestSuite) TestAuthorizationFlow_UserWithNoRole() {
 func (ts *FlowAuthzTestSuite) TestAuthorizationFlow_UserWithPartialPermissions() {
 	// Initiate authentication flow requesting 3 permissions (user only has 2)
 	inputs := map[string]string{
-		"applicationId":         authzTestAppID,
-		"requested_permissions": "read write delete",
+		"applicationId":              authzTestAppID,
+		"requested_permissions":      "read write delete",
+		"resource_server_identifier": "document-mgmt",
 	}
 
 	flowStep, err := common.InitiateAuthenticationFlow(authzTestAppID, false, inputs, "")

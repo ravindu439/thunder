@@ -186,7 +186,7 @@ Import this in your test setup file. It provides:
   - `ResizeObserver`
   - `HTMLMediaElement` (play, pause, load)
   - CSS variable handling for jsdom
-- **Asgardeo mocks** - Mock implementation of `@asgardeo/react`
+- **ThunderID mocks** - Mock implementation of `@thunderid/react`
 
 ```typescript
 // In your test setup file

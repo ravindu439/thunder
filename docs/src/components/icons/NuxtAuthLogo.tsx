@@ -1,30 +1,22 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 
 export default function NuxtAuthLogo({size = 28}: {size?: number}) {
   return (
-    <img
-      src="/assets/images/nuxt-auth-logo.svg"
-      alt="Nuxt Auth"
-      width={size}
-      height={size}
-      style={{objectFit: 'contain'}}
-    />
+    <svg width={size} height={size} viewBox="0 0 69 81" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        fill="url(#nuxt-auth-gradient)"
+        d="M35.6405 0.0415874L25.0861 10.596C17.2756 18.4065 17.2756 31.0698 25.0861 38.8802L53.3899 67.184C49.7137 71.7465 45.7019 75.3996 41.7084 78.2621C37.2765 81.4387 31.3756 81.7131 26.7293 78.8593C12.9514 70.3968 2.34384 54.5311 0.058806 27.8099C-0.527832 20.9497 3.32567 14.582 9.33703 11.225L25.1196 2.41138C28.3764 0.592676 32.0348 -0.197254 35.6405 0.0415874ZM44.2486 2.74721L30.743 16.2528C26.0567 20.9391 26.0567 28.5371 30.743 33.2234L58.0652 60.5456C63.2276 52.1254 67.1889 41.3616 68.6031 27.8032C69.3174 20.9552 65.4412 14.582 59.4298 11.225L44.2486 2.74721Z"
+      />
+      <defs>
+        <linearGradient id="nuxt-auth-gradient" x1="34.6008" y1="9.7381" x2="34.6008" y2="52.2381" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#00C591" />
+          <stop offset="1" stopColor="#108775" />
+        </linearGradient>
+      </defs>
+    </svg>
   );
 }

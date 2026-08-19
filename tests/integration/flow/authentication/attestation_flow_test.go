@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authentication
 
@@ -30,9 +15,9 @@ import (
 	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
-// This suite verifies the platform-attestation guard for POST /flow/execute. A mobile
-// (public, authorization_code) application that configures Google Play Integrity attestation may
-// initiate a flow directly only by presenting a valid Attestation-Token header:
+// This suite verifies the platform-attestation guard for POST /flow/execute. A mobile application
+// that configures Google Play Integrity attestation may initiate a flow directly only by presenting
+// a valid Attestation-Token header:
 //   - a missing token is rejected with 401 (FES-1014);
 //   - a token that cannot be verified because the outbound Play Integrity call cannot complete
 //     (here, unusable service account credentials) surfaces as a 500 server error, not a 401 — a
@@ -109,13 +94,13 @@ var attestationGuardFlow = testutils.Flow{
 	},
 }
 
-// attestationMobileApp is a public, redirect-based (authorization_code) mobile application that
-// configures Google Play Integrity attestation. Attestation takes precedence over the redirect
-// classification, so the app may initiate a flow directly — but only with a valid attestation
-// token. The service account credentials are intentionally unusable so verification always fails.
+// attestationMobileApp is a mobile application that configures Google Play Integrity attestation.
+// Mobile apps initiate flows directly by presenting a valid attestation token. The service account
+// credentials are intentionally unusable so verification always fails.
 var attestationMobileApp = testutils.Application{
 	Name:                      "Play Integrity Mobile App",
 	Description:               "Mobile application for attestation guard testing",
+	Type:                      "mobile",
 	IsRegistrationFlowEnabled: false,
 	ClientID:                  "attestation_mobile_client",
 	RedirectURIs:              []string{"myapp://callback"},

@@ -530,16 +530,6 @@ paths:
                     description:
                       key: "error.agentservice.invalid_response_type_description"
                       defaultValue: "One or more provided response types are invalid"
-                consent-sync-failed:
-                  summary: Consent service sync failure
-                  value:
-                    code: "AGT-1035"
-                    message:
-                      key: "error.agentservice.consent_sync_failed"
-                      defaultValue: "Consent sync failed"
-                    description:
-                      key: "error.agentservice.consent_sync_failed_description"
-                      defaultValue: "Failed to sync agent attribute changes with the consent service"
                 certificate-client-error:
                   summary: Certificate operation failed due to invalid input
                   value:
@@ -1067,16 +1057,6 @@ paths:
                     description:
                       key: "error.agentservice.invalid_response_type_description"
                       defaultValue: "One or more provided response types are invalid"
-                consent-sync-failed:
-                  summary: Consent service sync failure
-                  value:
-                    code: "AGT-1035"
-                    message:
-                      key: "error.agentservice.consent_sync_failed"
-                      defaultValue: "Consent sync failed"
-                    description:
-                      key: "error.agentservice.consent_sync_failed_description"
-                      defaultValue: "Failed to sync agent attribute changes with the consent service"
                 certificate-client-error:
                   summary: Certificate operation failed due to invalid input
                   value:
@@ -1482,11 +1462,11 @@ paths:
               schema:
                 modelProvider:
                   type: "string"
-                  required: true
+                  required: false
                   enum: ["openai", "anthropic", "gemini", "mistral", "custom"]
                 model:
                   type: "string"
-                  required: true
+                  required: false
                 function:
                   type: "string"
                   required: false
@@ -1508,11 +1488,11 @@ paths:
                 schema:
                   modelProvider:
                     type: "string"
-                    required: true
+                    required: false
                     enum: ["openai", "anthropic", "gemini", "mistral", "custom"]
                   model:
                     type: "string"
-                    required: true
+                    required: false
                   function:
                     type: "string"
                     required: false
@@ -1608,11 +1588,11 @@ paths:
                 schema:
                   modelProvider:
                     type: "string"
-                    required: true
+                    required: false
                     enum: ["openai", "anthropic", "gemini", "mistral", "custom"]
                   model:
                     type: "string"
-                    required: true
+                    required: false
                   function:
                     type: "string"
                     required: false
@@ -1669,11 +1649,11 @@ paths:
               schema:
                 modelProvider:
                   type: "string"
-                  required: true
+                  required: false
                   enum: ["openai", "anthropic", "gemini", "mistral", "custom"]
                 model:
                   type: "string"
-                  required: true
+                  required: false
                 function:
                   type: "string"
                   required: false
@@ -1917,6 +1897,10 @@ components:
           type: string
           description: Brief description of the agent. Stored as a system attribute.
           example: "Agent exposing calendar tools"
+        logoUrl:
+          type: string
+          description: Logo URL or avatar spec for the agent, shown in the console and login flows.
+          example: "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
         clientId:
           type: string
           description: OAuth client ID. Present only when the agent has an OAuth profile.
@@ -1998,6 +1982,12 @@ components:
           type: string
           description: Optional description of the agent.
           example: "Agent exposing calendar tools"
+        logoUrl:
+          type: string
+          description: |
+            Optional logo URL or avatar spec for the agent. Persisted with the agent's inbound
+            client so the console and login flows can display it. Defaults to no logo when omitted.
+          example: "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
         owner:
           type: string
           format: uuid
@@ -2049,7 +2039,7 @@ components:
           type: array
           items:
             type: string
-          description: User types allowed to authenticate against this agent.
+          description: User types that can sign up through this agent.
           example: ["employee", "contractor"]
         inboundAuthConfig:
           type: array
@@ -2083,6 +2073,13 @@ components:
         description:
           type: string
           example: "Agent exposing calendar tools"
+        logoUrl:
+          type: string
+          description: |
+            Optional logo URL or avatar spec for the agent. Omitting it leaves the stored logo
+            unchanged only when the same value is sent back; a full replacement update that omits
+            it clears the logo.
+          example: "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
         owner:
           type: string
           format: uuid
@@ -2154,6 +2151,10 @@ components:
         description:
           type: string
           example: "Agent exposing calendar tools"
+        logoUrl:
+          type: string
+          description: Logo URL or avatar spec for the agent, shown in the console and login flows.
+          example: "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
         owner:
           type: string
           format: uuid
@@ -2223,6 +2224,10 @@ components:
         description:
           type: string
           example: "Agent exposing calendar tools"
+        logoUrl:
+          type: string
+          description: Logo URL or avatar spec for the agent, shown in the console and login flows.
+          example: "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
         clientId:
           type: string
           description: OAuth client ID. Present only when the agent has an OAuth profile.
@@ -2372,6 +2377,15 @@ components:
           description: >
             Configuration applied when the access token's subject is the agent itself, issued
             only via the client_credentials grant.
+        defaultAudience:
+          type: string
+          maxLength: 2048
+          description: >
+            The aud claim for access tokens that are not bound to a resource server, that is,
+            OIDC-only or scopeless requests. Falls back to the client_id when empty. A request
+            that targets a resource server (via the resource parameter or API scopes) uses that
+            resource server as the audience instead.
+          example: https://api.example.com
 
     AccessTokenSubConfig:
       type: object
@@ -2793,11 +2807,11 @@ components:
           example:
             modelProvider:
               type: "string"
-              required: true
+              required: false
               enum: ["openai", "anthropic", "gemini", "mistral", "custom"]
             model:
               type: "string"
-              required: true
+              required: false
             function:
               type: "string"
               required: false

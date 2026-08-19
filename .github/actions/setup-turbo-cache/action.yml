@@ -4,10 +4,22 @@ description: Restores and saves the Turborepo task output cache backed by GitHub
 runs:
   using: composite
   steps:
+    # Keyed by job and run rather than by lockfile hash alone. actions/cache never
+    # overwrites an existing key, so a bare lockfile key was written once by
+    # whichever job finished first and then never refreshed: every job restored
+    # that same 7 MB entry, against the 445 MB of task outputs a full frontend
+    # build actually produces. Including the job name keeps each job's outputs on
+    # their own lineage, and the run id with the attempt makes every run, and
+    # every re-run of it, publish a fresh entry, with the restore-keys widening
+    # from this job's newest entry out to any recent one. The attempt matters
+    # because a failed attempt still saves at post time, so without it a partial
+    # cache from attempt 1 would be frozen in for the attempts that follow.
     - name: 🗂️ Cache Turbo
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
       with:
         path: .turbo
-        key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        key: turbo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml') }}--${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
+          turbo-${{ runner.os }}-${{ github.job }}-${{ hashFiles('pnpm-lock.yaml') }}-
+          turbo-${{ runner.os }}-${{ github.job }}-
           turbo-${{ runner.os }}-

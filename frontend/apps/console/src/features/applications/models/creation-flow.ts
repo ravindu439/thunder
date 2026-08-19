@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {ApplicationCreateFlowStep} from './application-create-flow';
 
@@ -30,4 +15,10 @@ import type {ApplicationCreateFlowStep} from './application-create-flow';
 export interface CreationFlow {
   /** Ordered list of wizard steps for this flow. */
   steps: ApplicationCreateFlowStep[];
+  /**
+   * Which of `steps` render the live sign-in preview panel. Templates with no hosted sign-in
+   * screen at all (e.g. machine-to-machine backends) declare this as an empty array so the
+   * wizard never renders a preview, instead of the page guessing from the current step.
+   */
+  previewSteps: ApplicationCreateFlowStep[];
 }

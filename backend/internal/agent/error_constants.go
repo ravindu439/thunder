@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -498,6 +483,36 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.agentservice.invalid_user_attribute_description",
 			DefaultValue: "One or more user attributes are not valid for the configured allowed user types",
+		},
+	}
+
+	// ErrorInvalidLogoURL is returned when the supplied logo URL fails validation.
+	ErrorInvalidLogoURL = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AGT-1041",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.agentservice.invalid_logo_url",
+			DefaultValue: "Invalid logo URL",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "error.agentservice.invalid_logo_url_description",
+			DefaultValue: "The provided logo URL is not valid",
+		},
+	}
+
+	// ErrorInvalidSubjectAttributeMapping is returned when the subject attribute mapping references an
+	// attribute that is not unique, required, and string-typed in an allowed agent type.
+	ErrorInvalidSubjectAttributeMapping = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AGT-1042",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.agentservice.invalid_subject_attribute_mapping",
+			DefaultValue: "Invalid subject attribute mapping",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.agentservice.invalid_subject_attribute_mapping_description",
+			DefaultValue: "The subject attribute mapping must reference an attribute that is unique, required, " +
+				"and string-typed in an allowed agent type",
 		},
 	}
 )

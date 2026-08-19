@@ -111,6 +111,322 @@ func (_c *redisClientMock_Del_Call) RunAndReturn(run func(ctx context.Context, k
 	return _c
 }
 
+// Eval provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) Eval(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd {
+	var _ca []interface{}
+	_ca = append(_ca, ctx, script, keys)
+	_ca = append(_ca, args...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Eval")
+	}
+
+	var r0 *redis.Cmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, ...interface{}) *redis.Cmd); ok {
+		r0 = returnFunc(ctx, script, keys, args...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.Cmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_Eval_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Eval'
+type redisClientMock_Eval_Call struct {
+	*mock.Call
+}
+
+// Eval is a helper method to define mock.On call
+//   - ctx context.Context
+//   - script string
+//   - keys []string
+//   - args ...interface{}
+func (_e *redisClientMock_Expecter) Eval(ctx interface{}, script interface{}, keys interface{}, args ...interface{}) *redisClientMock_Eval_Call {
+	return &redisClientMock_Eval_Call{Call: _e.mock.On("Eval",
+		append([]interface{}{ctx, script, keys}, args...)...)}
+}
+
+func (_c *redisClientMock_Eval_Call) Run(run func(ctx context.Context, script string, keys []string, args ...interface{})) *redisClientMock_Eval_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 []interface{}
+		variadicArgs := make([]interface{}, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(interface{})
+			}
+		}
+		arg3 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3...,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_Eval_Call) Return(cmd *redis.Cmd) *redisClientMock_Eval_Call {
+	_c.Call.Return(cmd)
+	return _c
+}
+
+func (_c *redisClientMock_Eval_Call) RunAndReturn(run func(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd) *redisClientMock_Eval_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// EvalRO provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) EvalRO(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd {
+	var _ca []interface{}
+	_ca = append(_ca, ctx, script, keys)
+	_ca = append(_ca, args...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EvalRO")
+	}
+
+	var r0 *redis.Cmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, ...interface{}) *redis.Cmd); ok {
+		r0 = returnFunc(ctx, script, keys, args...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.Cmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_EvalRO_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvalRO'
+type redisClientMock_EvalRO_Call struct {
+	*mock.Call
+}
+
+// EvalRO is a helper method to define mock.On call
+//   - ctx context.Context
+//   - script string
+//   - keys []string
+//   - args ...interface{}
+func (_e *redisClientMock_Expecter) EvalRO(ctx interface{}, script interface{}, keys interface{}, args ...interface{}) *redisClientMock_EvalRO_Call {
+	return &redisClientMock_EvalRO_Call{Call: _e.mock.On("EvalRO",
+		append([]interface{}{ctx, script, keys}, args...)...)}
+}
+
+func (_c *redisClientMock_EvalRO_Call) Run(run func(ctx context.Context, script string, keys []string, args ...interface{})) *redisClientMock_EvalRO_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 []interface{}
+		variadicArgs := make([]interface{}, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(interface{})
+			}
+		}
+		arg3 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3...,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_EvalRO_Call) Return(cmd *redis.Cmd) *redisClientMock_EvalRO_Call {
+	_c.Call.Return(cmd)
+	return _c
+}
+
+func (_c *redisClientMock_EvalRO_Call) RunAndReturn(run func(ctx context.Context, script string, keys []string, args ...interface{}) *redis.Cmd) *redisClientMock_EvalRO_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// EvalSha provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) EvalSha(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd {
+	var _ca []interface{}
+	_ca = append(_ca, ctx, sha1, keys)
+	_ca = append(_ca, args...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EvalSha")
+	}
+
+	var r0 *redis.Cmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, ...interface{}) *redis.Cmd); ok {
+		r0 = returnFunc(ctx, sha1, keys, args...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.Cmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_EvalSha_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvalSha'
+type redisClientMock_EvalSha_Call struct {
+	*mock.Call
+}
+
+// EvalSha is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sha1 string
+//   - keys []string
+//   - args ...interface{}
+func (_e *redisClientMock_Expecter) EvalSha(ctx interface{}, sha1 interface{}, keys interface{}, args ...interface{}) *redisClientMock_EvalSha_Call {
+	return &redisClientMock_EvalSha_Call{Call: _e.mock.On("EvalSha",
+		append([]interface{}{ctx, sha1, keys}, args...)...)}
+}
+
+func (_c *redisClientMock_EvalSha_Call) Run(run func(ctx context.Context, sha1 string, keys []string, args ...interface{})) *redisClientMock_EvalSha_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 []interface{}
+		variadicArgs := make([]interface{}, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(interface{})
+			}
+		}
+		arg3 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3...,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_EvalSha_Call) Return(cmd *redis.Cmd) *redisClientMock_EvalSha_Call {
+	_c.Call.Return(cmd)
+	return _c
+}
+
+func (_c *redisClientMock_EvalSha_Call) RunAndReturn(run func(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd) *redisClientMock_EvalSha_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// EvalShaRO provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) EvalShaRO(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd {
+	var _ca []interface{}
+	_ca = append(_ca, ctx, sha1, keys)
+	_ca = append(_ca, args...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for EvalShaRO")
+	}
+
+	var r0 *redis.Cmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []string, ...interface{}) *redis.Cmd); ok {
+		r0 = returnFunc(ctx, sha1, keys, args...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.Cmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_EvalShaRO_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EvalShaRO'
+type redisClientMock_EvalShaRO_Call struct {
+	*mock.Call
+}
+
+// EvalShaRO is a helper method to define mock.On call
+//   - ctx context.Context
+//   - sha1 string
+//   - keys []string
+//   - args ...interface{}
+func (_e *redisClientMock_Expecter) EvalShaRO(ctx interface{}, sha1 interface{}, keys interface{}, args ...interface{}) *redisClientMock_EvalShaRO_Call {
+	return &redisClientMock_EvalShaRO_Call{Call: _e.mock.On("EvalShaRO",
+		append([]interface{}{ctx, sha1, keys}, args...)...)}
+}
+
+func (_c *redisClientMock_EvalShaRO_Call) Run(run func(ctx context.Context, sha1 string, keys []string, args ...interface{})) *redisClientMock_EvalShaRO_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []string
+		if args[2] != nil {
+			arg2 = args[2].([]string)
+		}
+		var arg3 []interface{}
+		variadicArgs := make([]interface{}, len(args)-3)
+		for i, a := range args[3:] {
+			if a != nil {
+				variadicArgs[i] = a.(interface{})
+			}
+		}
+		arg3 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3...,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_EvalShaRO_Call) Return(cmd *redis.Cmd) *redisClientMock_EvalShaRO_Call {
+	_c.Call.Return(cmd)
+	return _c
+}
+
+func (_c *redisClientMock_EvalShaRO_Call) RunAndReturn(run func(ctx context.Context, sha1 string, keys []string, args ...interface{}) *redis.Cmd) *redisClientMock_EvalShaRO_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Expire provides a mock function for the type redisClientMock
 func (_mock *redisClientMock) Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd {
 	ret := _mock.Called(ctx, key, expiration)
@@ -290,6 +606,137 @@ func (_c *redisClientMock_GetDel_Call) Return(stringCmd *redis.StringCmd) *redis
 }
 
 func (_c *redisClientMock_GetDel_Call) RunAndReturn(run func(ctx context.Context, key string) *redis.StringCmd) *redisClientMock_GetDel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ScriptExists provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) ScriptExists(ctx context.Context, hashes ...string) *redis.BoolSliceCmd {
+	// string
+	_va := make([]interface{}, len(hashes))
+	for _i := range hashes {
+		_va[_i] = hashes[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _mock.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ScriptExists")
+	}
+
+	var r0 *redis.BoolSliceCmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) *redis.BoolSliceCmd); ok {
+		r0 = returnFunc(ctx, hashes...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.BoolSliceCmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_ScriptExists_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ScriptExists'
+type redisClientMock_ScriptExists_Call struct {
+	*mock.Call
+}
+
+// ScriptExists is a helper method to define mock.On call
+//   - ctx context.Context
+//   - hashes ...string
+func (_e *redisClientMock_Expecter) ScriptExists(ctx interface{}, hashes ...interface{}) *redisClientMock_ScriptExists_Call {
+	return &redisClientMock_ScriptExists_Call{Call: _e.mock.On("ScriptExists",
+		append([]interface{}{ctx}, hashes...)...)}
+}
+
+func (_c *redisClientMock_ScriptExists_Call) Run(run func(ctx context.Context, hashes ...string)) *redisClientMock_ScriptExists_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		variadicArgs := make([]string, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(string)
+			}
+		}
+		arg1 = variadicArgs
+		run(
+			arg0,
+			arg1...,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_ScriptExists_Call) Return(boolSliceCmd *redis.BoolSliceCmd) *redisClientMock_ScriptExists_Call {
+	_c.Call.Return(boolSliceCmd)
+	return _c
+}
+
+func (_c *redisClientMock_ScriptExists_Call) RunAndReturn(run func(ctx context.Context, hashes ...string) *redis.BoolSliceCmd) *redisClientMock_ScriptExists_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ScriptLoad provides a mock function for the type redisClientMock
+func (_mock *redisClientMock) ScriptLoad(ctx context.Context, script string) *redis.StringCmd {
+	ret := _mock.Called(ctx, script)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ScriptLoad")
+	}
+
+	var r0 *redis.StringCmd
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *redis.StringCmd); ok {
+		r0 = returnFunc(ctx, script)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*redis.StringCmd)
+		}
+	}
+	return r0
+}
+
+// redisClientMock_ScriptLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ScriptLoad'
+type redisClientMock_ScriptLoad_Call struct {
+	*mock.Call
+}
+
+// ScriptLoad is a helper method to define mock.On call
+//   - ctx context.Context
+//   - script string
+func (_e *redisClientMock_Expecter) ScriptLoad(ctx interface{}, script interface{}) *redisClientMock_ScriptLoad_Call {
+	return &redisClientMock_ScriptLoad_Call{Call: _e.mock.On("ScriptLoad", ctx, script)}
+}
+
+func (_c *redisClientMock_ScriptLoad_Call) Run(run func(ctx context.Context, script string)) *redisClientMock_ScriptLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *redisClientMock_ScriptLoad_Call) Return(stringCmd *redis.StringCmd) *redisClientMock_ScriptLoad_Call {
+	_c.Call.Return(stringCmd)
+	return _c
+}
+
+func (_c *redisClientMock_ScriptLoad_Call) RunAndReturn(run func(ctx context.Context, script string) *redis.StringCmd) *redisClientMock_ScriptLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }

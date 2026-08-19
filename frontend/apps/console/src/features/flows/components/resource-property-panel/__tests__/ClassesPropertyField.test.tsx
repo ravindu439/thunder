@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -40,17 +25,16 @@ describe('ClassesPropertyField', () => {
     vi.clearAllMocks();
   });
 
-  it('should render a single row for an empty value', () => {
+  it('should show only the placeholder when there are no classes', () => {
     render(
       <ClassesPropertyField resource={mockResource} propertyKey="className" propertyValue="" onChange={mockOnChange} />,
     );
 
-    expect(screen.getAllByPlaceholderText('flows:core.elements.classesPropertyField.placeholder')).toHaveLength(1);
-    // Only row, no delete button should be rendered.
-    expect(screen.queryByRole('button', {name: ''})).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('flows:core.elements.classesPropertyField.placeholder')).toBeInTheDocument();
+    expect(screen.queryAllByRole('button')).toHaveLength(0);
   });
 
-  it('should render one row per space-separated class', () => {
+  it('should render a chip per space-separated class', () => {
     render(
       <ClassesPropertyField
         resource={mockResource}
@@ -60,13 +44,15 @@ describe('ClassesPropertyField', () => {
       />,
     );
 
-    const inputs = screen.getAllByPlaceholderText('flows:core.elements.classesPropertyField.placeholder');
-    expect(inputs).toHaveLength(2);
-    expect(inputs[0]).toHaveValue('btn');
-    expect(inputs[1]).toHaveValue('btn-primary');
+    expect(screen.getByText('btn')).toBeInTheDocument();
+    expect(screen.getByText('btn-primary')).toBeInTheDocument();
+    // With chips present the placeholder is dropped.
+    expect(
+      screen.queryByPlaceholderText('flows:core.elements.classesPropertyField.placeholder'),
+    ).not.toBeInTheDocument();
   });
 
-  it('should add a new empty row when the add button is clicked', () => {
+  it('should append a class when one is typed and committed', () => {
     render(
       <ClassesPropertyField
         resource={mockResource}
@@ -76,13 +62,26 @@ describe('ClassesPropertyField', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('flows:core.elements.classesPropertyField.addClass'));
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, {target: {value: 'btn-primary'}});
+    fireEvent.keyDown(input, {key: 'Enter'});
 
-    expect(screen.getAllByPlaceholderText('flows:core.elements.classesPropertyField.placeholder')).toHaveLength(2);
-    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn ', mockResource, undefined);
+    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn btn-primary', mockResource);
   });
 
-  it('should update a row value on change and debounce the update', () => {
+  it('should split a pasted value containing whitespace into separate classes', () => {
+    render(
+      <ClassesPropertyField resource={mockResource} propertyKey="className" propertyValue="" onChange={mockOnChange} />,
+    );
+
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, {target: {value: 'btn btn-primary'}});
+    fireEvent.keyDown(input, {key: 'Enter'});
+
+    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn btn-primary', mockResource);
+  });
+
+  it('should not add the same class twice', () => {
     render(
       <ClassesPropertyField
         resource={mockResource}
@@ -92,13 +91,17 @@ describe('ClassesPropertyField', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('flows:core.elements.classesPropertyField.placeholder');
-    fireEvent.change(input, {target: {value: 'btn-secondary'}});
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, {target: {value: 'btn'}});
+    fireEvent.keyDown(input, {key: 'Enter'});
 
-    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn-secondary', mockResource, true);
+    // Whatever the widget emits, the persisted value never gains a duplicate.
+    const persisted: string[] = mockOnChange.mock.calls.map((call) => call[1] as string);
+    expect(persisted.every((value: string) => value === 'btn')).toBe(true);
+    expect(screen.getAllByText('btn')).toHaveLength(1);
   });
 
-  it('should remove a row when its delete button is clicked', () => {
+  it('should remove a class when its chip is deleted', () => {
     render(
       <ClassesPropertyField
         resource={mockResource}
@@ -108,12 +111,9 @@ describe('ClassesPropertyField', () => {
       />,
     );
 
-    const deleteButtons = screen.getAllByRole('button', {name: 'common:actions.delete'});
-    expect(deleteButtons).toHaveLength(2);
+    // Each chip renders a delete button; the first belongs to "btn".
+    fireEvent.click(screen.getAllByTestId('CancelIcon')[0]);
 
-    fireEvent.click(deleteButtons[0]);
-
-    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn-primary', mockResource, undefined);
-    expect(screen.getAllByPlaceholderText('flows:core.elements.classesPropertyField.placeholder')).toHaveLength(1);
+    expect(mockOnChange).toHaveBeenCalledWith('className', 'btn-primary', mockResource);
   });
 });

@@ -1,28 +1,14 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import type {EdgeTypes, Node, NodeTypes} from '@xyflow/react';
+import type {Edge, EdgeTypes, Node, NodeTypes} from '@xyflow/react';
 import type {Context, Dispatch, FunctionComponent, SetStateAction} from 'react';
 import {createContext} from 'react';
 import type {FlowCompletionConfigsInterface} from '../models/flows';
 import type {MetadataInterface} from '../models/metadata';
 import type {Resource} from '../models/resources';
 import type {EdgeStyleTypes} from '../models/steps';
+import type {GraphValidationRule} from '../validation/validation-rules';
 
 /**
  * Props interface of {@link FlowConfigContext}
@@ -112,6 +98,25 @@ export interface FlowConfigContextProps {
    * Setter to push the latest nodes into the shared context.
    */
   setFlowNodes: Dispatch<SetStateAction<Node[]>>;
+  /**
+   * Current React Flow edges, alongside {@link flowNodes}, so graph validation
+   * rules can also check what a node or one of its elements connects to.
+   */
+  flowEdges: Edge[];
+  /**
+   * Setter to push the latest edges into the shared context.
+   */
+  setFlowEdges: Dispatch<SetStateAction<Edge[]>>;
+  /**
+   * Cross-node validation rules active for the current flow. Empty by
+   * default; flow-type-specific hosts register the rules that apply
+   * (e.g. the SSO pairing rules for AUTHENTICATION flows).
+   */
+  graphValidationRules: GraphValidationRule[];
+  /**
+   * Setter to register the graph validation rules for the current flow.
+   */
+  setGraphValidationRules: Dispatch<SetStateAction<GraphValidationRule[]>>;
 }
 
 const FlowConfigContext: Context<FlowConfigContextProps | undefined> = createContext<

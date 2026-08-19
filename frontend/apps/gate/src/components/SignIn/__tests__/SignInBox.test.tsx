@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {act} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {DesignContext, type DesignContextType} from '@thunderid/design';
 import {render as testRender, screen, fireEvent, waitFor} from '@thunderid/test-utils';
@@ -85,6 +71,7 @@ interface MockFlowComponent {
   required?: boolean;
   eventType?: string;
   image?: string;
+  action?: {ref?: string};
   components?: MockFlowComponent[];
 }
 
@@ -138,6 +125,9 @@ vi.mock('@thunderid/react', async () => {
       Block: 'BLOCK',
       TextInput: 'TEXT_INPUT',
       PasswordInput: 'PASSWORD_INPUT',
+      EmailInput: 'EMAIL_INPUT',
+      PhoneInput: 'PHONE_INPUT',
+      OtpInput: 'OTP_INPUT',
       Action: 'ACTION',
     },
     EmbeddedFlowEventType: {
@@ -187,6 +177,20 @@ describe('SignInBox', () => {
     });
     render(<SignInBox />);
     expect(screen.getByText('Invalid credentials')).toBeInTheDocument();
+  });
+
+  // An expired consent prompt auto-submits, and the expiry error is raised against that in-flight
+  // request. Rendering it would flash an error over a submission that goes on to succeed.
+  it('holds back the error alert while a submission is in flight', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [{id: 'text-1', type: 'TEXT', label: 'Consent', variant: 'H1'}],
+      error: {message: 'Time allowed to complete the step has expired.'},
+      isLoading: true,
+    });
+    render(<SignInBox />);
+
+    expect(screen.queryByText('Time allowed to complete the step has expired.')).not.toBeInTheDocument();
+    expect(screen.getByText('Consent')).toBeInTheDocument();
   });
 
   it('renders TEXT component as heading', () => {
@@ -333,6 +337,36 @@ describe('SignInBox', () => {
     expect(screen.getByText('Enter OTP')).toBeInTheDocument();
     // OTP input has 6 digit fields
     expect(screen.getAllByRole('textbox')).toHaveLength(6);
+  });
+
+  it('renders OTP_INPUT with the digit count reported by the step', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      additionalData: {otpLength: '8'},
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'otp-input',
+              type: 'OTP_INPUT',
+              ref: 'otp',
+              label: 'Enter OTP',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Verify',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+    expect(screen.getAllByRole('textbox')).toHaveLength(8);
   });
 
   it('renders TRIGGER action buttons for social login', () => {
@@ -528,15 +562,16 @@ describe('SignInBox', () => {
         {
           id: 'rich-text-signup',
           type: 'RICH_TEXT',
-          label: '<p>Don\'t have an account? <a href="{{meta(application.sign_up_url)}}">Sign up</a></p>',
+          label:
+            '<p data-component-ref="self-sign-up-link">Don\'t have an account? <a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          action: {ref: 'action_signup'},
         },
       ],
     });
     render(<SignInBox />);
 
-    const signUpLink = screen.getByText('Sign up');
-    // Sign-up link is now a plain anchor using the fallback URL
-    expect(signUpLink.closest('a')).toHaveAttribute('href', '/signup');
+    fireEvent.click(screen.getByText('Sign up'));
+    expect(mockOnSubmit).toHaveBeenCalledWith({inputs: {}, action: 'action_signup'});
   });
 
   it('renders correctly when design is enabled', () => {
@@ -592,7 +627,8 @@ describe('SignInBox', () => {
     await userEvent.type(otpInputs[0], '1');
   });
 
-  it('clears field error when user starts typing', async () => {
+  it('clears field error after debounce when user starts typing', () => {
+    vi.useFakeTimers();
     mockSignInRenderProps = createMockSignInRenderProps({
       components: [
         {
@@ -623,12 +659,18 @@ describe('SignInBox', () => {
     const submitBtn = screen.getByText('Continue');
     fireEvent.click(submitBtn);
 
-    // Now type to clear error
+    // Now type to start debounce
     const usernameInput = screen.getByLabelText(/Username/);
-    await userEvent.type(usernameInput, 't');
+    fireEvent.change(usernameInput, {target: {value: 't'}});
 
-    // Error should be cleared
+    // Advance past debounce delay — format validation for TEXT_INPUT is a no-op, so error clears
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Error should be cleared (no format validation for TEXT_INPUT)
     expect(mockOnSubmit).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('handles social login trigger click', async () => {
@@ -662,7 +704,7 @@ describe('SignInBox', () => {
     });
   });
 
-  it('navigates to sign up with query params preserved', () => {
+  it('renders sign up link when registration is enabled', () => {
     mockResolveAll.mockImplementation(
       (template: string, handlers?: Record<string, (key: string) => string | undefined>) =>
         template.replace(/\{\{meta\(([^)]+)\)\}\}/g, (_match, path: string) => handlers?.meta?.(path) ?? _match),
@@ -673,18 +715,18 @@ describe('SignInBox', () => {
         {
           id: 'rich-text-signup',
           type: 'RICH_TEXT',
-          label: '<p>Don\'t have an account? <a href="{{meta(application.sign_up_url)}}">Sign up</a></p>',
+          label:
+            '<p data-component-ref="self-sign-up-link">Don\'t have an account? <a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          action: {ref: 'action_signup'},
         },
       ],
     });
 
     render(<SignInBox />);
-    const signUpLink = screen.getByText('Sign up');
-    // Sign-up link is now a plain anchor using the fallback URL
-    expect(signUpLink.closest('a')).toHaveAttribute('href', '/signup');
+    expect(screen.getByText('Sign up')).toBeInTheDocument();
   });
 
-  it('preserves existing query params in the sign-up fallback URL', () => {
+  it('dispatches sign-up action regardless of URL query params', () => {
     mockSearchParams = new URLSearchParams({client_id: 'test-client', app_id: 'myapp'});
     mockResolveAll.mockImplementation(
       (template: string, handlers?: Record<string, (key: string) => string | undefined>) =>
@@ -696,17 +738,16 @@ describe('SignInBox', () => {
         {
           id: 'rich-text-signup',
           type: 'RICH_TEXT',
-          label: '<p>Don\'t have an account? <a href="{{meta(application.sign_up_url)}}">Sign up</a></p>',
+          label:
+            '<p data-component-ref="self-sign-up-link">Don\'t have an account? <a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          action: {ref: 'action_signup'},
         },
       ],
     });
 
     render(<SignInBox />);
-    const signUpLink = screen.getByText('Sign up');
-    const href = signUpLink.closest('a')?.getAttribute('href') ?? '';
-    expect(href).toContain('/signup');
-    expect(href).toContain('client_id=test-client');
-    expect(href).toContain('app_id=myapp');
+    fireEvent.click(screen.getByText('Sign up'));
+    expect(mockOnSubmit).toHaveBeenCalledWith({inputs: {}, action: 'action_signup'});
   });
 
   it('handles password input change', async () => {
@@ -1935,15 +1976,16 @@ describe('SignInBox', () => {
         {
           id: 'rich-text-signup',
           type: 'RICH_TEXT',
-          label: '<p>Don\'t have an account? <a href="{{meta(application.sign_up_url)}}">Sign up</a></p>',
+          label:
+            '<p data-component-ref="self-sign-up-link">Don\'t have an account? <a href="#" data-action-ref="action_signup">Sign up</a></p>',
+          action: {ref: 'action_signup'},
         },
       ],
     });
     render(<SignInBox />);
 
-    const signUpLink = screen.getByText('Sign up');
-    // Sign-up link is now a plain anchor using the fallback URL
-    expect(signUpLink.closest('a')).toHaveAttribute('href', '/signup');
+    fireEvent.click(screen.getByText('Sign up'));
+    expect(mockOnSubmit).toHaveBeenCalledWith({inputs: {}, action: 'action_signup'});
   });
 
   it('renders social login trigger with missing label and image', () => {
@@ -1982,6 +2024,90 @@ describe('SignInBox', () => {
     expect(screen.getByTestId('thunderid-signin')).toBeInTheDocument();
   });
 
+  it('shows the error alert without a spinner when the flow fails with no components', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [],
+      error: {message: 'Session expired'},
+      isLoading: false,
+    });
+    const {container} = render(<SignInBox />);
+
+    expect(screen.getByText('Session expired')).toBeInTheDocument();
+    expect(container.querySelector('.MuiCircularProgress-root')).not.toBeInTheDocument();
+  });
+
+  it('renders a return to application action when flow metadata carries the application URL', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [],
+      error: {message: 'Session expired'},
+      isLoading: false,
+      meta: {application: {url: 'https://app.example.com'}},
+    });
+    render(<SignInBox />);
+
+    expect(screen.getByRole('link', {name: 'Return to application'})).toHaveAttribute(
+      'href',
+      'https://app.example.com',
+    );
+  });
+
+  it('guides the user back to the application when the application URL is unavailable', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [],
+      error: {message: 'Session expired'},
+      isLoading: false,
+      meta: {},
+    });
+    const {container} = render(<SignInBox />);
+
+    expect(screen.getByText('Session expired')).toBeInTheDocument();
+    expect(screen.getByText('Please return to the application and try again.')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(container.querySelector('.MuiCircularProgress-root')).not.toBeInTheDocument();
+  });
+
+  it('shows the spinner while loading with no components and no error', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [],
+      error: null,
+      isLoading: true,
+    });
+    const {container} = render(<SignInBox />);
+
+    expect(container.querySelector('.MuiCircularProgress-root')).toBeInTheDocument();
+  });
+
+  it('keeps the form rendered while a submission is in flight', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      isLoading: true,
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'username-input',
+              type: 'TEXT_INPUT',
+              ref: 'username',
+              label: 'Username',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    expect(screen.getByLabelText(/Username/)).toBeInTheDocument();
+  });
+
   it('renders block without components property', () => {
     mockSignInRenderProps = createMockSignInRenderProps({
       components: [
@@ -1994,5 +2120,555 @@ describe('SignInBox', () => {
     });
     render(<SignInBox />);
     expect(screen.getByTestId('thunderid-signin')).toBeInTheDocument();
+  });
+
+  it('renders EMAIL_INPUT component', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              placeholder: 'Enter your email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+    expect(screen.getByLabelText(/Email/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Enter your email')).toBeInTheDocument();
+  });
+
+  it('shows required validation error for empty EMAIL_INPUT field', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const submitBtn = screen.getByText('Continue');
+    fireEvent.click(submitBtn);
+
+    expect(mockOnSubmit).not.toHaveBeenCalled();
+  });
+
+  it('displays the required error message for empty EMAIL_INPUT field', () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    fireEvent.click(screen.getByText('Continue'));
+
+    expect(screen.getByText('Email is required.')).toBeInTheDocument();
+  });
+
+  it('shows format validation error for invalid email in EMAIL_INPUT field', async () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const emailInput = screen.getByLabelText(/Email/);
+    await userEvent.type(emailInput, 'abc');
+
+    const submitBtn = screen.getByText('Continue');
+    fireEvent.click(submitBtn);
+
+    expect(mockOnSubmit).not.toHaveBeenCalled();
+  });
+
+  it('displays the invalid email error message for EMAIL_INPUT with bad format', async () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    await userEvent.type(screen.getByLabelText(/Email/), 'abc');
+    fireEvent.click(screen.getByText('Continue'));
+
+    expect(screen.getByText('Please enter a valid email address.')).toBeInTheDocument();
+  });
+
+  it('clears email format error after debounce when user types a valid email', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    // Type invalid email and trigger debounce
+    const emailInput = screen.getByLabelText(/Email/);
+    fireEvent.change(emailInput, {target: {value: 'abc'}});
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Format error should appear
+    expect(screen.getByText('Please enter a valid email address.')).toBeInTheDocument();
+
+    // Type a valid email and trigger debounce
+    fireEvent.change(emailInput, {target: {value: 'abc@example.com'}});
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Error should be cleared
+    expect(screen.queryByText('Please enter a valid email address.')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('submits form when EMAIL_INPUT has a valid email', async () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const emailInput = screen.getByLabelText(/Email/);
+    await userEvent.type(emailInput, 'user@example.com');
+
+    const submitBtn = screen.getByText('Continue');
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        inputs: {email: 'user@example.com'},
+        action: 'submit-btn',
+      });
+    });
+  });
+
+  it('allows submitting non-required EMAIL_INPUT when empty', async () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: false,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const submitBtn = screen.getByText('Continue');
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockOnSubmit).toHaveBeenCalledWith({
+        inputs: {},
+        action: 'submit-btn',
+      });
+    });
+  });
+
+  it('shows format validation error for non-required EMAIL_INPUT with invalid value', async () => {
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: false,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const emailInput = screen.getByLabelText(/Email/);
+    await userEvent.type(emailInput, 'notanemail');
+
+    const submitBtn = screen.getByText('Continue');
+    fireEvent.click(submitBtn);
+
+    expect(mockOnSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Please enter a valid email address.')).toBeInTheDocument();
+  });
+
+  it('replaces required email error with format error after debounce when user types invalid email', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    // Submit empty to trigger required error
+    fireEvent.click(screen.getByText('Continue'));
+    expect(screen.getByText('Email is required.')).toBeInTheDocument();
+
+    // Type invalid email and wait for debounce
+    fireEvent.change(screen.getByLabelText(/Email/), {target: {value: 'u'}});
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Required error should be gone, replaced by format error
+    expect(screen.queryByText('Email is required.')).not.toBeInTheDocument();
+    expect(screen.getByText('Please enter a valid email address.')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('shows email format error after debounce without submitting', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const emailInput = screen.getByLabelText(/Email/);
+    fireEvent.change(emailInput, {target: {value: 'notanemail'}});
+
+    // Before debounce fires, no error
+    expect(screen.queryByText('Please enter a valid email address.')).not.toBeInTheDocument();
+
+    // After debounce fires
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(screen.getByText('Please enter a valid email address.')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('does not show format error for non-email fields after debounce', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'username-input',
+              type: 'TEXT_INPUT',
+              ref: 'username',
+              label: 'Username',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const usernameInput = screen.getByLabelText(/Username/);
+    fireEvent.change(usernameInput, {target: {value: 'test'}});
+
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // No format validation for TEXT_INPUT
+    expect(screen.queryByText(/is required/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/valid email/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('does not show required error while typing in empty required field', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'username-input',
+              type: 'TEXT_INPUT',
+              ref: 'username',
+              label: 'Username',
+              required: true,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    // Type and then clear the field
+    const usernameInput = screen.getByLabelText(/Username/);
+    fireEvent.change(usernameInput, {target: {value: 'a'}});
+    fireEvent.change(usernameInput, {target: {value: ''}});
+
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Required error should NOT appear (only on submit)
+    expect(screen.queryByText(/is required/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('debounce resets on each keystroke', () => {
+    vi.useFakeTimers();
+    mockSignInRenderProps = createMockSignInRenderProps({
+      components: [
+        {
+          id: 'block-1',
+          type: 'BLOCK',
+          components: [
+            {
+              id: 'email-input',
+              type: 'EMAIL_INPUT',
+              ref: 'email',
+              label: 'Email',
+              required: false,
+            },
+            {
+              id: 'submit-btn',
+              type: 'ACTION',
+              eventType: 'SUBMIT',
+              label: 'Continue',
+              variant: 'PRIMARY',
+            },
+          ],
+        },
+      ],
+    });
+    render(<SignInBox />);
+
+    const emailInput = screen.getByLabelText(/Email/);
+
+    // Type partial invalid email
+    fireEvent.change(emailInput, {target: {value: 'abc'}});
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Not yet — debounce hasn't fired
+    expect(screen.queryByText('Please enter a valid email address.')).not.toBeInTheDocument();
+
+    // Type more — this resets the debounce timer
+    fireEvent.change(emailInput, {target: {value: 'abc@example.com'}});
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Valid email — no error
+    expect(screen.queryByText('Please enter a valid email address.')).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });

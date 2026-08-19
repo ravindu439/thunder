@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package openid4vp
 
@@ -27,11 +12,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/thunder-id/thunderid/internal/system/config"
-	"github.com/thunder-id/thunderid/internal/system/jose/jws"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
@@ -41,7 +26,7 @@ import (
 
 // Initialize wires the OpenID4VP verifier engine.
 func Initialize(
-	mux *http.ServeMux, cryptoProvider kmprovider.RuntimeCryptoProvider,
+	mux *http.ServeMux, cryptoProvider providers.RuntimeCryptoProvider,
 	configCrypto kmprovider.ConfigCryptoProvider, jwtService jwt.JWTServiceInterface,
 	defSvc presentation.PresentationDefinitionServiceInterface,
 	store providers.RuntimeStoreProvider,
@@ -57,7 +42,7 @@ func Initialize(
 		return nil, fmt.Errorf("%w: signing_key_id is required", ErrPolicy)
 	}
 
-	keys, err := cryptoProvider.GetPublicKeys(context.Background(), kmprovider.PublicKeyFilter{KeyID: cfg.SigningKeyID})
+	keys, err := cryptoProvider.GetPublicKeys(context.Background(), providers.PublicKeyFilter{KeyID: cfg.SigningKeyID})
 	if err != nil {
 		return nil, fmt.Errorf("failed to load signing key %q: %w", cfg.SigningKeyID, err)
 	}
@@ -65,7 +50,7 @@ func Initialize(
 		return nil, fmt.Errorf("%w: no signing key found for key id %q", ErrPolicy, cfg.SigningKeyID)
 	}
 	signingKey := keys[0]
-	if _, err := jws.MapAlgorithmToSignAlg(jws.Algorithm(signingKey.Algorithm)); err != nil {
+	if !slices.Contains(cryptoProvider.GetSupportedSigningAlgorithms(), signingKey.Algorithm) {
 		return nil, fmt.Errorf("%w: unsupported signing algorithm for key %q", ErrPolicy, cfg.SigningKeyID)
 	}
 	if len(signingKey.CertificateDER) == 0 {
@@ -112,9 +97,9 @@ func Initialize(
 		ResultRedirectURIBase: cfg.ResultRedirectURI,
 		ResultTokenValidity:   resultTokenValidity,
 		VerifierInfo:          verifierInfo,
-		EnforceKeyBinding:     cfg.EnforceKeyBinding,
+		EnforceKeyBinding:     cfg.EnforceKeyBindingEnabled(),
 	}, newOpenID4VPStore(configCrypto, store), clientID,
-		cryptoProvider, kmprovider.KeyRef{KeyID: cfg.SigningKeyID}, string(signingKey.Algorithm), x5c,
+		cryptoProvider, providers.KeyRef{KeyID: cfg.SigningKeyID}, signingKey.Algorithm, x5c,
 		trust, defSvc, jwtService, base)
 	if err != nil {
 		return nil, err

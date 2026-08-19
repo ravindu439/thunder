@@ -1,38 +1,34 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {QueryErrorNotice} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
-import {Box, Chip, IconButton, Tooltip, Typography, ListingTable, DataGrid} from '@wso2/oxygen-ui';
+import {Chip, IconButton, Tooltip, ListingTable, DataGrid} from '@wso2/oxygen-ui';
 import {Eye, Pencil, Trash2} from '@wso2/oxygen-ui-icons-react';
 import {useMemo, useCallback, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import FlowDeleteDialog from './FlowDeleteDialog';
 import useGetFlows from '../api/useGetFlows';
+import useFlowRoutes from '../hooks/useFlowRoutes';
 import type {BasicFlowDefinition} from '../models/responses';
 
 export default function FlowsList(): JSX.Element {
   const navigate = useNavigate();
+  const flowRoutes = useFlowRoutes();
   const {t} = useTranslation();
   const logger = useLogger('FlowsList');
   const dataGridLocaleText = useDataGridLocaleText();
-  const {data, isLoading, error} = useGetFlows();
+  const {data, isLoading, error, refetch} = useGetFlows();
+
+  // Resolves an error through the `flows` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `flows:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `flows:${key}`, options),
+    [t],
+  );
 
   const [selectedFlow, setSelectedFlow] = useState<BasicFlowDefinition | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
@@ -47,15 +43,15 @@ export default function FlowsList(): JSX.Element {
     setSelectedFlow(null);
   };
 
-  const handleEditClick = useCallback(
+  const handleOpenClick = useCallback(
     (flow: BasicFlowDefinition): void => {
       (async (): Promise<void> => {
-        await navigate(`/flows/signin/${flow.id}`);
+        await navigate(flowRoutes.flows.detail(flow.id));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to flow builder', {error: _error, flowId: flow.id});
       });
     },
-    [logger, navigate],
+    [flowRoutes, logger, navigate],
   );
 
   const columns: DataGrid.GridColDef<BasicFlowDefinition>[] = useMemo(
@@ -110,8 +106,14 @@ export default function FlowsList(): JSX.Element {
           return (
             <ListingTable.RowActions>
               {params.row.isReadOnly ? (
-                <Tooltip title={t('common:status.readOnly', 'Read Only')}>
-                  <IconButton size="small" disableRipple sx={{cursor: 'default'}}>
+                <Tooltip title={t('common:actions.view', 'View')}>
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenClick(params.row);
+                    }}
+                  >
                     <Eye size={16} />
                   </IconButton>
                 </Tooltip>
@@ -122,7 +124,7 @@ export default function FlowsList(): JSX.Element {
                       size="small"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleEditClick(params.row);
+                        handleOpenClick(params.row);
                       }}
                     >
                       <Pencil size={16} />
@@ -147,19 +149,20 @@ export default function FlowsList(): JSX.Element {
         },
       },
     ],
-    [handleDeleteClick, handleEditClick, t],
+    [handleDeleteClick, handleOpenClick, t],
   );
 
   if (error) {
     return (
-      <Box sx={{textAlign: 'center', py: 8}}>
-        <Typography variant="h6" color="error" gutterBottom>
-          {t('flows:listing.error.title')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {error.message ?? t('flows:listing.error.unknown')}
-        </Typography>
-      </Box>
+      <QueryErrorNotice
+        error={error}
+        t={tForErrors}
+        variant="block"
+        title={t('flows:listing.error.title')}
+        fallbackKey="listing.error.unknown"
+        fallbackDefaultValue="An unknown error occurred"
+        onRetry={() => void refetch()}
+      />
     );
   }
 
@@ -171,13 +174,8 @@ export default function FlowsList(): JSX.Element {
             rows={data?.flows ?? []}
             columns={columns}
             getRowId={(row): string => (row as BasicFlowDefinition).id}
-            getRowClassName={(params) =>
-              (params.row as BasicFlowDefinition).isReadOnly ? 'row-not-clickable' : 'row-clickable'
-            }
             onRowClick={(params) => {
-              if (!(params.row as BasicFlowDefinition).isReadOnly) {
-                handleEditClick(params.row as BasicFlowDefinition);
-              }
+              handleOpenClick(params.row as BasicFlowDefinition);
             }}
             initialState={{
               pagination: {
@@ -186,14 +184,13 @@ export default function FlowsList(): JSX.Element {
             }}
             pageSizeOptions={[5, 10, 25, 50]}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             autoHeight
             sx={{
-              '& .MuiDataGrid-row.row-clickable': {
+              '& .MuiDataGrid-row': {
                 cursor: 'pointer',
-              },
-              '& .MuiDataGrid-row.row-not-clickable': {
-                cursor: 'default',
               },
             }}
           />

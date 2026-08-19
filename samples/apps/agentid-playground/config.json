@@ -1,0 +1,23 @@
+{
+  "thunderidBaseUrl": "https://localhost:8090",
+  "appBaseUrl": "http://localhost:8082",
+  "scopes": "openid profile email booking:read booking:create",
+  "resources": {
+    "agent": "https://agent.travel.example",
+    "booking": "https://api.travel.example/booking"
+  },
+  "loginUser": {
+    "username": "johndoe",
+    "password": "Travel@123"
+  },
+  "agents": {
+    "concierge": {
+      "clientId": "agent-identity-concierge-id",
+      "clientSecret": "agent-identity-concierge-secret"
+    },
+    "worker": {
+      "clientId": "agent-identity-flight-search-id",
+      "clientSecret": "agent-identity-flight-search-secret"
+    }
+  }
+}

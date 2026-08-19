@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package connection
 
@@ -37,7 +22,6 @@ type oidcConnectionRequest struct {
 	TokenEndpoint         string   `json:"tokenEndpoint"`
 	UserInfoEndpoint      string   `json:"userInfoEndpoint,omitempty"`
 	JwksEndpoint          string   `json:"jwksEndpoint,omitempty"`
-	LogoutEndpoint        string   `json:"logoutEndpoint,omitempty"`
 	Issuer                string   `json:"issuer,omitempty"`
 	Scopes                []string `json:"scopes,omitempty"`
 	Prompt                string   `json:"prompt,omitempty"`
@@ -61,7 +45,6 @@ type oidcConnectionResponse struct {
 	TokenEndpoint         string   `json:"tokenEndpoint,omitempty"`
 	UserInfoEndpoint      string   `json:"userInfoEndpoint,omitempty"`
 	JwksEndpoint          string   `json:"jwksEndpoint,omitempty"`
-	LogoutEndpoint        string   `json:"logoutEndpoint,omitempty"`
 	Issuer                string   `json:"issuer,omitempty"`
 	Scopes                []string `json:"scopes,omitempty"`
 	Prompt                string   `json:"prompt,omitempty"`
@@ -87,7 +70,6 @@ func oidcToIDPDTO(req oidcConnectionRequest) (*providers.IDPDTO, error) {
 		{idp.PropTokenEndpoint, req.TokenEndpoint, false},
 		{idp.PropUserInfoEndpoint, req.UserInfoEndpoint, false},
 		{idp.PropJwksEndpoint, req.JwksEndpoint, false},
-		{idp.PropLogoutEndpoint, req.LogoutEndpoint, false},
 		{idp.PropIssuer, req.Issuer, false},
 		{idp.PropScopes, joinScopes(req.Scopes), false},
 		{idp.PropPrompt, req.Prompt, false},
@@ -144,7 +126,6 @@ func oidcFromIDPDTO(dto providers.IDPDTO) (oidcConnectionResponse, error) {
 		TokenEndpoint:         values[idp.PropTokenEndpoint],
 		UserInfoEndpoint:      values[idp.PropUserInfoEndpoint],
 		JwksEndpoint:          values[idp.PropJwksEndpoint],
-		LogoutEndpoint:        values[idp.PropLogoutEndpoint],
 		Issuer:                values[idp.PropIssuer],
 		Scopes:                splitScopes(values[idp.PropScopes]),
 		Prompt:                values[idp.PropPrompt],

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {
   Consent,
@@ -62,8 +47,10 @@ interface ConsentAdapterProps {
   onInputChange: (name: string, value: string) => void;
 }
 
+// Permissions are opt-in: an absent form value means the user has not granted the permission. This
+// must match how the SDK compiles consent_decisions on submit, or the screen and the token disagree.
 function isPermissionChecked(formValues: Record<string, string>, purposeId: string, name: string): boolean {
-  return formValues[getConsentOptionalKey(purposeId, name)] !== 'false';
+  return formValues[getConsentOptionalKey(purposeId, name)] === 'true';
 }
 
 // collectDescendants returns the transitive set of descendants of `name` per the parent index.

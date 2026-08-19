@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-assignment, react/require-default-props */
 
@@ -24,6 +9,16 @@ import React from 'react';
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest';
 import type {Resources} from '../../../models/resources';
 import DecoratedVisualFlow from '../DecoratedVisualFlow';
+
+const mockNavigate = vi.fn();
+
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 // Mock hooks
 vi.mock('../../../hooks/useUIPanelState', () => ({
@@ -35,11 +30,18 @@ vi.mock('../../../hooks/useUIPanelState', () => ({
   }),
 }));
 
+const {mockFlowConfigState, mockSetFlowEdges} = vi.hoisted(() => ({
+  mockFlowConfigState: {isVerboseMode: true},
+  mockSetFlowEdges: vi.fn(),
+}));
+
 vi.mock('../../../hooks/useFlowConfig', () => ({
   default: () => ({
     isFlowMetadataLoading: false,
+    isVerboseMode: mockFlowConfigState.isVerboseMode,
     metadata: undefined,
     setFlowNodes: vi.fn(),
+    setFlowEdges: mockSetFlowEdges,
   }),
 }));
 
@@ -120,7 +122,8 @@ const {mockApplyAutoLayout} = vi.hoisted(() => ({
   mockApplyAutoLayout: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../../utils/applyAutoLayout', () => ({
+vi.mock('../../../utils/applyAutoLayout', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../utils/applyAutoLayout')>()),
   default: mockApplyAutoLayout,
 }));
 
@@ -151,12 +154,17 @@ const {mockToObject, mockGetNodes, mockGetEdges, mockUpdateNodeData, mockFitView
 );
 
 vi.mock('@xyflow/react', () => ({
+  Position: {Bottom: 'bottom', Left: 'left', Right: 'right', Top: 'top'},
   useReactFlow: () => ({
     toObject: mockToObject,
     getNodes: mockGetNodes,
     getEdges: mockGetEdges,
     updateNodeData: mockUpdateNodeData,
     fitView: mockFitView,
+  }),
+  useStore: (selector: (state: {nodes: never[]; edges: never[]}) => unknown) => selector({edges: [], nodes: []}),
+  useStoreApi: () => ({
+    getState: () => ({edges: [], nodeLookup: new Map(), nodes: []}),
   }),
   useUpdateNodeInternals: () => mockUpdateNodeInternals,
 }));
@@ -256,8 +264,10 @@ vi.mock('../VisualFlow', () => ({
       <button data-testid="node-drag-stop-trigger" onClick={onNodeDragStop}>
         Node Drag Stop
       </button>
-      <button
+      {/* A click on the node body: not a button, so it focuses the node. */}
+      <div
         data-testid="node-click-trigger"
+        role="presentation"
         onClick={(event) =>
           (onNodeClick as ((e: unknown, n: unknown) => void) | undefined)?.(event, {
             id: 'clicked-node',
@@ -266,6 +276,19 @@ vi.mock('../VisualFlow', () => ({
         }
       >
         Node Click
+      </div>
+      {/* A click on a node header action (configure, delete), which reaches
+          onNodeClick through the node but must not move the camera. */}
+      <button
+        data-testid="node-action-click-trigger"
+        onClick={(event) =>
+          (onNodeClick as ((e: unknown, n: unknown) => void) | undefined)?.(event, {
+            id: 'clicked-node',
+            position: {x: 0, y: 0},
+          })
+        }
+      >
+        Node Action Click
       </button>
     </div>
   ),
@@ -360,6 +383,7 @@ describe('DecoratedVisualFlow', () => {
     vi.clearAllMocks();
     mockGetNodes.mockReturnValue([]);
     mockGetEdges.mockReturnValue([]);
+    mockFlowConfigState.isVerboseMode = true;
     // Reset applyAutoLayout to return a resolved promise by default
     mockApplyAutoLayout.mockResolvedValue([]);
     // Reset fitView to return a resolved promise by default
@@ -421,7 +445,7 @@ describe('DecoratedVisualFlow', () => {
       expect(screen.getByTestId('simulate-flow-button')).toBeInTheDocument();
     });
 
-    it('should disable save while previewing so the zoomed viewport is not persisted', () => {
+    it('should keep save enabled while previewing (clicking it stops the preview first)', () => {
       const nodes = [{id: 'node-1', position: {x: 0, y: 0}, data: {}}] as Node[];
       renderComponent(<DecoratedVisualFlow {...defaultProps} nodes={nodes} onSave={vi.fn()} />);
 
@@ -429,10 +453,13 @@ describe('DecoratedVisualFlow', () => {
 
       fireEvent.click(screen.getByTestId('simulate-flow-button'));
 
-      expect(screen.getByTestId('save-flow-button')).toBeDisabled();
+      expect(screen.getByTestId('save-flow-button')).toBeEnabled();
     });
 
     it('should focus the clicked node via fitView', () => {
+      // Focusing is skipped for a node that is no longer on the canvas.
+      mockGetNodes.mockReturnValue([{id: 'clicked-node', position: {x: 0, y: 0}, data: {}}]);
+
       renderComponent(<DecoratedVisualFlow {...defaultProps} />);
 
       fireEvent.click(screen.getByTestId('node-click-trigger'));
@@ -455,6 +482,16 @@ describe('DecoratedVisualFlow', () => {
       renderComponent(<DecoratedVisualFlow {...defaultProps} />);
 
       expect(screen.getByTestId('form-requires-view-dialog')).toBeInTheDocument();
+    });
+  });
+
+  describe('Navigation', () => {
+    it('should navigate to the flows list when the back button is clicked', () => {
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+
+      fireEvent.click(screen.getByRole('button', {name: /back/i}));
+
+      expect(mockNavigate).toHaveBeenCalledWith('/flows');
     });
   });
 
@@ -487,7 +524,7 @@ describe('DecoratedVisualFlow', () => {
     it('should render save button in top bar', () => {
       renderComponent(<DecoratedVisualFlow {...defaultProps} onSave={vi.fn()} />);
 
-      expect(screen.getByText('core.headerPanel.save')).toBeInTheDocument();
+      expect(screen.getByTestId('save-flow-button')).toBeInTheDocument();
     });
 
     it('should render canvas toolbar', () => {
@@ -506,7 +543,7 @@ describe('DecoratedVisualFlow', () => {
 
       renderComponent(<DecoratedVisualFlow {...defaultProps} onSave={mockOnSave} />);
 
-      const saveButton = screen.getByText('core.headerPanel.save');
+      const saveButton = screen.getByTestId('save-flow-button');
       fireEvent.click(saveButton);
 
       expect(mockOnSave).toHaveBeenCalledWith({
@@ -519,7 +556,7 @@ describe('DecoratedVisualFlow', () => {
     it('should not throw when onSave is not provided', () => {
       renderComponent(<DecoratedVisualFlow {...defaultProps} onSave={undefined} />);
 
-      const saveButton = screen.getByText('core.headerPanel.save');
+      const saveButton = screen.getByTestId('save-flow-button');
       expect(() => fireEvent.click(saveButton)).not.toThrow();
     });
   });
@@ -536,6 +573,162 @@ describe('DecoratedVisualFlow', () => {
       await waitFor(() => {
         expect(mockApplyAutoLayout).toHaveBeenCalled();
       });
+    });
+
+    it('should use detailed spacing and measured sizes in verbose mode', async () => {
+      mockGetNodes.mockReturnValue([
+        {id: 'exec-1', type: 'TASK_EXECUTION', position: {x: 0, y: 0}, data: {}, measured: {width: 350, height: 140}},
+      ]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      fireEvent.click(screen.getByTestId('auto-layout-trigger'));
+
+      await waitFor(() => {
+        expect(mockApplyAutoLayout).toHaveBeenCalled();
+      });
+      const [layoutNodes, , options] = mockApplyAutoLayout.mock.calls[0] as [Node[], Edge[], Record<string, number>];
+      expect(layoutNodes[0].measured).toEqual({width: 350, height: 140});
+      expect(options).toMatchObject({nodeSpacing: 100, rankSpacing: 160});
+    });
+
+    it('should use tight spacing and chip sizes in compact mode', async () => {
+      mockFlowConfigState.isVerboseMode = false;
+      mockGetNodes.mockReturnValue([
+        {id: 'exec-1', type: 'TASK_EXECUTION', position: {x: 0, y: 0}, data: {}, measured: {width: 350, height: 140}},
+        {
+          id: 'stack-1',
+          type: 'EXECUTION_STACK',
+          position: {x: 0, y: 0},
+          data: {memberIds: ['a', 'b', 'c'], members: []},
+        },
+      ]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      fireEvent.click(screen.getByTestId('auto-layout-trigger'));
+
+      await waitFor(() => {
+        expect(mockApplyAutoLayout).toHaveBeenCalled();
+      });
+      const [layoutNodes, , options] = mockApplyAutoLayout.mock.calls[0] as [Node[], Edge[], Record<string, number>];
+      expect(layoutNodes[0].measured).toEqual({width: 48, height: 48});
+      // 3 members: 48 chip + 2 deck-layer offsets of 4
+      expect(layoutNodes[1].measured).toEqual({width: 56, height: 48});
+      expect(options).toMatchObject({nodeSpacing: 60, rankSpacing: 80});
+    });
+
+    it('should map stack positions back onto member nodes', async () => {
+      const setNodes = vi.fn();
+      mockGetNodes.mockReturnValue([
+        {id: 'stack-1', type: 'EXECUTION_STACK', position: {x: 0, y: 0}, data: {memberIds: ['a', 'b'], members: []}},
+      ]);
+      mockApplyAutoLayout.mockResolvedValue([
+        {id: 'stack-1', position: {x: 200, y: 300}, data: {memberIds: ['a', 'b'], members: []}},
+      ]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} setNodes={setNodes} />);
+      fireEvent.click(screen.getByTestId('auto-layout-trigger'));
+
+      await waitFor(() => {
+        expect(setNodes).toHaveBeenCalled();
+      });
+      const updater = setNodes.mock.calls[0][0] as (nodes: Node[]) => Node[];
+      const updated = updater([
+        {id: 'a', position: {x: 1, y: 1}, data: {}},
+        {id: 'b', position: {x: 2, y: 2}, data: {}},
+        {id: 'other', position: {x: 3, y: 3}, data: {}},
+      ]);
+      expect(updated[0].position).toEqual({x: 200, y: 300});
+      expect(updated[1].position).toEqual({x: 200, y: 300});
+      expect(updated[2].position).toEqual({x: 3, y: 3});
+    });
+  });
+
+  describe('Validation graph sync', () => {
+    it('should publish the source edges rather than the compact display edges', () => {
+      const displayEdges = [
+        {id: 'e1', source: 'view-1', sourceHandle: 'button-1_NEXT', target: 'execution-stack_exec-a'},
+      ] as Edge[];
+      const sourceEdges = [{id: 'e1', source: 'view-1', sourceHandle: 'button-1_NEXT', target: 'exec-a'}] as Edge[];
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} edges={displayEdges} sourceEdges={sourceEdges} />);
+
+      // A stack rewires an edge onto a synthetic id, which would hide the
+      // element's real target from graph validation rules.
+      expect(mockSetFlowEdges).toHaveBeenCalledWith(sourceEdges);
+    });
+
+    it('should publish the edges as-is when there is no display transform', () => {
+      const edges = [{id: 'e1', source: 'view-1', sourceHandle: 'button-1_NEXT', target: 'exec-a'}] as Edge[];
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} edges={edges} />);
+
+      expect(mockSetFlowEdges).toHaveBeenCalledWith(edges);
+    });
+  });
+
+  describe('Compact Mode Toggle', () => {
+    it('should run the shared auto layout when switching to compact mode', async () => {
+      const {rerender} = renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      expect(mockApplyAutoLayout).not.toHaveBeenCalled();
+
+      mockFlowConfigState.isVerboseMode = false;
+      rerender(<DecoratedVisualFlow {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(mockApplyAutoLayout).toHaveBeenCalled();
+      });
+    });
+
+    it('should run the shared auto layout when switching back to detailed mode', async () => {
+      mockFlowConfigState.isVerboseMode = false;
+      const {rerender} = renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      expect(mockApplyAutoLayout).not.toHaveBeenCalled();
+
+      mockFlowConfigState.isVerboseMode = true;
+      rerender(<DecoratedVisualFlow {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(mockApplyAutoLayout).toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('Node focus on click', () => {
+    it('should focus a node that is still on the canvas', () => {
+      mockGetNodes.mockReturnValue([{id: 'clicked-node', position: {x: 0, y: 0}, data: {}}]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      screen.getByTestId('node-click-trigger').click();
+
+      expect(mockFitView).toHaveBeenCalledWith({
+        nodes: [{id: 'clicked-node'}],
+        padding: 0.3,
+        maxZoom: 1.2,
+        duration: 500,
+      });
+    });
+
+    it('should leave the viewport alone when a node header action is clicked', () => {
+      // Deleting from the node header queues a fitView that resolves after the
+      // node is gone, which fits nothing and snaps the canvas to the origin.
+      mockGetNodes.mockReturnValue([{id: 'clicked-node', position: {x: 0, y: 0}, data: {}}]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      screen.getByTestId('node-action-click-trigger').click();
+
+      expect(mockFitView).not.toHaveBeenCalled();
+    });
+
+    it('should leave the viewport alone when the clicked node is already gone', () => {
+      // Deleting a node clicks it on the way out, and React Flow can deliver
+      // that click after the removal. Fitting to it would match nothing and
+      // snap the canvas to the origin.
+      mockGetNodes.mockReturnValue([{id: 'some-other-node', position: {x: 0, y: 0}, data: {}}]);
+
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+      screen.getByTestId('node-click-trigger').click();
+
+      expect(mockFitView).not.toHaveBeenCalled();
     });
   });
 
@@ -848,6 +1041,30 @@ describe('DecoratedVisualFlow', () => {
           source: {
             data: {
               dragged: {category: 'FIELD'},
+            },
+          },
+          target: {
+            id: 'flow-builder-canvas_test',
+            data: {},
+          },
+        },
+        canceled: false,
+      });
+
+      await waitFor(() => {
+        const dialog = screen.getByTestId('form-requires-view-dialog');
+        expect(dialog).toHaveAttribute('data-scenario', 'input-on-canvas');
+      });
+    });
+
+    it('should handle a SELECT drop on canvas as an input-on-canvas scenario', async () => {
+      renderComponent(<DecoratedVisualFlow {...defaultProps} />);
+
+      triggerCapturedDragEnd({
+        operation: {
+          source: {
+            data: {
+              dragged: {category: 'FIELD', type: 'SELECT'},
             },
           },
           target: {

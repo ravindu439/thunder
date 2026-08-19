@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -1179,6 +1164,48 @@ var (
 			Key: "flows.executor.errors.interaction_required_desc",
 			DefaultValue: "The accumulated authentication assurance does not satisfy the requested " +
 				"acr_values or max_age",
+		},
+	}
+
+	// ErrInvalidRevocationMode is returned when an administrative action receives an unsupported mode.
+	ErrInvalidRevocationMode = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "FET-1083",
+		Error: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.invalid_revocation_mode",
+			DefaultValue: "Invalid revocation mode",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.invalid_revocation_mode_desc",
+			DefaultValue: "The requested revocation mode is not supported for this action",
+		},
+	}
+
+	// ErrUserDeletionNotAllowed is returned when the target user cannot be deleted.
+	ErrUserDeletionNotAllowed = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "FET-1084",
+		Error: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.user_deletion_not_allowed",
+			DefaultValue: "User deletion not allowed",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.user_deletion_not_allowed_desc",
+			DefaultValue: "The user cannot be deleted in the current state",
+		},
+	}
+
+	// ErrUserDeletionFailed is returned when a permitted user deletion cannot be completed.
+	ErrUserDeletionFailed = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "FET-1085",
+		Error: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.user_deletion_failed",
+			DefaultValue: "User deletion failed",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key:          "flows.executor.errors.user_deletion_failed_desc",
+			DefaultValue: "The user could not be deleted",
 		},
 	}
 )

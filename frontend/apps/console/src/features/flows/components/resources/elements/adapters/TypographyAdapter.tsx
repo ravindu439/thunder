@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useTemplateLiteralResolver} from '@thunderid/hooks';
 import {Typography, type TypographyProps} from '@wso2/oxygen-ui';
 import {useMemo, type CSSProperties, type ReactElement, type ReactNode} from 'react';
 import {useTranslation} from 'react-i18next';
 import TemplatePlaceholder, {containsTemplateLiteral} from './TemplatePlaceholder';
-import {VARIANT_TO_MUI_MAP} from '@/features/flows/constants/typographyVariantMaps';
+import {VARIANT_TO_MUI_MAP, COLOR_ENUM_TO_MUI_MAP} from '@/features/flows/constants/typographyVariantMaps';
 import {TypographyVariants, type Element} from '@/features/flows/models/elements';
 
 /**
@@ -38,6 +23,7 @@ export interface TypographyElement extends Element<TypographyConfig> {
   variant: (typeof TypographyVariants)[keyof typeof TypographyVariants];
   label?: string;
   align?: 'inherit' | 'left' | 'center' | 'right' | 'justify';
+  color?: string;
 }
 
 /**
@@ -72,6 +58,8 @@ function TypographyAdapter({resource}: TypographyAdapterPropsInterface): ReactEl
 
   const muiVariant = variantStr ? VARIANT_TO_MUI_MAP[variantStr] : undefined;
   const align = typographyElement?.align;
+  const colorEnum = typographyElement?.color;
+  const color = colorEnum ? COLOR_ENUM_TO_MUI_MAP[colorEnum] : undefined;
 
   const rawLabel = typographyElement?.label ?? '';
   const labelNode: ReactNode = containsTemplateLiteral(rawLabel) ? (
@@ -81,7 +69,7 @@ function TypographyAdapter({resource}: TypographyAdapterPropsInterface): ReactEl
   );
 
   return (
-    <Typography variant={muiVariant} align={align} style={typographyConfig?.styles} {...config}>
+    <Typography variant={muiVariant} align={align} color={color} style={typographyConfig?.styles} {...config}>
       {labelNode}
     </Typography>
   );

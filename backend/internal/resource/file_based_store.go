@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package resource
 
@@ -39,7 +24,7 @@ type fileBasedResourceStore struct {
 }
 
 // newFileBasedResourceStore creates a new file-based resource store.
-func newFileBasedResourceStore() (resourceStoreInterface, transaction.Transactioner, error) {
+func newFileBasedResourceStore() (resourceStoreInterface, providers.Transactioner, error) {
 	genericStore := declarativeresource.NewGenericFileBasedStore(entity.KeyTypeResourceServer)
 	store := &fileBasedResourceStore{
 		GenericFileBasedStore: genericStore,
@@ -463,6 +448,13 @@ func (f *fileBasedResourceStore) GetActionList(
 
 	actions := []providers.Action{}
 
+	// A nil resID selects resource server level actions (actions not attached to any resource),
+	// mirroring the RESOURCE_ID IS NULL semantics of the database store. Declarative resource
+	// servers declare actions only under resources, so there are never any at the server level.
+	if resID == nil {
+		return actions, nil
+	}
+
 	// Iterate through all resource servers
 	for _, item := range list {
 		if rs, ok := item.Data.(*providers.ResourceServer); ok {
@@ -475,8 +467,8 @@ func (f *fileBasedResourceStore) GetActionList(
 			for _, res := range rs.Resources {
 				resUUID := fmt.Sprintf("%s_%s", rs.ID, res.Handle)
 
-				// If resID is specified, only get actions from that resource
-				if resID != nil && resUUID != *resID {
+				// Only get actions from the requested resource
+				if resUUID != *resID {
 					continue
 				}
 

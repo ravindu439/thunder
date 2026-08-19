@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -27,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -150,10 +136,171 @@ func CreateAgentType(schema UserType) (string, error) {
 	return existingID, nil
 }
 
-// DeleteAgentType is a no-op. The server rejects agent type deletion (USRS-1015) — see
-// CreateAgentType for how suites share the singleton `default` schema.
-func DeleteAgentType(_ string) error {
+// AgentTypeSnapshot captures the singleton `default` agent type so a suite that mutates it can put
+// it back. It holds every mutable field, not just the schema: an entity-type update replaces the
+// whole record, so any field left out of the restore payload is silently reset to its zero value.
+// The schema in particular cannot come from the list endpoint, which omits it.
+type AgentTypeSnapshot struct {
+	ID                    string
+	OUID                  string
+	AllowSelfRegistration bool
+	SystemAttributes      map[string]interface{}
+	Schema                map[string]interface{}
+}
+
+// SnapshotAgentType reads the current `default` agent type from the detail endpoint. Suites that
+// call CreateAgentType mutate a singleton every other suite shares, so they must snapshot before
+// and RestoreAgentType after, otherwise the schema and OU they installed leak into later packages.
+func SnapshotAgentType() (*AgentTypeSnapshot, error) {
+	id, err := findDefaultAgentTypeID()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/agent-types/%s", TestServerURL, id), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create agent type request: %w", err)
+	}
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch agent type: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read agent type response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("expected status 200 fetching agent type, got %d: %s",
+			resp.StatusCode, string(body))
+	}
+
+	var detail struct {
+		ID                    string                 `json:"id"`
+		OUID                  string                 `json:"ouId"`
+		AllowSelfRegistration bool                   `json:"allowSelfRegistration"`
+		SystemAttributes      map[string]interface{} `json:"systemAttributes"`
+		Schema                map[string]interface{} `json:"schema"`
+	}
+	if err := json.Unmarshal(body, &detail); err != nil {
+		return nil, fmt.Errorf("failed to parse agent type: %w", err)
+	}
+
+	return &AgentTypeSnapshot{
+		ID:                    detail.ID,
+		OUID:                  detail.OUID,
+		AllowSelfRegistration: detail.AllowSelfRegistration,
+		SystemAttributes:      detail.SystemAttributes,
+		Schema:                detail.Schema,
+	}, nil
+}
+
+// RestoreAgentType puts a snapshot back, then re-reads the type to confirm its OU resolves. If the
+// snapshot's OU no longer exists, because a suite pointed the singleton at an OU it then deleted,
+// the type is restored against the bootstrap `default` OU instead so the PUT cannot fail on a
+// dangling reference.
+func RestoreAgentType(snapshot *AgentTypeSnapshot) error {
+	if snapshot == nil {
+		return errors.New("agent type snapshot is nil")
+	}
+
+	ouID := snapshot.OUID
+	if _, err := GetOrganizationUnit(ouID); err != nil {
+		bootstrapOUID, lookupErr := findBootstrapOUID()
+		if lookupErr != nil {
+			return fmt.Errorf("snapshot OU %s is gone and the bootstrap OU is unavailable: %w",
+				ouID, lookupErr)
+		}
+		ouID = bootstrapOUID
+	}
+
+	// Build the payload by hand rather than through UserType: its AllowSelfRegistration carries
+	// `omitempty`, so a snapshotted `false` would be dropped, and it has no SystemAttributes field at
+	// all. Either omission makes the server reset that field instead of restoring it.
+	payload := map[string]interface{}{
+		"name":                  "default",
+		"ouId":                  ouID,
+		"allowSelfRegistration": snapshot.AllowSelfRegistration,
+		"schema":                snapshot.Schema,
+	}
+	if snapshot.SystemAttributes != nil {
+		payload["systemAttributes"] = snapshot.SystemAttributes
+	}
+
+	if err := putAgentTypeRaw(snapshot.ID, payload); err != nil {
+		return err
+	}
+
+	// Confirm the PUT actually applied. A 200 alone does not prove it: a partial or ignored update
+	// would leave the calling suite's state installed and still look successful here.
+	restored, err := SnapshotAgentType()
+	if err != nil {
+		return fmt.Errorf("failed to re-read the agent type after restoring it: %w", err)
+	}
+	if restored.ID != snapshot.ID {
+		return fmt.Errorf("restored agent type has id %s, want %s", restored.ID, snapshot.ID)
+	}
+	if restored.OUID != ouID {
+		return fmt.Errorf("restored agent type has ouId %s, want %s", restored.OUID, ouID)
+	}
+	if restored.AllowSelfRegistration != snapshot.AllowSelfRegistration {
+		return fmt.Errorf("restored agent type has allowSelfRegistration %t, want %t",
+			restored.AllowSelfRegistration, snapshot.AllowSelfRegistration)
+	}
+	if !reflect.DeepEqual(restored.SystemAttributes, snapshot.SystemAttributes) {
+		return fmt.Errorf("restored agent type systemAttributes do not match the snapshot: got %v, want %v",
+			restored.SystemAttributes, snapshot.SystemAttributes)
+	}
+	if !reflect.DeepEqual(restored.Schema, snapshot.Schema) {
+		return fmt.Errorf("restored agent type schema does not match the snapshot: got %v, want %v",
+			restored.Schema, snapshot.Schema)
+	}
+	if _, err := GetOrganizationUnit(restored.OUID); err != nil {
+		return fmt.Errorf("restored agent type points at unresolvable OU %s: %w", restored.OUID, err)
+	}
 	return nil
+}
+
+// findBootstrapOUID resolves the long-lived `default` organization unit seeded at bootstrap.
+func findBootstrapOUID() (string, error) {
+	req, err := http.NewRequest("GET", TestServerURL+"/organization-units?limit=100", nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create OU list request: %w", err)
+	}
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to list organization units: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read OU list response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("expected status 200 listing organization units, got %d: %s",
+			resp.StatusCode, string(body))
+	}
+
+	var list struct {
+		OrganizationUnits []struct {
+			ID     string `json:"id"`
+			Handle string `json:"handle"`
+		} `json:"organizationUnits"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return "", fmt.Errorf("failed to parse OU list: %w", err)
+	}
+
+	for _, ou := range list.OrganizationUnits {
+		if ou.Handle == "default" {
+			return ou.ID, nil
+		}
+	}
+	return "", errors.New("bootstrap organization unit with handle 'default' not found")
 }
 
 var errAgentTypeNameConflict = errors.New("agent type name conflict")
@@ -200,7 +347,13 @@ func postAgentType(schema UserType) (string, error) {
 }
 
 func putAgentType(schemaID string, schema UserType) error {
-	payload, err := json.Marshal(schema)
+	return putAgentTypeRaw(schemaID, schema)
+}
+
+// putAgentTypeRaw updates an agent type from an arbitrary payload, so a caller can send fields that
+// the UserType struct drops or does not model.
+func putAgentTypeRaw(schemaID string, body interface{}) error {
+	payload, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("failed to marshal agent type: %w", err)
 	}
@@ -299,6 +452,83 @@ func CreateUser(user User) (string, error) {
 	return userID, nil
 }
 
+// ListUserTypes returns every user type visible to the caller, each with its schema.
+//
+// The listing endpoint omits the schema, so each type is fetched individually. Seeding reads every user
+// type in the deployment, so tests asserting seeded defaults use this to check the precondition their
+// expectation depends on rather than assuming no other suite left a type behind.
+func ListUserTypes() ([]UserType, error) {
+	body, err := getJSON(TestServerURL + "/user-types?limit=100")
+	if err != nil {
+		return nil, err
+	}
+
+	var listing struct {
+		TotalResults int `json:"totalResults"`
+		Types        []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"types"`
+	}
+	if err := json.Unmarshal(body, &listing); err != nil {
+		return nil, fmt.Errorf("failed to parse user type listing: %w. Response: %s", err, string(body))
+	}
+	// Callers use this as a deployment-wide precondition, so a truncated page must not read as the whole
+	// deployment.
+	if listing.TotalResults > len(listing.Types) {
+		return nil, fmt.Errorf("user type listing is truncated: %d of %d returned; raise the limit",
+			len(listing.Types), listing.TotalResults)
+	}
+
+	userTypes := make([]UserType, 0, len(listing.Types))
+	for _, item := range listing.Types {
+		detail, err := getJSON(fmt.Sprintf("%s/user-types/%s", TestServerURL, item.ID))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read user type %q: %w", item.Name, err)
+		}
+		var userType UserType
+		if err := json.Unmarshal(detail, &userType); err != nil {
+			return nil, fmt.Errorf("failed to parse user type %q: %w. Response: %s", item.Name, err, string(detail))
+		}
+		userTypes = append(userTypes, userType)
+	}
+	return userTypes, nil
+}
+
+// IsAttributeUnique reports whether the named schema attribute is declared unique on this user type.
+func (u UserType) IsAttributeUnique(attribute string) bool {
+	definition, ok := u.Schema[attribute].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	unique, _ := definition["unique"].(bool)
+	return unique
+}
+
+// getJSON performs an authenticated GET and returns the raw body, failing on any non-200 status.
+func getJSON(url string) ([]byte, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	client := GetHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("expected status 200, got %d. Response: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
 // DeleteUserType deletes a user type by ID
 func DeleteUserType(schemaID string) error {
 	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/user-types/%s", TestServerURL, schemaID), nil)
@@ -387,6 +617,14 @@ func CreateApplication(app Application) (string, error) {
 		redirectURIs = []string{"http://localhost:8080/callback"}
 	}
 
+	// The application type is required. Tests that do not care about the type default to full-stack,
+	// whose flow behavior is derived from the OAuth config shape (matching what an untyped app used
+	// to do). Tests exercising type-specific behavior set Type explicitly.
+	appType := app.Type
+	if appType == "" {
+		appType = "fullstack"
+	}
+
 	inboundAuthConfig := app.InboundAuthConfig
 	if len(inboundAuthConfig) == 0 && !app.Embedded {
 		// Include token-exchange so the default test app is flow-native capable (eligible for a Flow
@@ -425,10 +663,23 @@ func CreateApplication(app Application) (string, error) {
 		appData["allowedUserTypes"] = app.AllowedUserTypes
 	}
 
+	// Add subject attribute mapping if provided
+	if len(app.SubjectAttribute) > 0 {
+		appData["subjectAttribute"] = app.SubjectAttribute
+	}
+
 	// Add assertion config if provided
 	if app.AssertionConfig != nil {
 		appData["assertion"] = app.AssertionConfig
 	}
+
+	// Add login consent config if provided
+	if app.LoginConsent != nil {
+		appData["loginConsent"] = app.LoginConsent
+	}
+
+	// Add the application type (explicit, or defaulted to full-stack above).
+	appData["type"] = appType
 
 	// Add client-level attestation config if provided
 	if app.Attestation != nil {
@@ -652,7 +903,6 @@ var idpPropertyToConnectionField = map[string]string{
 	"token_endpoint":         "tokenEndpoint",
 	"userinfo_endpoint":      "userInfoEndpoint",
 	"jwks_endpoint":          "jwksEndpoint",
-	"logout_endpoint":        "logoutEndpoint",
 	"issuer":                 "issuer",
 	"trusted_token_audience": "trustedTokenAudience",
 }
@@ -673,11 +923,16 @@ func idpToConnectionBody(idp IDP) map[string]interface{} {
 			body["scopes"] = strings.Split(prop.Value, ",")
 		case "token_exchange_enabled":
 			body["tokenExchangeEnabled"] = prop.Value == "true"
+		case "id_jag_enabled":
+			body["idJagEnabled"] = prop.Value == "true"
 		default:
 			if field, ok := idpPropertyToConnectionField[prop.Name]; ok {
 				body[field] = prop.Value
 			}
 		}
+	}
+	if idp.AttributeConfiguration != nil {
+		body["attributeConfiguration"] = idp.AttributeConfiguration
 	}
 	return body
 }
@@ -708,6 +963,16 @@ func connectionBodyToIDP(idpType string, resp map[string]interface{}) *IDP {
 			}
 		}
 		idp.Properties = append(idp.Properties, IDPProperty{Name: "scopes", Value: strings.Join(parts, ",")})
+	}
+	// Round-tripped through JSON because the response arrives as a generic map. A malformed section is
+	// left nil rather than failing the conversion, so callers assert on it instead of on a parse error.
+	if raw, ok := resp["attributeConfiguration"]; ok && raw != nil {
+		if encoded, err := json.Marshal(raw); err == nil {
+			var config AttributeConfiguration
+			if err := json.Unmarshal(encoded, &config); err == nil {
+				idp.AttributeConfiguration = &config
+			}
+		}
 	}
 	return idp
 }
@@ -1232,9 +1497,9 @@ func CreateResourceServerWithActions(rs ResourceServer, actions []Action) (strin
 	for i, action := range actions {
 		_, err := createAction(rsID, action)
 		if err != nil {
-			// Cleanup: delete the resource server on failure
-			DeleteResourceServer(rsID)
-			return "", fmt.Errorf("failed to create action %d: %w", i, err)
+			// Roll back through the child-aware delete: any action created before this one blocks a
+			// plain resource-server delete, so a partially built server would otherwise survive.
+			return "", rollbackResourceServer(rsID, fmt.Errorf("failed to create action %d: %w", i, err))
 		}
 	}
 
@@ -1358,6 +1623,9 @@ func GetResourceServerByName(name string) (string, error) {
 	return "", fmt.Errorf("resource server with name %q not found", name)
 }
 
+// DeleteResourceServer deletes a resource server that owns no resources or actions. The server
+// refuses the delete with RES-1006 while any dependency remains, so a server built with resources or
+// actions must go through DeleteResourceServerWithChildren instead.
 func DeleteResourceServer(rsID string) error {
 	client := GetHTTPClient()
 
@@ -1369,6 +1637,71 @@ func DeleteResourceServer(rsID string) error {
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to delete resource server: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("expected status 204, got %d. Response: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
+}
+
+// CreateAction creates an action on a resource server and returns the action ID.
+func CreateAction(resourceServerID string, action Action) (string, error) {
+	return createAction(resourceServerID, action)
+}
+
+// GetActionsByResourceServer returns the IDs of the actions defined on a resource server.
+func GetActionsByResourceServer(resourceServerID string) ([]string, error) {
+	client := GetHTTPClient()
+
+	url := fmt.Sprintf("%s/resource-servers/%s/actions", TestServerURL, resourceServerID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create list-actions request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list actions: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("expected status 200, got %d. Response: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp struct {
+		Actions []struct {
+			ID string `json:"id"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal actions response: %w", err)
+	}
+
+	actionIDs := make([]string, 0, len(listResp.Actions))
+	for _, action := range listResp.Actions {
+		actionIDs = append(actionIDs, action.ID)
+	}
+	return actionIDs, nil
+}
+
+// DeleteAction deletes an action from a resource server.
+func DeleteAction(resourceServerID, actionID string) error {
+	client := GetHTTPClient()
+
+	url := fmt.Sprintf("%s/resource-servers/%s/actions/%s", TestServerURL, resourceServerID, actionID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete action: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -1408,6 +1741,101 @@ func PutDefaultResourceServer(resourceServerID string) error {
 	return nil
 }
 
+// GetWritableServerConfig returns the writable layer of the named server-config section, so a
+// caller can restore exactly what was there rather than guessing at a default. An absent layer is
+// reported as an empty object.
+func GetWritableServerConfig(section string) (json.RawMessage, error) {
+	url := fmt.Sprintf("%s/server-config/%s", TestServerURL, section)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %s server config request: %w", section, err)
+	}
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s server config: %w", section, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s server config response: %w", section, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("expected status 200 reading %s server config, got %d. Response: %s",
+			section, resp.StatusCode, string(body))
+	}
+
+	var layers struct {
+		Writable json.RawMessage `json:"writable"`
+	}
+	if err := json.Unmarshal(body, &layers); err != nil {
+		return nil, fmt.Errorf("failed to parse %s server config: %w", section, err)
+	}
+
+	if len(layers.Writable) == 0 {
+		return json.RawMessage("{}"), nil
+	}
+	return layers.Writable, nil
+}
+
+// PutWritableServerConfig replaces the writable layer of the named server-config section.
+func PutWritableServerConfig(section string, body []byte) error {
+	url := fmt.Sprintf("%s/server-config/%s", TestServerURL, section)
+
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create %s server config request: %w", section, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update %s server config: %w", section, err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read %s server config response: %w", section, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("expected status 200 updating %s server config with %s, got %d. Response: %s",
+			section, string(body), resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// MergeWritableServerConfig applies the given top-level keys over the current writable layer of the
+// section and writes the result back, returning the layer as it was beforehand.
+//
+// Merging rather than replacing keeps sibling keys that the caller did not set, which a bare PUT
+// would drop. The returned value is what the caller restores when it is done.
+func MergeWritableServerConfig(section string, patch map[string]interface{}) (json.RawMessage, error) {
+	original, err := GetWritableServerConfig(section)
+	if err != nil {
+		return nil, err
+	}
+
+	merged := make(map[string]interface{})
+	if err := json.Unmarshal(original, &merged); err != nil {
+		return nil, fmt.Errorf("failed to parse writable %s server config: %w", section, err)
+	}
+	for key, value := range patch {
+		merged[key] = value
+	}
+
+	body, err := json.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal %s server config: %w", section, err)
+	}
+	if err := PutWritableServerConfig(section, body); err != nil {
+		return nil, err
+	}
+	return original, nil
+}
+
 // createAction creates an action on a resource server via API and returns the action ID
 func createAction(resourceServerID string, action Action) (string, error) {
 	client := GetHTTPClient()
@@ -1442,6 +1870,304 @@ func createAction(resourceServerID string, action Action) (string, error) {
 	}
 
 	return createdAction.ID, nil
+}
+
+// CreateResource creates a resource under a resource server via API and returns the created
+// resource ID. parentID may be empty to create a top-level resource.
+func CreateResource(resourceServerID, name, handle, parentID string) (string, error) {
+	client := GetHTTPClient()
+
+	body := map[string]interface{}{"name": name, "handle": handle}
+	if parentID != "" {
+		body["parent"] = parentID
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal resource: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/resource-servers/%s/resources", TestServerURL, resourceServerID)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("expected status 201, got %d. Response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(bodyBytes, &created); err != nil {
+		return "", fmt.Errorf("failed to unmarshal resource response: %w", err)
+	}
+	return created.ID, nil
+}
+
+// createActionUnderResource creates an action nested under a resource and returns the action ID.
+func createActionUnderResource(resourceServerID, resourceID string, action Action) (string, error) {
+	client := GetHTTPClient()
+
+	actionJSON, err := json.Marshal(action)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal action: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/resource-servers/%s/resources/%s/actions", TestServerURL, resourceServerID, resourceID)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(actionJSON))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("expected status 201, got %d. Response: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(bodyBytes, &created); err != nil {
+		return "", fmt.Errorf("failed to unmarshal action response: %w", err)
+	}
+	return created.ID, nil
+}
+
+// CreateSystemScopedResourceServer creates a custom resource server that reproduces the
+// hierarchical "system:<handle>:view" permission strings used by the built-in system management
+// APIs. The product ships only the root "system" scope by default; this helper simulates an
+// operator declaring fine-grained scopes, letting the authz suites verify that resource-level
+// permissions still enforce when configured. It builds a "system" root resource, then one child
+// resource per handle (each with a "view" action), yielding the permissions "system",
+// "system:<handle>" and "system:<handle>:view". Returns the resource server ID; delete it with
+// DeleteResourceServerWithChildren during teardown — a plain DeleteResourceServer is refused with
+// RES-1006 while the resources and actions built here still exist.
+func CreateSystemScopedResourceServer(ouID, name, identifier string, childHandles ...string) (string, error) {
+	rsID, err := createResourceServer(ResourceServer{
+		Name:       name,
+		Identifier: identifier,
+		OUID:       ouID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create resource server: %w", err)
+	}
+
+	systemID, err := CreateResource(rsID, "System", "system", "")
+	if err != nil {
+		return "", rollbackResourceServer(rsID, fmt.Errorf("failed to create system resource: %w", err))
+	}
+
+	for _, handle := range childHandles {
+		childID, err := CreateResource(rsID, handle, handle, systemID)
+		if err != nil {
+			return "", rollbackResourceServer(rsID, fmt.Errorf("failed to create %q resource: %w", handle, err))
+		}
+		if _, err := createActionUnderResource(rsID, childID, Action{Name: "View", Handle: "view"}); err != nil {
+			return "", rollbackResourceServer(rsID, fmt.Errorf("failed to create view action for %q: %w", handle, err))
+		}
+	}
+
+	return rsID, nil
+}
+
+// rollbackResourceServer deletes a partially built resource server after a setup step failed. It
+// returns the original cause, wrapping any cleanup failure so neither error is silently discarded.
+func rollbackResourceServer(rsID string, cause error) error {
+	if delErr := DeleteResourceServerWithChildren(rsID); delErr != nil {
+		return fmt.Errorf("%w (resource server cleanup also failed: %v)", cause, delErr)
+	}
+	return cause
+}
+
+// DeleteResourceServerWithChildren removes a resource server together with its resource tree and
+// every action it owns. A plain DELETE on a resource server that still has dependencies is refused
+// with RES-1006, so any server built by CreateSystemScopedResourceServer or
+// CreateResourceServerWithActions must be torn down through here or it survives in the shared
+// database.
+//
+// Actions live at two levels and both block deletion: CreateSystemScopedResourceServer attaches them
+// to resources, while CreateResourceServerWithActions attaches them directly to the server.
+func DeleteResourceServerWithChildren(rsID string) error {
+	// Collect the tree depth-first so children are always deleted before their parents. The list
+	// endpoint returns only one level: without a parentId it yields the top-level resources, so the
+	// nested ones are invisible unless each level is walked explicitly.
+	ordered, err := collectResourceIDsDeepestFirst(rsID, "")
+	if err != nil {
+		return err
+	}
+
+	for _, resourceID := range ordered {
+		actions, actionErr := ListActionIDsAtResource(rsID, resourceID)
+		if actionErr != nil {
+			return actionErr
+		}
+		for _, actionID := range actions {
+			if delErr := deleteActionAtResource(rsID, resourceID, actionID); delErr != nil {
+				return delErr
+			}
+		}
+		if delErr := deleteResource(rsID, resourceID); delErr != nil {
+			return fmt.Errorf("failed to delete resource %s of resource server %s: %w",
+				resourceID, rsID, delErr)
+		}
+	}
+
+	serverActions, err := ListActionIDsAtResourceServer(rsID)
+	if err != nil {
+		return err
+	}
+	for _, actionID := range serverActions {
+		if delErr := DeleteAction(rsID, actionID); delErr != nil {
+			return fmt.Errorf("failed to delete action %s of resource server %s: %w",
+				actionID, rsID, delErr)
+		}
+	}
+
+	return DeleteResourceServer(rsID)
+}
+
+// ListActionIDsAtResourceServer returns the IDs of actions attached directly to a resource server,
+// as opposed to those attached to one of its resources.
+func ListActionIDsAtResourceServer(rsID string) ([]string, error) {
+	body, err := getJSON(fmt.Sprintf("%s/resource-servers/%s/actions?limit=100", TestServerURL, rsID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list actions of resource server %s: %w", rsID, err)
+	}
+
+	var list struct {
+		Actions []struct {
+			ID string `json:"id"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse action list: %w", err)
+	}
+
+	ids := make([]string, 0, len(list.Actions))
+	for _, action := range list.Actions {
+		ids = append(ids, action.ID)
+	}
+	return ids, nil
+}
+
+// collectResourceIDsDeepestFirst returns the resource subtree under parentID, children ahead of
+// their parents.
+func collectResourceIDsDeepestFirst(rsID, parentID string) ([]string, error) {
+	children, err := ListResourceIDs(rsID, parentID)
+	if err != nil {
+		return nil, err
+	}
+
+	ordered := make([]string, 0, len(children))
+	for _, child := range children {
+		descendants, descErr := collectResourceIDsDeepestFirst(rsID, child)
+		if descErr != nil {
+			return nil, descErr
+		}
+		ordered = append(ordered, descendants...)
+		ordered = append(ordered, child)
+	}
+	return ordered, nil
+}
+
+// ListResourceIDs returns the IDs of resources directly under parentID. An empty parentID lists the
+// top-level resources, which requires omitting the query parameter entirely: sending `parentId=`
+// makes the server look up a resource whose id is the empty string and answer 404.
+func ListResourceIDs(rsID, parentID string) ([]string, error) {
+	requestURL := fmt.Sprintf("%s/resource-servers/%s/resources?limit=100", TestServerURL, rsID)
+	if parentID != "" {
+		requestURL += "&parentId=" + url.QueryEscape(parentID)
+	}
+
+	body, err := getJSON(requestURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list resources of resource server %s: %w", rsID, err)
+	}
+
+	var list struct {
+		Resources []struct {
+			ID string `json:"id"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse resource list: %w", err)
+	}
+
+	ids := make([]string, 0, len(list.Resources))
+	for _, resource := range list.Resources {
+		ids = append(ids, resource.ID)
+	}
+	return ids, nil
+}
+
+// ListActionIDsAtResource returns the IDs of actions defined directly on a resource.
+func ListActionIDsAtResource(rsID, resourceID string) ([]string, error) {
+	body, err := getJSON(fmt.Sprintf("%s/resource-servers/%s/resources/%s/actions?limit=100",
+		TestServerURL, rsID, resourceID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list actions of resource %s: %w", resourceID, err)
+	}
+
+	var list struct {
+		Actions []struct {
+			ID string `json:"id"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return nil, fmt.Errorf("failed to parse action list: %w", err)
+	}
+
+	ids := make([]string, 0, len(list.Actions))
+	for _, action := range list.Actions {
+		ids = append(ids, action.ID)
+	}
+	return ids, nil
+}
+
+func deleteActionAtResource(rsID, resourceID, actionID string) error {
+	return deleteURL(fmt.Sprintf("%s/resource-servers/%s/resources/%s/actions/%s",
+		TestServerURL, rsID, resourceID, actionID))
+}
+
+func deleteResource(rsID, resourceID string) error {
+	return deleteURL(fmt.Sprintf("%s/resource-servers/%s/resources/%s",
+		TestServerURL, rsID, resourceID))
+}
+
+// deleteURL issues a DELETE and requires a 204.
+func deleteURL(url string) error {
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send delete request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("expected status 204, got %d. Response: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 // CreateFlow creates a flow via API and returns the flow ID
@@ -1506,6 +2232,45 @@ func CreateIsolatedAuthFlow(handle string) (string, error) {
 				"id":        "auth_assert",
 				"type":      "TASK_EXECUTION",
 				"executor":  map[string]interface{}{"name": "AuthAssertExecutor"},
+				"onSuccess": "end",
+			},
+			{
+				"id":   "end",
+				"type": "END",
+			},
+		},
+	})
+}
+
+// CreateIsolatedRegistrationFlow creates a minimal REGISTRATION flow suitable for tests that need
+// an app with IsRegistrationFlowEnabled set without triggering cross-type reference validation.
+// The handle is caller-supplied so tests can craft unique values per suite and clean up
+// deterministically.
+func CreateIsolatedRegistrationFlow(handle string) (string, error) {
+	return CreateFlow(Flow{
+		Name:     "Isolated Registration Flow " + handle,
+		FlowType: "REGISTRATION",
+		Handle:   handle,
+		Nodes: []map[string]interface{}{
+			{
+				"id":        "start",
+				"type":      "START",
+				"onSuccess": "user_type_resolver",
+			},
+			{
+				"id":   "user_type_resolver",
+				"type": "TASK_EXECUTION",
+				"executor": map[string]interface{}{
+					"name": "UserTypeResolver",
+				},
+				"onSuccess": "provisioning",
+			},
+			{
+				"id":   "provisioning",
+				"type": "TASK_EXECUTION",
+				"executor": map[string]interface{}{
+					"name": "ProvisioningExecutor",
+				},
 				"onSuccess": "end",
 			},
 			{
@@ -1846,4 +2611,120 @@ func GetAgent(agentID string) (*Agent, error) {
 		return nil, fmt.Errorf("failed to decode get agent response: %w", err)
 	}
 	return &a, nil
+}
+
+// UpdateRole replaces a role by ID. Used to change a role's permissions or assignments after tokens
+// have been issued against them.
+func UpdateRole(roleID string, role Role) error {
+	roleJSON, err := json.Marshal(role)
+	if err != nil {
+		return fmt.Errorf("failed to marshal role: %w", err)
+	}
+
+	req, err := http.NewRequest("PUT", TestServerURL+"/roles/"+roleID, bytes.NewReader(roleJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update role: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update role, status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// UpdateUserCredentials sets new credentials (e.g. a password) for a user, the way an administrative
+// password reset does.
+func UpdateUserCredentials(userID string, credentials map[string]string) error {
+	credsJSON, err := json.Marshal(credentials)
+	if err != nil {
+		return fmt.Errorf("failed to marshal credentials: %w", err)
+	}
+	payload, err := json.Marshal(map[string]json.RawMessage{"credentials": credsJSON})
+	if err != nil {
+		return fmt.Errorf("failed to marshal credential update request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST",
+		TestServerURL+"/users/"+userID+"/update-credentials", bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update user credentials: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update user credentials, status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// UpdateApplication replaces an application by ID. Supplying a new client secret on the OAuth inbound
+// auth config rotates it.
+func UpdateApplication(appID string, app Application) error {
+	appJSON, err := json.Marshal(app)
+	if err != nil {
+		return fmt.Errorf("failed to marshal application: %w", err)
+	}
+
+	req, err := http.NewRequest("PUT", TestServerURL+"/applications/"+appID, bytes.NewReader(appJSON))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := GetHTTPClient().Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update application: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update application, status %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// RemoveRoleAssignments unassigns the given subjects from a role, the way an administrator revoking a
+// user's role does. Assignments are a sub-resource of the role, so a role update does not carry them.
+func RemoveRoleAssignments(roleID string, assignments []Assignment) error {
+	return removeRoleAssignments(roleID, assignments, GetHTTPClient())
+}
+
+// DeleteResource deletes a resource from a resource server. A resource server cannot be deleted
+// while it still has resources, so suites that build a resource tree must remove it leaf first.
+func DeleteResource(resourceServerID, resourceID string) error {
+	client := GetHTTPClient()
+
+	url := fmt.Sprintf("%s/resource-servers/%s/resources/%s", TestServerURL, resourceServerID, resourceID)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to delete resource: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("expected status 204, got %d. Response: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
 }

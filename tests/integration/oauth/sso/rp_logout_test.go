@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package sso
 
@@ -70,6 +55,29 @@ func (ts *SSOLogoutTestSuite) TestRPInitiatedLogoutEndsSession() {
 	ts.Equal("VIEW", reAuthStep.Type, "the re-prompt should render the credential input view")
 	ts.NotNil(reAuthStep.Data, "the credential prompt should carry view data")
 	ts.Empty(reAuthStep.Assertion, "no assertion should be issued when credentials are still required")
+}
+
+// TestRPInitiatedLogoutRevokesTokenFamily proves that signing out revokes the login's token family:
+// after logout the access token issued for that session is rejected by introspection, even though it
+// has not yet expired.
+func (ts *SSOLogoutTestSuite) TestRPInitiatedLogoutRevokesTokenFamily() {
+	client := ts.newSessionClient()
+
+	tokens := ts.loginTokens(client, logoutUsername, "logout_revoke_state_1")
+	ts.Require().NotEmpty(tokens.AccessToken, "login should issue an access token")
+	ts.Require().True(ts.introspectActive(client, tokens.AccessToken),
+		"the access token should be active right after login")
+
+	executionID, logoutID := ts.initiateLogout(client, tokens.IDToken, postLogoutRedirectURI, "logout_revoke_state_2")
+	ts.Require().NotEmpty(executionID)
+	ts.Require().NotEmpty(logoutID)
+
+	step := ts.flowExecute(client, map[string]interface{}{"executionId": executionID})
+	ts.Require().Equal("COMPLETE", step.FlowStatus, "the sign-out flow should complete")
+	ts.completeLogout(client, logoutID)
+
+	ts.False(ts.introspectActive(client, tokens.AccessToken),
+		"signing out must revoke the session's token family, so its access token is no longer active")
 }
 
 // initiateLogout posts to the end_session_endpoint and returns the sign-out flow executionId and the

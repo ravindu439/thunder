@@ -1,28 +1,12 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {type Edge, type Node, useReactFlow} from '@xyflow/react';
 import {useEffect} from 'react';
 import useFlowPlugins from './useFlowPlugins';
 import useUIPanelState from './useUIPanelState';
 import VisualFlowConstants from '../constants/VisualFlowConstants';
-import {ActionTypes} from '../models/actions';
-import {type Element, ElementCategories} from '../models/elements';
+import {type Element} from '../models/elements';
 import {StepTypes} from '../models/steps';
 
 /**
@@ -33,8 +17,8 @@ import {StepTypes} from '../models/steps';
  */
 const useDeleteExecutionResource = (): void => {
   const {setIsOpenResourcePropertiesPanel} = useUIPanelState();
-  const {getEdges, getNodes, updateNodeData, setNodes} = useReactFlow();
-  const {onNodeDelete, onNodeElementDelete} = useFlowPlugins();
+  const {getEdges, getNodes, updateNodeData} = useReactFlow();
+  const {onNodeDelete} = useFlowPlugins();
 
   /**
    * Deletes associated execution components when execution nodes are removed.
@@ -97,29 +81,8 @@ const useDeleteExecutionResource = (): void => {
     return true;
   }
 
-  /**
-   * Deletes the execution node when a execution action is removed.
-   *
-   * @param _stepId - The ID of the step from which the element is being deleted.
-   * @param element - The element being deleted, which is expected to be a execution action.
-   * @returns Returns true if the deletion was successful.
-   */
-  function deleteExecutionNode(_stepId: string, element: Element): boolean {
-    const action = element.action as {type?: string; onSuccess?: string} | undefined;
-
-    if (element.category === ElementCategories.Action && action?.type === ActionTypes.Next) {
-      setNodes((nodes: Node[]) =>
-        nodes?.filter((node: Node) => node.id !== action?.onSuccess || node.type !== StepTypes.Execution),
-      );
-    }
-
-    return true;
-  }
-
   // eslint-disable-next-line react-hooks/exhaustive-deps -- handlers use state-getter pattern (getNodes, getEdges) so they're safe with empty deps
   useEffect(() => onNodeDelete(deleteExecutionActionNode), [onNodeDelete]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => onNodeElementDelete(deleteExecutionNode), [onNodeElementDelete]);
 };
 
 export default useDeleteExecutionResource;

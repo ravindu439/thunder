@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Organization Unit Response Model
@@ -93,6 +78,46 @@ export interface OrganizationUnit {
    * @example 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
    */
   layoutId?: string | null;
+
+  /**
+   * Sign-in (authentication) flow ID. Applications created under this organization unit can
+   * snapshot this flow instead of building their own.
+   * @example '550e8400-e29b-41d4-a716-446655440000'
+   */
+  authFlowId?: string | null;
+
+  /**
+   * Sign-up (registration) flow ID.
+   * @example '550e8400-e29b-41d4-a716-446655440000'
+   */
+  registrationFlowId?: string | null;
+
+  /**
+   * Whether the default sign-up flow is enabled.
+   */
+  isRegistrationFlowEnabled?: boolean;
+
+  /**
+   * Recovery flow ID.
+   * @example '550e8400-e29b-41d4-a716-446655440000'
+   */
+  recoveryFlowId?: string | null;
+
+  /**
+   * Whether the default recovery flow is enabled.
+   */
+  isRecoveryFlowEnabled?: boolean;
+
+  /**
+   * Sign-out flow ID.
+   * @example '550e8400-e29b-41d4-a716-446655440000'
+   */
+  signOutFlowId?: string | null;
+
+  /**
+   * Whether the default sign-out flow is enabled.
+   */
+  isSignOutFlowEnabled?: boolean;
 
   /**
    * Organization unit logo URL

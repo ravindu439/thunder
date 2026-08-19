@@ -18,7 +18,9 @@ servers:
 
 tags:
   - name: Flow Execution
-    description: Execute app native authentication and registration flow steps.
+    description: >-
+      Execute app native authentication and registration flow steps, and run administration flows by
+      their flow identifier.
 
 security: []
 
@@ -27,14 +29,22 @@ paths:
     post:
       summary: Execute a flow step
       description: >-
-        Execute a step in an authentication flow. Backend/server-side applications must present
+        Execute a step in a flow. Backend/server-side applications must present
         their Flow Secret in the `Flow-Secret` header (see the `FlowSecret` security scheme) when
         initiating a new flow; the header is ignored for other application types.
+
+        A flow is initiated either by `applicationId` and `flowType`, or, for administration flows
+        only, by `flowId`. Initiating by `flowId` requires an access token carrying the `system`
+        scope, and the referenced flow must be of type `ADMINISTRATION`; any other flow type is
+        rejected with `403`. Supplying the step's inputs on the initiating request runs the flow
+        through to its terminal state in a single call; omitting them returns the required inputs and
+        an `executionId` to continue with.
       tags:
         - Flow Execution
       security:
         - {}
         - FlowSecret: []
+        - OAuth2: [system]
       parameters:
         - in: header
           name: Attestation-Token
@@ -52,6 +62,7 @@ paths:
             schema:
               oneOf:
                 - $ref: '#/components/schemas/InitialFlowRequest'
+                - $ref: '#/components/schemas/AdministrativeFlowRequest'
                 - $ref: '#/components/schemas/SubSequentFlowRequest'
             examples:
               initialRequest:
@@ -64,6 +75,24 @@ paths:
                 value:
                   applicationId: "550e8400-e29b-41d4-a716-446655440000"
                   flowType: "AUTHENTICATION"
+              initialSignOutRequest:
+                summary: Initial request to terminate the SSO session established for the application
+                value:
+                  applicationId: "550e8400-e29b-41d4-a716-446655440000"
+                  flowType: "SIGNOUT"
+              administrativeFlowSingleCall:
+                summary: Administration flow run to completion in one call (inputs supplied up front)
+                value:
+                  flowId: "019fd0b5-e8fe-7852-9b5a-1e2757ed85b8"
+                  verbose: true
+                  inputs: {
+                    "subject": "019fd0e4-de6c-7ea5-9541-7982f40beeb9"
+                  }
+              administrativeFlowFirstStep:
+                summary: Administration flow initiated without inputs, returning the inputs to supply next
+                value:
+                  flowId: "019fd0b5-e8fe-7852-9b5a-1e2757ed85b8"
+                  verbose: true
               subSequentRequestExample:
                 summary: Subsequent request
                 value:
@@ -241,6 +270,21 @@ components:
         Flow Secret used to authenticate backend/server-side applications when initiating a flow
         directly. Required for non-public clients that do not use the redirect-based
         authorization_code flow; ignored for other applications.
+    OAuth2:
+      type: oauth2
+      description: >-
+        Access token used to authenticate the administrator initiating an administration flow by
+        `flowId`. The token must carry the `system` scope.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://localhost:8090/oauth2/authorize
+          tokenUrl: https://localhost:8090/oauth2/token
+          scopes:
+            system: Access to system management APIs
+        clientCredentials:
+          tokenUrl: https://localhost:8090/oauth2/token
+          scopes:
+            system: Access to system management APIs
   schemas:
     InitialFlowRequest:
       type: object
@@ -259,7 +303,42 @@ components:
             - AUTHENTICATION
             - REGISTRATION
             - RECOVERY
+            - SIGNOUT
           example: "AUTHENTICATION"
+        verbose:
+          type: boolean
+          description: When true, the response includes full UI metadata (meta/components) for prompt nodes
+          example: false
+
+    AdministrativeFlowRequest:
+      type: object
+      description: >-
+        Initiates an administration flow by its identifier. Only flows of type `ADMINISTRATION` may
+        be started this way, and the caller must present an access token carrying the `system` scope.
+      required:
+        - flowId
+      properties:
+        flowId:
+          type: string
+          description: >-
+            Identifier of the administration flow to execute. The flow must be of type
+            `ADMINISTRATION`; any other flow type is rejected.
+          example: "019fd0b5-e8fe-7852-9b5a-1e2757ed85b8"
+        inputs:
+          type: object
+          description: >-
+            Input data for the flow. Supplying every required input here runs the flow to its
+            terminal state in this single call; omitting them returns the inputs to supply on a
+            follow-up request.
+          additionalProperties:
+            type: string
+          example: {
+            "subject": "019fd0e4-de6c-7ea5-9541-7982f40beeb9"
+          }
+        action:
+          type: string
+          description: Reference of the action to execute in the flow
+          example: "submit"
         verbose:
           type: boolean
           description: When true, the response includes full UI metadata (meta/components) for prompt nodes
@@ -372,6 +451,12 @@ components:
           example: "ERROR"
         error:
           $ref: '#/components/schemas/Error'
+        errorAssertion:
+          type: string
+          description: |
+            Optionally returned signed JWT error assertion. It carries the flow error type and description bound to 
+            that authorization request.
+          example: "<jwt_token>"
 
     Data:
       type: object
@@ -446,9 +531,9 @@ components:
         type:
           type: string
           description: |
-            Action type forwarded from the PROMPT node definition. Predefined values are
-            `SUBMIT` (approve/confirm) and `REJECT` (deny/cancel). Custom strings are also
-            accepted for executor-specific routing.
+            Action type forwarded from the PROMPT node definition. The value is an opaque string:
+            the flow author and the executor that consumes it agree on the vocabulary, so the
+            recognized values are documented by that executor rather than fixed here.
           example: "SUBMIT"
 
     Input:
@@ -549,6 +634,12 @@ components:
           $ref: '#/components/schemas/I18nMessage'
         description:
           $ref: '#/components/schemas/I18nMessage'
+        errorAssertion:
+          type: string
+          description: |
+            Optionally returned signed JWT error assertion. It carries the flow error type and description bound to 
+            that authorization request.
+          example: "<jwt_token>"
 
     I18nMessage:
       type: object

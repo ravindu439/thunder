@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {screen, fireEvent, waitFor, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
@@ -171,6 +156,40 @@ describe('ManageChildOrganizationUnitSection', () => {
     );
 
     expect(screen.getByRole('grid')).toBeInTheDocument();
+  });
+
+  it('should render an inline read error state instead of the grid when the query fails', () => {
+    mockUseGetChildOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+    });
+
+    renderWithProviders(
+      <ManageChildOrganizationUnitSection organizationUnitId="ou-parent" organizationUnitName="Engineering" />,
+    );
+
+    expect(screen.getByText('Failed to load child organization units')).toBeInTheDocument();
+    expect(screen.queryByRole('grid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  it('should refetch when the retry action is clicked', () => {
+    const mockRefetch = vi.fn();
+    mockUseGetChildOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetch,
+    });
+
+    renderWithProviders(
+      <ManageChildOrganizationUnitSection organizationUnitId="ou-parent" organizationUnitName="Engineering" />,
+    );
+
+    fireEvent.click(screen.getByText('Refresh'));
+
+    expect(mockRefetch).toHaveBeenCalledTimes(1);
   });
 
   it('should call useGetChildOrganizationUnits with correct ID', () => {

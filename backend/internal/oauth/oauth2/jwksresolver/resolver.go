@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package jwksresolver provides utilities for resolving RSA encryption keys from
 // a relying party's JWKS (inline or remote URI). It is intentionally RSA- and
@@ -23,18 +8,17 @@ package jwksresolver
 
 import (
 	"context"
-	"crypto"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 
 	certmodel "github.com/thunder-id/thunderid/internal/cert"
 	inboundmodel "github.com/thunder-id/thunderid/internal/inboundclient/model"
 	syshttp "github.com/thunder-id/thunderid/internal/system/http"
-	"github.com/thunder-id/thunderid/internal/system/jose/jws"
 	"github.com/thunder-id/thunderid/internal/system/log"
 )
 
@@ -67,14 +51,14 @@ func newJWKSResolver(httpClient syshttp.HTTPClientInterface) *Resolver {
 }
 
 // ResolveEncryptionKey resolves the RP's RSA public key from the application certificate.
-// It returns the public key and the kid from the matching JWK entry (empty string when absent).
+// It returns the public key JWK and the kid from the matching JWK entry (empty string when absent).
 // encryptionAlg is used to filter incompatible keys. policy controls "use" field strictness.
 func (r *Resolver) ResolveEncryptionKey(
 	ctx context.Context,
 	certificate *inboundmodel.Certificate,
 	encryptionAlg string,
 	policy KeyUsePolicy,
-) (crypto.PublicKey, string, *tidcommon.ServiceError) {
+) (map[string]interface{}, string, *tidcommon.ServiceError) {
 	if certificate == nil || certificate.Type == "" {
 		r.logger.Error(ctx, "No certificate configured for encryption key resolution")
 		return nil, "", &tidcommon.InternalServerError
@@ -149,7 +133,7 @@ func (r *Resolver) parseEncryptionKeyFromJWKS(ctx context.Context,
 	jwksData []byte,
 	encryptionAlg string,
 	policy KeyUsePolicy,
-) (crypto.PublicKey, string, *tidcommon.ServiceError) {
+) (map[string]interface{}, string, *tidcommon.ServiceError) {
 	var jwksObj struct {
 		Keys []map[string]interface{} `json:"keys"`
 	}
@@ -171,23 +155,33 @@ func (r *Resolver) parseEncryptionKeyFromJWKS(ctx context.Context,
 				continue
 			}
 		}
-		kty, _ := key["kty"].(string)
-		if kty != "RSA" {
-			continue
-		}
+
 		// Only filter by alg when the field is explicitly present.
 		if keyAlg, _ := key["alg"].(string); keyAlg != "" && keyAlg != encryptionAlg {
 			continue
 		}
-		pub, err := jws.JWKToPublicKey(key)
-		if err == nil && pub != nil {
-			kid, _ := key["kid"].(string)
-			return pub, kid, nil
+
+		// The key type must be compatible with the requested key encryption algorithm
+		// family, since "alg" is frequently absent from JWKS entries.
+		if kty, _ := key["kty"].(string); kty != keyTypeForEncryptionAlg(encryptionAlg) {
+			continue
 		}
+
+		kid, _ := key["kid"].(string)
+		return key, kid, nil
 	}
 
-	r.logger.Error(ctx, "No suitable RSA encryption key found in JWKS", log.String("alg", encryptionAlg))
+	r.logger.Error(ctx, "No suitable encryption key found in JWKS", log.String("alg", encryptionAlg))
 	return nil, "", &tidcommon.InternalServerError
+}
+
+// keyTypeForEncryptionAlg returns the JWK "kty" required by the given JWE key encryption
+// algorithm: "RSA" for RSA-OAEP variants, "EC" for ECDH-ES variants.
+func keyTypeForEncryptionAlg(encryptionAlg string) string {
+	if strings.HasPrefix(encryptionAlg, "ECDH-ES") {
+		return "EC"
+	}
+	return "RSA"
 }
 
 // jwksEndpoint returns the scheme and host of the given URI for safe log output,

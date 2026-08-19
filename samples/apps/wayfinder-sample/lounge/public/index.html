@@ -1,10 +1,6 @@
 <!--
- Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
-
- WSO2 LLC. licenses this file to you under the Apache License,
- Version 2.0 (the "License"); you may not use this file except
- in compliance with the License. You may obtain a copy of the License at
- http://www.apache.org/licenses/LICENSE-2.0
+    Copyright 2026 The ThunderID Authors
+    SPDX-License-Identifier: Apache-2.0
 -->
 <!doctype html>
 <html lang="en">
@@ -12,7 +8,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Skyline Lounge</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
@@ -105,14 +100,14 @@
           const r = await fetch("/api/verify/start", { method: "POST" });
           const data = await r.json();
           if (!r.ok) throw new Error(data.error || "Failed to start");
-          showQr(data.walletUrl, data.txnId);
+          showQr(data.qrDataUrl, data.txnId);
         } catch (e) {
           main.innerHTML = '<p class="err">' + escapeHtml(e.message) + '</p>';
           setTimeout(idle, 2800);
         }
       }
 
-      function showQr(walletUrl, txnId) {
+      function showQr(qrDataUrl, txnId) {
         main.innerHTML =
           '<div class="stack">' +
           '<div class="qr"><img id="qr-img" alt="Scan with your wallet" /></div>' +
@@ -120,14 +115,8 @@
           '</div>';
         footer.innerHTML = '<button class="ghost" id="cancel">Cancel</button>';
         document.getElementById("cancel").onclick = idle;
-        QRCode.toDataURL(walletUrl, { width: 480, margin: 1 }, function(err, url) {
-          if (err) {
-            main.innerHTML = '<p class="err">Failed to generate QR: ' + escapeHtml(err.message) + '</p>';
-            return;
-          }
-          const img = document.getElementById("qr-img");
-          if (img) img.src = url;
-        });
+        const img = document.getElementById("qr-img");
+        if (img) img.src = qrDataUrl;
         poll(txnId);
       }
 

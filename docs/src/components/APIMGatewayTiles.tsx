@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {PropSidebarItemLink} from '@docusaurus/plugin-content-docs';
 import {useCurrentSidebarCategory} from '@docusaurus/plugin-content-docs/client';
@@ -28,11 +13,11 @@ interface GatewayConfig {
 }
 
 const GATEWAY_CONFIG: Record<string, GatewayConfig> = {
-  'guides/guides/integrations/apim-gateways/apisix':     {bgColor: '#1a0a14', logo: <APISIXLogo color="#fff" />},
-  'guides/guides/integrations/apim-gateways/azure-apim': {bgColor: '#002050', logo: <AzureAPIMlogo color="#fff" />},
-  'guides/guides/integrations/apim-gateways/envoy':      {bgColor: '#1a0a2e', logo: <EnvoyLogo color="#fff" />},
-  'guides/guides/integrations/apim-gateways/kong':       {bgColor: '#043558', logo: <KongLogo color="#fff" />},
-  'guides/guides/integrations/apim-gateways/krakend':    {bgColor: '#041c36', logo: <KrakenDLogo color="#fff" />},
+  'guides/integrations/apim-gateways/apisix':     {bgColor: '#1a0a14', logo: <APISIXLogo color="#fff" />},
+  'guides/integrations/apim-gateways/azure-apim': {bgColor: '#002050', logo: <AzureAPIMlogo color="#fff" />},
+  'guides/integrations/apim-gateways/envoy':      {bgColor: '#1a0a2e', logo: <EnvoyLogo color="#fff" />},
+  'guides/integrations/apim-gateways/kong':       {bgColor: '#043558', logo: <KongLogo color="#fff" />},
+  'guides/integrations/apim-gateways/krakend':    {bgColor: '#041c36', logo: <KrakenDLogo color="#fff" />},
 };
 
 const DEFAULT_BG = '#1e2a4a';
@@ -42,7 +27,7 @@ export function APIMGatewayTiles(): React.ReactElement {
 
   const items = category.items.filter(
     (item): item is PropSidebarItemLink =>
-      item.type === 'link' && item.docId !== 'guides/guides/integrations/apim-gateways/overview',
+      item.type === 'link' && item.docId !== 'guides/integrations/apim-gateways/overview',
   );
 
   return (

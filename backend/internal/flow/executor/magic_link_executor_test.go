@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -57,7 +42,7 @@ func toStringPtr(s string) *string { return &s }
 
 func newMagicLinkAuthenticatedUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -206,7 +191,7 @@ func (suite *MagicLinkExecutorTestSuite) TestExecute_GenerateMode_Success_Authen
 	// Assert the correct values are inside the template data
 	expectedURL := "https://example.com/verify?id=flow-123&token=jwt-token-123"
 	assert.Equal(suite.T(), expectedURL, templateData["magicLink"])
-	assert.Equal(suite.T(), "5", templateData["expiryMinutes"])
+	assert.Equal(suite.T(), "5 minutes", templateData["expiryTime"])
 	assert.Equal(suite.T(), magicLinkTestUserID, resp.RuntimeData[userAttributeUserID])
 	suite.mockEntityProvider.AssertExpectations(suite.T())
 	suite.mockMagicLinkService.AssertExpectations(suite.T())
@@ -248,7 +233,7 @@ func (suite *MagicLinkExecutorTestSuite) TestExecute_GenerateMode_Success_Regist
 	assert.True(suite.T(), ok, "Template data should be present in ForwardedData")
 	expectedURL := "https://example.com/verify?id=flow-123&token=jwt-token-123"
 	assert.Equal(suite.T(), expectedURL, templateData["magicLink"])
-	assert.Equal(suite.T(), "5", templateData["expiryMinutes"])
+	assert.Equal(suite.T(), "5 minutes", templateData["expiryTime"])
 	assert.Equal(suite.T(), magicLinkTestEmail, resp.RuntimeData[userAttributeEmail])
 	assert.Equal(suite.T(), userAttributeEmail, resp.RuntimeData[common.RuntimeKeyMagicLinkDestinationAttribute])
 	suite.mockEntityProvider.AssertExpectations(suite.T())
@@ -366,7 +351,7 @@ func (suite *MagicLinkExecutorTestSuite) TestExecute_GenerateMode_Success_WithCu
 
 	templateData, ok := resp.ForwardedData[common.ForwardedDataKeyTemplateData].(map[string]interface{})
 	assert.True(suite.T(), ok)
-	assert.Equal(suite.T(), "10", templateData["expiryMinutes"])
+	assert.Equal(suite.T(), "10 minutes", templateData["expiryTime"])
 
 	suite.mockMagicLinkService.AssertExpectations(suite.T())
 }

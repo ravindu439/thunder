@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package dbstore
 
@@ -70,4 +55,32 @@ var queryExtendTTLRuntimeStore = dbmodel.DBQuery{
 	Query: `UPDATE "RUNTIME_STORE" SET EXPIRY_TIME = $4, UPDATED_AT = CURRENT_TIMESTAMP ` +
 		`WHERE DEPLOYMENT_ID = $1 AND NAMESPACE = $2 AND KEY = $3 ` +
 		`AND (EXPIRY_TIME IS NULL OR EXPIRY_TIME > $5)`,
+}
+
+// queryPutIfNotExistsRuntimeStore inserts an entry, or overwrites it in place if the existing entry
+// has already expired. The conflicting row is left untouched (and no row is returned) when it is
+// still live, so the caller can tell a fresh claim from a blocked one by whether a row came back.
+var queryPutIfNotExistsRuntimeStore = dbmodel.DBQuery{
+	ID: "RTS-07",
+	Query: `INSERT INTO "RUNTIME_STORE" (DEPLOYMENT_ID, NAMESPACE, KEY, VALUE, EXPIRY_TIME) ` +
+		`VALUES ($1, $2, $3, $4, $5) ` +
+		`ON CONFLICT (DEPLOYMENT_ID, NAMESPACE, KEY) ` +
+		`DO UPDATE SET VALUE = EXCLUDED.VALUE, EXPIRY_TIME = EXCLUDED.EXPIRY_TIME, UPDATED_AT = CURRENT_TIMESTAMP ` +
+		`WHERE "RUNTIME_STORE".EXPIRY_TIME IS NOT NULL AND "RUNTIME_STORE".EXPIRY_TIME <= $6 ` +
+		`RETURNING KEY`,
+}
+
+// queryCompareFieldAndSwapRuntimeStore replaces the value of a non-expired entry, but only when the
+// top-level JSON string field named by $6 in the stored value equals $7, preserving its TTL. The
+// field name and expected value are bind parameters; the JSON extraction differs by dialect.
+var queryCompareFieldAndSwapRuntimeStore = dbmodel.DBQuery{
+	ID: "RTS-08",
+	PostgresQuery: `UPDATE "RUNTIME_STORE" SET VALUE = $4, UPDATED_AT = CURRENT_TIMESTAMP ` +
+		`WHERE DEPLOYMENT_ID = $1 AND NAMESPACE = $2 AND KEY = $3 ` +
+		`AND (EXPIRY_TIME IS NULL OR EXPIRY_TIME > $5) ` +
+		`AND (VALUE ->> $6) = $7`,
+	SQLiteQuery: `UPDATE "RUNTIME_STORE" SET VALUE = $4, UPDATED_AT = CURRENT_TIMESTAMP ` +
+		`WHERE DEPLOYMENT_ID = $1 AND NAMESPACE = $2 AND KEY = $3 ` +
+		`AND (EXPIRY_TIME IS NULL OR EXPIRY_TIME > $5) ` +
+		`AND json_extract(VALUE, '$.' || $6) = $7`,
 }

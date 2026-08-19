@@ -1,25 +1,9 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useMutation, useQueryClient, type UseMutationResult} from '@tanstack/react-query';
 import {useConfig, useToast} from '@thunderid/contexts';
 import {useThunderID} from '@thunderid/react';
-import {getErrorMessage} from '@thunderid/utils';
 import {useTranslation} from 'react-i18next';
 import AgentQueryKeys from '../constants/agent-query-keys';
 import type {Agent, AgentInboundAuthConfig} from '../models/agent';
@@ -34,7 +18,7 @@ export interface RegenerateAgentSecretResult {
 }
 
 /**
- * Generates a cryptographically secure OAuth 2.0 client secret matching the backend's
+ * Generates a cryptographically secure OAuth 2 client secret matching the backend's
  * `GenerateOAuth2ClientSecret()` (32 random bytes encoded as base64url, no padding).
  */
 function generateClientSecret(): string {
@@ -109,9 +93,6 @@ export default function useRegenerateAgentSecret(): UseMutationResult<
       queryClient.invalidateQueries({queryKey: [AgentQueryKeys.AGENT, variables.agentId]}).catch(() => undefined);
       queryClient.invalidateQueries({queryKey: [AgentQueryKeys.AGENTS]}).catch(() => undefined);
       showToast(t('regenerateSecret.snackbar.success', 'Client secret regenerated successfully'), 'success');
-    },
-    onError: (error) => {
-      showToast(getErrorMessage(error, t, 'regenerateSecret.dialog.error'), 'error');
     },
   });
 }

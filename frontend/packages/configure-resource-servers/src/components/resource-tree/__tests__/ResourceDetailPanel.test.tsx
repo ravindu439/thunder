@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {fireEvent, renderWithProviders, screen, waitFor} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -258,6 +243,182 @@ describe('ResourceDetailPanel', () => {
     );
 
     expect(screen.queryByText(/This is a system resource server and cannot be modified/i)).not.toBeInTheDocument();
+  });
+
+  it('disables the fields and hides the Save bar for a resource node of a read-only server', async () => {
+    const selectedNode: SelectedNode = {
+      type: 'resource',
+      id: 'r-1',
+      data: {id: 'r-1', name: 'Documents', handle: 'documents', permission: 'dark-dodos/documents'},
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={readOnlyResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    const nameField = screen.getByDisplayValue('Documents');
+    expect(nameField).toBeDisabled();
+
+    fireEvent.change(nameField, {target: {value: 'Renamed'}});
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', {name: /Save/i})).not.toBeInTheDocument();
+    });
+  });
+
+  it('disables the fields and hides the Save bar for an action node of a read-only server', async () => {
+    const selectedNode: SelectedNode = {
+      type: 'server-action',
+      id: 'a-1',
+      data: {id: 'a-1', name: 'Read All', handle: 'read-all', permission: 'dark-dodos:read-all'},
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={readOnlyResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    const nameField = screen.getByDisplayValue('Read All');
+    expect(nameField).toBeDisabled();
+
+    fireEvent.change(nameField, {target: {value: 'Renamed'}});
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', {name: /Save/i})).not.toBeInTheDocument();
+    });
+  });
+
+  it('hides the Save/Reset bar when the name is typed away and back to original', async () => {
+    const selectedNode: SelectedNode = {
+      type: 'resource',
+      id: 'r-1',
+      data: {id: 'r-1', name: 'Documents', handle: 'documents', permission: 'dark-dodos/documents'},
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={mockResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    const input = screen.getByDisplayValue('Documents');
+    fireEvent.change(input, {target: {value: 'Docs'}});
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+
+    fireEvent.change(input, {target: {value: 'Documents'}});
+
+    await waitFor(() => expect(screen.queryByRole('button', {name: /Save/i})).not.toBeInTheDocument());
+  });
+
+  it('shows the bar again after Discard if the field is re-edited to a new value', async () => {
+    const selectedNode: SelectedNode = {
+      type: 'resource',
+      id: 'r-1',
+      data: {id: 'r-1', name: 'Documents', handle: 'documents', permission: 'dark-dodos/documents'},
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={mockResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    let input = screen.getByDisplayValue('Documents');
+    fireEvent.change(input, {target: {value: 'Docs'}});
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', {name: /Reset/i}));
+    await waitFor(() => expect(screen.queryByRole('button', {name: /Save/i})).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue('Documents')).toBeInTheDocument();
+
+    input = screen.getByDisplayValue('Documents');
+    fireEvent.change(input, {target: {value: 'Renamed Again'}});
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+  });
+
+  it('shows the resolved catalog message inline, never the raw server text, when a server save fails', async () => {
+    mockUpdateResourceServerMutate.mockImplementation((_vars: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error('raw backend save failure detail'));
+    });
+
+    const selectedNode: SelectedNode = {
+      type: 'server',
+      id: 'rs-1',
+      data: mockResourceServer,
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={mockResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('https://api.example.com'), {
+      target: {value: 'https://new-api.example.com'},
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', {name: /Save/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to save.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('raw backend save failure detail')).not.toBeInTheDocument();
+  });
+
+  it('clears the save error when the identifier field is edited again', async () => {
+    mockUpdateResourceServerMutate.mockImplementation((_vars: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error('boom'));
+    });
+
+    const selectedNode: SelectedNode = {
+      type: 'server',
+      id: 'rs-1',
+      data: mockResourceServer,
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={mockResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('https://api.example.com'), {
+      target: {value: 'https://new-api.example.com'},
+    });
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', {name: /Save/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to save.')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByDisplayValue('https://new-api.example.com'), {
+      target: {value: 'https://newer-api.example.com'},
+    });
+
+    expect(screen.queryByText('Failed to save.')).not.toBeInTheDocument();
+  });
+
+  it('clears the save error when Reset is clicked after a failed save', async () => {
+    mockUpdateResourceServerMutate.mockImplementation((_vars: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error('boom'));
+    });
+
+    const selectedNode: SelectedNode = {
+      type: 'server',
+      id: 'rs-1',
+      data: mockResourceServer,
+    };
+
+    renderWithProviders(
+      <ResourceDetailPanel selectedNode={selectedNode} resourceServer={mockResourceServer} onRefresh={vi.fn()} />,
+    );
+
+    fireEvent.change(screen.getByDisplayValue('https://api.example.com'), {
+      target: {value: 'https://new-api.example.com'},
+    });
+    await waitFor(() => expect(screen.getByRole('button', {name: /Save/i})).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', {name: /Save/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to save.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', {name: /Reset/i}));
+
+    expect(screen.queryByText('Failed to save.')).not.toBeInTheDocument();
   });
 });
 

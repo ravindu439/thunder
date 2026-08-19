@@ -1,6 +1,6 @@
 name: 'Setup Samples Environment'
 description: 'Sets up complete environment for sample app building and packaging'
-author: 'WSO2'
+author: 'The ThunderID Authors'
 
 inputs:
   node-version:

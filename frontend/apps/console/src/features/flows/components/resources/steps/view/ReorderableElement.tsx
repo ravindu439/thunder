@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {Box, Button, Menu, MenuItem, type BoxProps} from '@wso2/oxygen-ui';
+import {Box, Menu, MenuItem, type BoxProps} from '@wso2/oxygen-ui';
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -28,8 +13,6 @@ import {
 import {useNodeId, useReactFlow, type Node} from '@xyflow/react';
 import classNames from 'classnames';
 import {useRef, useState, useMemo, memo, type MouseEvent, type ReactElement, type ReactNode} from 'react';
-import {useTranslation} from 'react-i18next';
-import dashedAddButtonSx from './dashedAddButtonSx';
 import Handle from '../../../dnd/Handle';
 import Sortable from '../../../dnd/Sortable';
 import type {SortableProps} from '../../../dnd/Sortable';
@@ -41,7 +24,7 @@ import useFlowPlugins from '@/features/flows/hooks/useFlowPlugins';
 import useInteractionState from '@/features/flows/hooks/useInteractionState';
 import useUIPanelState from '@/features/flows/hooks/useUIPanelState';
 import useValidationStatus from '@/features/flows/hooks/useValidationStatus';
-import {BlockTypes, ElementCategories, type Element} from '@/features/flows/models/elements';
+import {BlockTypes, ElementCategories, ElementTypes, type Element} from '@/features/flows/models/elements';
 import type {Resource} from '@/features/flows/models/resources';
 import type {StepData} from '@/features/flows/models/steps';
 
@@ -129,7 +112,6 @@ function ReorderableElement({
   slotProps = {},
   ...rest
 }: ReorderableComponentPropsInterface): ReactElement {
-  const {t} = useTranslation();
   const handleRef = useRef<HTMLButtonElement>(null);
   const stepId: string | null = useNodeId();
   const {updateNodeData} = useReactFlow();
@@ -146,6 +128,11 @@ function ReorderableElement({
   // Action-category blocks (e.g. social login trigger wrappers) share the BLOCK type
   // with forms but only group a trigger button — they must not accept extra fields.
   const isForm = element.type === BlockTypes.Form && element.category !== ElementCategories.Action;
+
+  // Stacks are containers too, so they get the same click-to-add affordance as forms
+  // rather than being drag-and-drop only.
+  const isStack = element.type === ElementTypes.Stack;
+  const isContainer = isForm || isStack;
 
   const depsRef = useRef({
     element,
@@ -315,18 +302,21 @@ function ReorderableElement({
     handleMoveDown,
   } = handlersRef.current;
 
-  // Filter available elements to only show form-compatible types that are visible on resource panel
-  const formCompatibleElements = useMemo(
-    () =>
-      isForm && depsRef.current.availableElements
-        ? depsRef.current.availableElements.filter(
-            (el: Resource) =>
-              VisualFlowConstants.FLOW_BUILDER_FORM_ALLOWED_RESOURCE_TYPES.includes(el.type) &&
-              el.display?.showOnResourcePanel !== false,
-          )
-        : [],
-    [isForm],
-  );
+  // Filter available elements to only show container-compatible types that are visible
+  // on the resource panel
+  const formCompatibleElements = useMemo(() => {
+    if (!isContainer || !availableElements) {
+      return [];
+    }
+    const allowedTypes = isStack
+      ? VisualFlowConstants.FLOW_BUILDER_STACK_ALLOWED_RESOURCE_TYPES
+      : VisualFlowConstants.FLOW_BUILDER_FORM_ALLOWED_RESOURCE_TYPES;
+    return availableElements.filter(
+      (el: Resource) => allowedTypes.includes(el.type) && el.display?.showOnResourcePanel !== false,
+    );
+    // Reads the prop rather than the ref: the container flags never change for a
+    // mounted element, so a ref-based memo would swallow a late-loaded element list.
+  }, [isContainer, isStack, availableElements]);
 
   return (
     <Sortable
@@ -404,8 +394,8 @@ function ReorderableElement({
                 </Handle>
               )}
               {extraActions}
-              {isForm && formCompatibleElements.length > 0 && (
-                <Handle label="Add Field" onClick={handleMenuOpen}>
+              {isContainer && formCompatibleElements.length > 0 && (
+                <Handle label={isStack ? 'Add Component' : 'Add Field'} onClick={handleMenuOpen}>
                   <PlusIcon size={16} />
                 </Handle>
               )}
@@ -437,28 +427,14 @@ function ReorderableElement({
               availableElements={availableElements}
               onAddElementToForm={onAddElementToForm}
             />
-            {isForm && formCompatibleElements.length > 0 && (
-              <Button
-                fullWidth
-                size="small"
-                className="nodrag"
-                data-testid="form-add-field-button"
-                startIcon={<PlusIcon size={15} />}
-                onClick={(event: MouseEvent<HTMLElement>) => {
-                  event.stopPropagation();
-                  handleMenuOpen(event);
-                }}
-                sx={dashedAddButtonSx}
-              >
-                {t('flows:core.steps.view.addField', 'Add Field')}
-              </Button>
-            )}
+            {/* Forms and stacks render their own add button inside their container
+                outline, so it is enclosed by the same border as their children. */}
           </Box>
         </Box>
       </ValidationErrorBoundary>
 
-      {/* Menu for adding fields to Form */}
-      {isForm && (
+      {/* Menu for adding elements to a container (form or stack) */}
+      {isContainer && (
         <Menu
           anchorEl={anchorEl}
           open={menuOpen}

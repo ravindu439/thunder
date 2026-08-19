@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package utils
 
@@ -228,6 +213,11 @@ func (suite *HTTPUtilTestSuite) TestIsValidLogoURI() {
 		{
 			name:     "EmojiURI",
 			uri:      "emoji:smile",
+			expected: true,
+		},
+		{
+			name:     "AvatarURI",
+			uri:      "avatar:1",
 			expected: true,
 		},
 		{
@@ -449,7 +439,17 @@ func (suite *HTTPUtilTestSuite) TestSanitizeString() {
 		{
 			name:     "StringWithHTML",
 			input:    "String with <script>alert('XSS')</script> HTML",
-			expected: "String with &lt;script&gt;alert(&#39;XSS&#39;)&lt;/script&gt; HTML",
+			expected: "String with <script>alert('XSS')</script> HTML",
+		},
+		{
+			name:     "StringWithApostrophe",
+			input:    "  Dean's Sub team  ",
+			expected: "Dean's Sub team",
+		},
+		{
+			name:     "StringWithAmpersandAndQuotes",
+			input:    `R&D <team> "core"`,
+			expected: `R&D <team> "core"`,
 		},
 		{
 			name:     "StringWithControlChars",
@@ -517,7 +517,7 @@ func (suite *HTTPUtilTestSuite) TestSanitizeStringMap() {
 			},
 			expected: map[string]string{
 				"key1": "value with spaces",
-				"key2": "&lt;script&gt;alert(&#39;XSS&#39;)&lt;/script&gt;",
+				"key2": "<script>alert('XSS')</script>",
 				"key3": "ControlChar",
 			},
 		},
@@ -526,6 +526,150 @@ func (suite *HTTPUtilTestSuite) TestSanitizeStringMap() {
 	for _, tc := range testCases {
 		suite.T().Run(tc.name, func(t *testing.T) {
 			result := SanitizeStringMap(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+// Sanitizing an already sanitized value must be a no-op. Without this, values that survive a
+// read-modify-write cycle (e.g. a role name echoed back on update) accumulate encoding on every save.
+func (suite *HTTPUtilTestSuite) TestSanitizeStringIsIdempotent() {
+	inputs := []string{
+		"Dean's Sub team",
+		`R&D <team> "core"`,
+		"<script>alert('XSS')</script>",
+		"  padded  ",
+	}
+
+	for _, input := range inputs {
+		suite.T().Run(input, func(t *testing.T) {
+			once := SanitizeString(input)
+			assert.Equal(t, once, SanitizeString(once))
+			assert.Equal(t, once, SanitizeString(SanitizeString(once)))
+		})
+	}
+}
+
+func (suite *HTTPUtilTestSuite) TestFilterSensitiveHeaders() {
+	testCases := []struct {
+		name     string
+		input    map[string][]string
+		expected map[string][]string
+	}{
+		{
+			name:     "NilHeader",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "EmptyHeader",
+			input:    map[string][]string{},
+			expected: map[string][]string{},
+		},
+		{
+			name: "RemovesSensitiveHeaders",
+			input: map[string][]string{
+				"Authorization":       {"Bearer token"},
+				"Cookie":              {"session=abc"},
+				"Set-Cookie":          {"id=1"},
+				"Proxy-Authorization": {"Basic xyz"},
+				"X-Request-Id":        {"req-123"},
+			},
+			expected: map[string][]string{
+				"X-Request-Id": {"req-123"},
+			},
+		},
+		{
+			name: "PreservesNonSensitiveHeaders",
+			input: map[string][]string{
+				"Content-Type": {"application/json"},
+				"Accept":       {"text/html"},
+			},
+			expected: map[string][]string{
+				"Content-Type": {"application/json"},
+				"Accept":       {"text/html"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.T().Run(tc.name, func(t *testing.T) {
+			result := FilterSensitiveHeaders(tc.input)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func (suite *HTTPUtilTestSuite) TestSanitizeRawMultiValueStringMap() {
+	testCases := []struct {
+		name     string
+		input    map[string][]string
+		expected map[string][]string
+	}{
+		{
+			name:     "NilMap",
+			input:    nil,
+			expected: nil,
+		},
+		{
+			name:     "EmptyMap",
+			input:    map[string][]string{},
+			expected: map[string][]string{},
+		},
+		{
+			name: "NormalValues",
+			input: map[string][]string{
+				"Content-Type": {"application/json"},
+				"Accept":       {"text/html", "application/json"},
+			},
+			expected: map[string][]string{
+				"Content-Type": {"application/json"},
+				"Accept":       {"text/html", "application/json"},
+			},
+		},
+		{
+			name: "PreservesHTMLInValues",
+			input: map[string][]string{
+				"X-Claims":  {`{"email":{"essential":true}}`},
+				"X-Snippet": {"<script>alert('xss')</script>"},
+			},
+			expected: map[string][]string{
+				"X-Claims":  {`{"email":{"essential":true}}`},
+				"X-Snippet": {"<script>alert('xss')</script>"},
+			},
+		},
+		{
+			name: "RemovesControlCharsAndTrimsFromValues",
+			input: map[string][]string{
+				"X-Custom": {"  value\x01  "},
+			},
+			expected: map[string][]string{
+				"X-Custom": {"value"},
+			},
+		},
+		{
+			name: "RemovesNewlineAndTab",
+			input: map[string][]string{
+				"X-Inject": {"line1\nline2", "col1\tcol2"},
+			},
+			expected: map[string][]string{
+				"X-Inject": {"line1line2", "col1col2"},
+			},
+		},
+		{
+			name: "PreservesKeysVerbatim",
+			input: map[string][]string{
+				"X-Custom\x00": {"val"},
+			},
+			expected: map[string][]string{
+				"X-Custom\x00": {"val"},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.T().Run(tc.name, func(t *testing.T) {
+			result := SanitizeRawMultiValueStringMap(tc.input)
 			assert.Equal(t, tc.expected, result)
 		})
 	}

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package credential
 
@@ -130,18 +115,18 @@ func requestToDTO(req *credentialConfigurationRequest) *CredentialConfigurationD
 	}
 }
 
-// sanitizeClaims trims claim names and display names, dropping entries with no name.
+// sanitizeClaims trims claim names and display names. Entries left without a name are kept so
+// that validation rejects them, rather than silently dropping part of the submitted configuration.
 func sanitizeClaims(in []ClaimMapping) []ClaimMapping {
+	if len(in) == 0 {
+		return nil
+	}
 	out := make([]ClaimMapping, 0, len(in))
 	for _, c := range in {
-		name := sysutils.SanitizeString(c.Name)
-		if name == "" {
-			continue
-		}
-		out = append(out, ClaimMapping{Name: name, DisplayName: sysutils.SanitizeString(c.DisplayName)})
-	}
-	if len(out) == 0 {
-		return nil
+		out = append(out, ClaimMapping{
+			Name:        sysutils.SanitizeString(c.Name),
+			DisplayName: sysutils.SanitizeString(c.DisplayName),
+		})
 	}
 	return out
 }

@@ -1,24 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useLogger} from '@thunderid/logger';
+import {getErrorMessage} from '@thunderid/utils';
 import {Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Button, Alert} from '@wso2/oxygen-ui';
-import {useState, type JSX} from 'react';
+import {useCallback, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import useRegenerateAgentSecret from '../api/useRegenerateAgentSecret';
 
@@ -41,6 +27,14 @@ export default function RegenerateSecretDialog({
   const logger = useLogger('RegenerateSecretDialog');
   const [error, setError] = useState<string | null>(null);
   const regenerateClientSecret = useRegenerateAgentSecret();
+
+  // Resolves an error through the `agents` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agents:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `agents:${key}`, options),
+    [t],
+  );
 
   const handleCancel = (): void => {
     setError(null);
@@ -65,10 +59,12 @@ export default function RegenerateSecretDialog({
           onSuccess?.(clientSecret);
         },
         onError: (err) => {
-          const errorMessage =
-            err instanceof Error
-              ? err.message
-              : t('agents:regenerateSecret.dialog.error', 'Failed to regenerate client secret');
+          const errorMessage = getErrorMessage(
+            err,
+            tForErrors,
+            'regenerateSecret.dialog.error',
+            'Failed to regenerate client secret',
+          );
           logger.error('Failed to regenerate agent client secret', {
             agentId,
             errorMessage,

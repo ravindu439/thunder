@@ -1,23 +1,21 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {Box, Card, CardContent, Stack, Typography} from '@wso2/oxygen-ui';
-import type {JSX, KeyboardEvent} from 'react';
+import {
+  Box,
+  Card,
+  CardActionArea,
+  CardContent,
+  Divider,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
+  Stack,
+  Typography,
+  useTheme,
+} from '@wso2/oxygen-ui';
+import {Lightbulb} from '@wso2/oxygen-ui-icons-react';
+import type {ChangeEvent, JSX} from 'react';
 import {useEffect} from 'react';
 import {useTranslation} from 'react-i18next';
 import ConfigureMcpConnection from './ConfigureMcpConnection';
@@ -60,13 +58,14 @@ export interface ConfigureMcpClientTypeProps {
 }
 
 /**
- * React component that renders the MCP client type chooser shown on the
- * Client type step of the mcp-client template's creation flow.
+ * React component that renders the MCP client type chooser shown on the Configuration step
+ * of the mcp-client template's creation flow, headed "Client Type" — a choice unique to MCP
+ * clients, distinct from the "Sign-In Approach" heading used by other templates' Configuration
+ * step.
  *
  * Presents the two MCP client types — On behalf of a user and On its own behalf —
- * as a pair of selectable cards. The pair behaves as a single-select radio
- * group of two options, so it exposes `role="radiogroup"`/`role="radio"`
- * semantics rather than the gallery card's `button`/`aria-pressed` contract.
+ * as a stacked list of radio cards, mirroring the standard flow's Sign-In Approach layout so the
+ * two client-obtains-tokens choices in the product read as one consistent pattern.
  * Below the cards, a "what you get" preview panel ({@link McpClientTypePreview}) shows the
  * consequences of the current selection. When the user-delegated type is selected, the
  * redirect URI editor ({@link ConfigureMcpConnection}) is embedded inline beneath the preview
@@ -110,6 +109,7 @@ export default function ConfigureMcpClientType({
   onReadyChange = undefined,
 }: ConfigureMcpClientTypeProps): JSX.Element {
   const {t} = useTranslation();
+  const theme = useTheme();
 
   const clientTypeLabel = t('applications:onboarding.mcp.clientType.title');
 
@@ -122,98 +122,90 @@ export default function ConfigureMcpClientType({
     }
   }, [selectedType, onReadyChange]);
 
+  const handleApproachChange = (event: ChangeEvent<HTMLInputElement>): void => {
+    onSelect(event.target.value as McpClientType);
+  };
+
   return (
     <Stack direction="column" spacing={2} data-testid="application-configure-mcp-client-type">
       <Stack direction="column" spacing={0.5}>
-        <Typography variant="h6">{clientTypeLabel}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          {t('applications:onboarding.mcp.clientType.subtitle')}
+        <Typography variant="h1" gutterBottom>
+          {clientTypeLabel}
         </Typography>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Lightbulb size={20} color={theme.vars?.palette.warning.main} />
+          <Typography variant="body2" color="text.secondary">
+            {t('applications:onboarding.mcp.clientType.subtitle')}
+          </Typography>
+        </Stack>
       </Stack>
 
-      <Box
-        role="radiogroup"
-        aria-label={clientTypeLabel}
-        sx={{
-          display: 'grid',
-          gridTemplateColumns: {xs: '1fr', sm: 'repeat(2, 1fr)'},
-          gap: 2,
-        }}
-      >
-        {McpClientTypeMetadataList.map((option) => {
-          const isSelected = selectedType === option.value;
+      <RadioGroup aria-label={clientTypeLabel} value={selectedType} onChange={handleApproachChange}>
+        <Stack direction="column" spacing={2}>
+          {McpClientTypeMetadataList.map((option) => {
+            const isSelected = selectedType === option.value;
 
-          return (
-            <Card
-              key={option.value}
-              variant="outlined"
-              role="radio"
-              tabIndex={0}
-              aria-checked={isSelected}
-              onClick={() => onSelect(option.value)}
-              onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onSelect(option.value);
-                }
-              }}
-              sx={{
-                borderRadius: 2,
-                borderWidth: isSelected ? 2 : 1,
-                borderColor: isSelected ? 'primary.main' : 'divider',
-                cursor: 'pointer',
-                bgcolor: isSelected ? 'action.selected' : 'background.paper',
-                transition: 'border-color 0.15s, box-shadow 0.15s, transform 0.15s',
-                '&:hover': {
-                  borderColor: 'primary.main',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  transform: 'translateY(-2px)',
-                },
-                '&:focus-visible': {
-                  outline: 'none',
-                  borderColor: 'primary.main',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                  transform: 'translateY(-2px)',
-                },
-              }}
-            >
-              <CardContent sx={{p: 2.5, '&:last-child': {pb: 2.5}}}>
-                <Stack direction="column" spacing={2}>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 48,
-                      height: 48,
-                    }}
-                  >
-                    {option.icon}
-                  </Box>
-                  <Stack direction="column" spacing={0.75}>
-                    <Typography variant="subtitle1" sx={{fontWeight: 600, lineHeight: 1.3}}>
-                      {t(option.titleKey)}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{lineHeight: 1.5}}>
-                      {t(option.descriptionKey)}
-                    </Typography>
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </Box>
+            return (
+              <Card key={option.value} variant="outlined" onClick={() => onSelect(option.value)}>
+                <CardActionArea
+                  sx={{
+                    height: '100%',
+                    cursor: 'pointer',
+                    border: 1,
+                    borderColor: isSelected ? 'primary.main' : 'divider',
+                    transition: 'all 0.2s ease-in-out',
+                    '&:hover': {
+                      borderColor: 'primary.main',
+                      bgcolor: isSelected ? 'action.selected' : 'action.hover',
+                    },
+                  }}
+                >
+                  <CardContent>
+                    <Stack direction="row" spacing={2} alignItems="flex-start">
+                      <FormControlLabel
+                        value={option.value}
+                        control={<Radio />}
+                        label=""
+                        sx={{m: 0}}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <Box sx={{flex: 1}}>
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{mb: 1}}>
+                          {option.icon}
+                          <Typography variant="h6">{t(option.titleKey)}</Typography>
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary">
+                          {t(option.descriptionKey)}
+                        </Typography>
 
-      <McpClientTypePreview clientType={selectedType} />
+                        {isSelected && (
+                          <>
+                            <Divider sx={{my: 2}} />
+                            <McpClientTypePreview clientType={option.value} />
+                          </>
+                        )}
+                      </Box>
+                    </Stack>
+                  </CardContent>
+                </CardActionArea>
+              </Card>
+            );
+          })}
+        </Stack>
+      </RadioGroup>
 
       {selectedType === McpClientTypes.USER_DELEGATED && (
-        <ConfigureMcpConnection
-          compact
-          redirectUris={redirectUris}
-          onRedirectUrisChange={onRedirectUrisChange}
-          onReadyChange={onReadyChange}
-        />
+        <Stack spacing={3}>
+          <Typography variant="h1" gutterBottom>
+            {t('applications:onboarding.configure.details.urls.title', 'URLs')}
+          </Typography>
+          <ConfigureMcpConnection
+            compact
+            redirectUris={redirectUris}
+            onRedirectUrisChange={onRedirectUrisChange}
+            onReadyChange={onReadyChange}
+          />
+        </Stack>
       )}
     </Stack>
   );

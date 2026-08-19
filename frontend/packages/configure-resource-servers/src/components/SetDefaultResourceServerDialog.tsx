@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useToast} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
-import {Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography} from '@wso2/oxygen-ui';
-import {Star} from '@wso2/oxygen-ui-icons-react';
-import type {JSX} from 'react';
-import {useTranslation} from 'react-i18next';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography} from '@wso2/oxygen-ui';
+import {useCallback, useState, type JSX} from 'react';
+import {Trans, useTranslation} from 'react-i18next';
 import useSetDefaultResourceServer from '../api/useSetDefaultResourceServer';
 import type {ResourceServer} from '../models/resource-server';
 
@@ -42,6 +27,22 @@ export default function SetDefaultResourceServerDialog({
   const {showToast} = useToast();
   const logger = useLogger('SetDefaultResourceServerDialog');
   const setDefault = useSetDefaultResourceServer();
+  const [error, setError] = useState<string | null>(null);
+
+  // Resolves an error through the `resourceServers` catalog. `t` defaults to the `common`
+  // namespace, so this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with
+  // `resourceServers:`, per getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string =>
+      t(key.includes(':') ? key : `resourceServers:${key}`, options),
+    [t],
+  );
+
+  const handleClose = (): void => {
+    if (setDefault.isPending) return;
+    setError(null);
+    onClose();
+  };
 
   const handleConfirm = (): void => {
     if (!resourceServer) return;
@@ -50,6 +51,7 @@ export default function SetDefaultResourceServerDialog({
       {resourceServerId: resourceServer.id},
       {
         onSuccess: () => {
+          setError(null);
           showToast(
             t('resourceServers:setDefault.success', '{{name}} is now the default resource server.', {
               name: resourceServer.name,
@@ -61,45 +63,38 @@ export default function SetDefaultResourceServerDialog({
         },
         onError: (err: Error) => {
           logger.error('Failed to set default resource server', {error: err});
-          showToast(t('resourceServers:setDefault.error', 'Failed to set the default resource server.'), 'error');
+          setError(getErrorMessage(err, tForErrors, 'setDefault.error', 'Failed to set the default resource server.'));
         },
       },
     );
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>
-        <Stack direction="row" alignItems="center" spacing={1.5}>
-          <Box
-            sx={{
-              width: 40,
-              height: 40,
-              borderRadius: 2,
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'primary.main',
-              bgcolor: 'primary.light',
-            }}
-          >
-            <Star size={20} />
-          </Box>
-          <span>{t('resourceServers:setDefault.title', 'Set default resource server')}</span>
-        </Stack>
-      </DialogTitle>
+    <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
+      <DialogTitle>{t('resourceServers:setDefault.title', 'Set default resource server')}</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary">
-          <strong>{resourceServer?.name}</strong>{' '}
+          <Trans
+            i18nKey="resourceServers:setDefault.message"
+            defaults="<bold>{{name}}</bold> will become the default resource server."
+            values={{name: resourceServer?.name}}
+            components={{bold: <strong />}}
+          />
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{mt: 1}}>
           {t(
-            'resourceServers:setDefault.message',
-            'will become the default resource server. Requests without a resource parameter will fall back to it.',
+            'resourceServers:setDefault.explanation',
+            'When an application requests a token without naming a resource server, its permissions come from this one. Only one resource server can be the default at a time.',
           )}
         </Typography>
+        {error && (
+          <Alert severity="error" sx={{mt: 2}}>
+            {error}
+          </Alert>
+        )}
       </DialogContent>
       <DialogActions>
-        <Button variant="outlined" onClick={onClose} disabled={setDefault.isPending}>
+        <Button variant="outlined" onClick={handleClose} disabled={setDefault.isPending}>
           {t('common:cancel', 'Cancel')}
         </Button>
         <Button variant="contained" onClick={handleConfirm} disabled={setDefault.isPending}>

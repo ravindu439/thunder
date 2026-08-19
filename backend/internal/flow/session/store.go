@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -70,6 +55,26 @@ func (st *store) GetByHandle(ctx context.Context, handleID string) (*Session, er
 // GetByExecutionID fetches the session established by the given flow execution.
 func (st *store) GetByExecutionID(ctx context.Context, flowExecutionID string) (*Session, error) {
 	return st.getSingle(ctx, queryGetSessionByExecutionID, flowExecutionID)
+}
+
+// ListBySubject returns every session owned by the subject.
+func (st *store) ListBySubject(ctx context.Context, subjectID string) ([]Session, error) {
+	result := make([]Session, 0)
+	err := withRuntimePersistentDBClient(st.dbProvider, func(dbClient provider.DBClientInterface) error {
+		rows, err := dbClient.QueryContext(ctx, queryListSessionsBySubject, subjectID, st.deploymentID)
+		if err != nil {
+			return fmt.Errorf("failed to list sessions by subject: %w", err)
+		}
+		for _, row := range rows {
+			sess, buildErr := buildSessionFromRow(row)
+			if buildErr != nil {
+				return buildErr
+			}
+			result = append(result, *sess)
+		}
+		return nil
+	})
+	return result, err
 }
 
 // getSingle runs a single-key lookup query and maps the at-most-one row into a Session, returning
@@ -173,30 +178,6 @@ func (st *store) GetByCheckpoint(ctx context.Context, sessionID,
 	return result, nil
 }
 
-// ListCheckpointIDs returns the checkpoint ids a session has saved, without decrypting any payload.
-func (st *store) ListCheckpointIDs(ctx context.Context, sessionID string) ([]string, error) {
-	var ids []string
-
-	err := withRuntimePersistentDBClient(st.dbProvider, func(dbClient provider.DBClientInterface) error {
-		results, queryErr := dbClient.QueryContext(ctx, queryListCheckpointsBySessionID, sessionID, st.deploymentID)
-		if queryErr != nil {
-			return fmt.Errorf("failed to execute query: %w", queryErr)
-		}
-		for _, row := range results {
-			id, parseErr := parseString(row["checkpoint_id"], "checkpoint_id")
-			if parseErr != nil {
-				return parseErr
-			}
-			ids = append(ids, id)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return ids, nil
-}
-
 // Delete removes a session's session context.
 func (st *store) Delete(ctx context.Context, sessionID string) error {
 	return withRuntimePersistentDBClient(st.dbProvider, func(dbClient provider.DBClientInterface) error {
@@ -252,7 +233,7 @@ func (st *store) buildSessionContextFromRow(row map[string]interface{}) (*Sessio
 func (st *store) Record(ctx context.Context, p Participant) error {
 	return withRuntimePersistentDBClient(st.dbProvider, func(dbClient provider.DBClientInterface) error {
 		_, err := dbClient.ExecuteContext(ctx, queryUpsertParticipant,
-			p.SessionID, st.deploymentID, p.AppID, p.FirstJoinedAt, p.LastActiveAt)
+			p.SessionID, st.deploymentID, p.AppID, p.FirstJoinedAt, p.LastActiveAt, p.TokenFamilyID)
 		if err != nil {
 			return fmt.Errorf("failed to record session participant: %w", err)
 		}
@@ -316,6 +297,7 @@ func buildParticipantFromRow(row map[string]interface{}) (Participant, error) {
 	return Participant{
 		SessionID:     sessionID,
 		AppID:         appID,
+		TokenFamilyID: parseNullableString(row["tfid"]),
 		FirstJoinedAt: firstJoinedAt,
 		LastActiveAt:  lastActiveAt,
 	}, nil

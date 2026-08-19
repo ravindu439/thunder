@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ou
 
@@ -22,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -456,12 +442,12 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 			},
 		},
 		{
-			name: "declarative validation failure - handle too short",
-			body: `{"handle": "fi", "name": "Finance Services"}`,
+			name: "declarative validation failure - handle too long",
+			body: fmt.Sprintf(`{"handle": %q, "name": "Finance Services"}`, strings.Repeat("f", 101)),
 			assert: func(recorder *httptest.ResponseRecorder) {
 				if recorder.Code == http.StatusCreated {
 					suite.T().Log("⚠️ Warning: Request passed validation. " +
-						"Ensure your model.go struct fields have `validate:\"min=3\"` tags attached!")
+						"Ensure your model.go struct fields have `native:\"max=100\"` tags attached!")
 					return
 				}
 				suite.Equal(http.StatusBadRequest, recorder.Code)
@@ -469,6 +455,22 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 			},
 			assertService: func(serviceMock *OrganizationUnitServiceInterfaceMock) {
 				serviceMock.AssertNotCalled(suite.T(), "CreateOrganizationUnit", mock.Anything)
+			},
+		},
+		{
+			name: "accepts a single character handle",
+			body: `{"handle": "w", "name": "Workforce"}`,
+			setup: func(serviceMock *OrganizationUnitServiceInterfaceMock) {
+				serviceMock.
+					On("CreateOrganizationUnit", mock.Anything,
+						mock.MatchedBy(func(req providers.OrganizationUnitRequestWithID) bool {
+							return req.Handle == "w" && req.Name == "Workforce"
+						})).
+					Return(providers.OrganizationUnit{ID: "ou-1", Handle: "w", Name: "Workforce"}, nil).
+					Once()
+			},
+			assert: func(recorder *httptest.ResponseRecorder) {
+				suite.Equal(http.StatusCreated, recorder.Code)
 			},
 		},
 		{
@@ -483,10 +485,10 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 					On("CreateOrganizationUnit", mock.Anything,
 						mock.MatchedBy(func(req providers.OrganizationUnitRequestWithID) bool {
 							return req.Handle == defaultOUHandle &&
-								req.Name == "Finance &lt;script&gt;" &&
+								req.Name == "Finance <script>" &&
 								req.Description == "desc"
 						})).
-					Return(providers.OrganizationUnit{ID: "ou-1", Name: "Finance &lt;script&gt;"}, nil).
+					Return(providers.OrganizationUnit{ID: "ou-1", Name: "Finance <script>"}, nil).
 					Once()
 			},
 			assert: func(recorder *httptest.ResponseRecorder) {
@@ -504,6 +506,12 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 				"name": "` + testOUNameFinance + `",
 				"themeId": "theme-123",
 				"layoutId": "layout-456",
+				"authFlowId": "auth-flow-123",
+				"registrationFlowId": "reg-flow-123",
+				"isRegistrationFlowEnabled": true,
+				"recoveryFlowId": "recovery-flow-123",
+				"isRecoveryFlowEnabled": true,
+				"signOutFlowId": "signout-flow-123",
 				"logoUrl": "https://example.com/logo.png"
 			}`,
 			setup: func(serviceMock *OrganizationUnitServiceInterfaceMock) {
@@ -514,15 +522,27 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 								req.Name == testOUNameFinance &&
 								req.ThemeID == "theme-123" &&
 								req.LayoutID == "layout-456" &&
+								req.AuthFlowID == "auth-flow-123" &&
+								req.RegistrationFlowID == "reg-flow-123" &&
+								req.IsRegistrationFlowEnabled &&
+								req.RecoveryFlowID == "recovery-flow-123" &&
+								req.IsRecoveryFlowEnabled &&
+								req.SignOutFlowID == "signout-flow-123" &&
 								req.LogoURL == "https://example.com/logo.png"
 						})).
 					Return(providers.OrganizationUnit{
-						ID:       "ou-1",
-						Handle:   "finance",
-						Name:     testOUNameFinance,
-						ThemeID:  "theme-123",
-						LayoutID: "layout-456",
-						LogoURL:  "https://example.com/logo.png",
+						ID:                        "ou-1",
+						Handle:                    "finance",
+						Name:                      testOUNameFinance,
+						ThemeID:                   "theme-123",
+						LayoutID:                  "layout-456",
+						AuthFlowID:                "auth-flow-123",
+						RegistrationFlowID:        "reg-flow-123",
+						IsRegistrationFlowEnabled: true,
+						RecoveryFlowID:            "recovery-flow-123",
+						IsRecoveryFlowEnabled:     true,
+						SignOutFlowID:             "signout-flow-123",
+						LogoURL:                   "https://example.com/logo.png",
 					}, nil).
 					Once()
 			},
@@ -533,6 +553,12 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPostRequest
 				suite.Equal("ou-1", resp.ID)
 				suite.Equal("theme-123", resp.ThemeID)
 				suite.Equal("layout-456", resp.LayoutID)
+				suite.Equal("auth-flow-123", resp.AuthFlowID)
+				suite.Equal("reg-flow-123", resp.RegistrationFlowID)
+				suite.True(resp.IsRegistrationFlowEnabled)
+				suite.Equal("recovery-flow-123", resp.RecoveryFlowID)
+				suite.True(resp.IsRecoveryFlowEnabled)
+				suite.Equal("signout-flow-123", resp.SignOutFlowID)
 				suite.Equal("https://example.com/logo.png", resp.LogoURL)
 			},
 		},
@@ -861,18 +887,18 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPutRequest(
 						defaultOURequestID,
 						mock.MatchedBy(func(req providers.OrganizationUnitRequestWithID) bool {
 							return req.Handle == defaultOUHandle &&
-								req.Name == "Finance &lt;script&gt;" &&
+								req.Name == "Finance <script>" &&
 								req.Description == "desc"
 						}),
 					).
-					Return(providers.OrganizationUnit{ID: defaultOURequestID, Name: "Finance &lt;script&gt;"}, nil).
+					Return(providers.OrganizationUnit{ID: defaultOURequestID, Name: "Finance <script>"}, nil).
 					Once()
 			},
 			assert: func(recorder *httptest.ResponseRecorder) {
 				suite.Equal(http.StatusOK, recorder.Code)
 				var resp providers.OrganizationUnit
 				suite.NoError(json.Unmarshal(recorder.Body.Bytes(), &resp))
-				suite.Equal("Finance &lt;script&gt;", resp.Name)
+				suite.Equal("Finance <script>", resp.Name)
 			},
 		},
 		{
@@ -884,6 +910,12 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPutRequest(
 				"name": "` + testOUNameFinance + `",
 				"themeId": "theme-new",
 				"layoutId": "layout-new",
+				"authFlowId": "auth-flow-new",
+				"registrationFlowId": "reg-flow-new",
+				"isRegistrationFlowEnabled": true,
+				"recoveryFlowId": "recovery-flow-new",
+				"isRecoveryFlowEnabled": true,
+				"signOutFlowId": "signout-flow-new",
 				"logoUrl": "https://example.com/new-logo.png"
 			}`,
 			setJSONHeader:  true,
@@ -898,16 +930,28 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPutRequest(
 								req.Name == testOUNameFinance &&
 								req.ThemeID == "theme-new" &&
 								req.LayoutID == "layout-new" &&
+								req.AuthFlowID == "auth-flow-new" &&
+								req.RegistrationFlowID == "reg-flow-new" &&
+								req.IsRegistrationFlowEnabled &&
+								req.RecoveryFlowID == "recovery-flow-new" &&
+								req.IsRecoveryFlowEnabled &&
+								req.SignOutFlowID == "signout-flow-new" &&
 								req.LogoURL == "https://example.com/new-logo.png"
 						}),
 					).
 					Return(providers.OrganizationUnit{
-						ID:       defaultOURequestID,
-						Handle:   "finance",
-						Name:     testOUNameFinance,
-						ThemeID:  "theme-new",
-						LayoutID: "layout-new",
-						LogoURL:  "https://example.com/new-logo.png",
+						ID:                        defaultOURequestID,
+						Handle:                    "finance",
+						Name:                      testOUNameFinance,
+						ThemeID:                   "theme-new",
+						LayoutID:                  "layout-new",
+						AuthFlowID:                "auth-flow-new",
+						RegistrationFlowID:        "reg-flow-new",
+						IsRegistrationFlowEnabled: true,
+						RecoveryFlowID:            "recovery-flow-new",
+						IsRecoveryFlowEnabled:     true,
+						SignOutFlowID:             "signout-flow-new",
+						LogoURL:                   "https://example.com/new-logo.png",
 					}, nil).
 					Once()
 			},
@@ -917,6 +961,12 @@ func (suite *OrganizationUnitHandlerTestSuite) TestOUHandler_HandleOUPutRequest(
 				suite.NoError(json.Unmarshal(recorder.Body.Bytes(), &resp))
 				suite.Equal("theme-new", resp.ThemeID)
 				suite.Equal("layout-new", resp.LayoutID)
+				suite.Equal("auth-flow-new", resp.AuthFlowID)
+				suite.Equal("reg-flow-new", resp.RegistrationFlowID)
+				suite.True(resp.IsRegistrationFlowEnabled)
+				suite.Equal("recovery-flow-new", resp.RecoveryFlowID)
+				suite.True(resp.IsRecoveryFlowEnabled)
+				suite.Equal("signout-flow-new", resp.SignOutFlowID)
 				suite.Equal("https://example.com/new-logo.png", resp.LogoURL)
 			},
 		},

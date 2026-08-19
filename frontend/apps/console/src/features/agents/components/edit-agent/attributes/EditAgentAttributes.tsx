@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard} from '@thunderid/components';
+import {QueryErrorNotice, SettingsCard} from '@thunderid/components';
 import {useGetAgentType, useGetAgentTypes} from '@thunderid/configure-agent-types';
 import {renderSchemaField} from '@thunderid/configure-users';
 import {useResolveDisplayName} from '@thunderid/hooks';
 import {Box, CircularProgress, Typography} from '@wso2/oxygen-ui';
-import {useEffect, useRef, type JSX} from 'react';
+import {useCallback, useEffect, useRef, type JSX} from 'react';
 import {useForm, useWatch} from 'react-hook-form';
 import {useTranslation} from 'react-i18next';
 import AttributesSummarySection from './AttributesSummarySection';
@@ -64,7 +49,15 @@ export default function EditAgentAttributes({
 
   const {data: agentTypesData} = useGetAgentTypes();
   const matchedSchema = agentTypesData?.types?.find((s) => s.name === agent.type);
-  const {data: schemaDetails, isLoading} = useGetAgentType(matchedSchema?.id);
+  const {data: schemaDetails, isLoading, error, refetch} = useGetAgentType(matchedSchema?.id);
+
+  // Resolves an error through the `agents` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agents:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `agents:${key}`, options),
+    [t],
+  );
 
   const attributes = (editedAgent.attributes ?? agent.attributes ?? {}) as AttributeFormData;
 
@@ -81,14 +74,21 @@ export default function EditAgentAttributes({
   // baseline every subsequent watched value is compared against to detect a real edit.
   const baselineRef = useRef(filterAttributes(attributes));
 
+  // Staging re-renders the page, which can recreate onFieldChange. Keying the effect on the
+  // callback would restage and loop, so keep it keyed on the watched values only.
+  const onFieldChangeRef = useRef(onFieldChange);
+  useEffect(() => {
+    onFieldChangeRef.current = onFieldChange;
+  }, [onFieldChange]);
+
   useEffect(() => {
     const filtered = filterAttributes(watchedValues);
     // react-hook-form's useWatch fires again shortly after mount as each dynamically-rendered
     // field registers, even without any user interaction — only propagate once the values
     // actually diverge from the baseline, or the Save/Reset bar would show up unprompted.
     if (areAttributesEqual(filtered, baselineRef.current)) return;
-    onFieldChange('attributes', filtered);
-  }, [watchedValues, onFieldChange]);
+    onFieldChangeRef.current('attributes', filtered);
+  }, [watchedValues]);
 
   if (isLoading) {
     return (
@@ -96,6 +96,10 @@ export default function EditAgentAttributes({
         <CircularProgress size={32} />
       </Box>
     );
+  }
+
+  if (error) {
+    return <QueryErrorNotice error={error} t={tForErrors} variant="inline" onRetry={() => void refetch()} />;
   }
 
   // A read-only agent can't be edited at all, so there's nothing for a form to do here — fall

@@ -1,30 +1,24 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
+import (
+	authnprovidercm "github.com/thunder-id/thunderid/internal/authnprovider/common"
+)
+
 const (
-	defaultAuthFlowExpiry           int64 = 1800  // 30 minutes in seconds
+	defaultAuthFlowExpiry           int64 = 3600  // 60 minutes in seconds
 	defaultRegistrationFlowExpiry   int64 = 3600  // 60 minutes in seconds
 	defaultUserOnboardingFlowExpiry int64 = 86400 // 24 hours in seconds
 	defaultRecoveryFlowExpiry       int64 = 1800  // 30 minutes in seconds
+	defaultSignOutFlowExpiry        int64 = 1800  // 30 minutes in seconds
 
-	fieldFlowSecret = "flowSecret"
+	fieldFlowSecret = authnprovidercm.CredentialTypeFlowSecret
+
+	// applicationTypePropertyKey is the InboundClient.Properties key under which the application
+	// type is stored.
+	applicationTypePropertyKey = "type"
 )
 
 // flowInitiationMode classifies how an application is permitted to initiate a new authentication
@@ -48,4 +42,8 @@ const (
 	// identity. This takes precedence over the redirect-based classification for apps that configure
 	// attestation.
 	flowInitiationAttestation
+	// flowInitiationDevMode indicates a mobile application with attestation dev mode enabled, which may
+	// initiate a flow directly without presenting a platform attestation. Intended for testing and
+	// trying out sample or development mobile clients; disabled by default.
+	flowInitiationDevMode
 )

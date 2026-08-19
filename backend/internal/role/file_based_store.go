@@ -1,32 +1,19 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
 	"github.com/thunder-id/thunderid/internal/system/declarative_resource/entity"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 type fileBasedStore struct {
@@ -34,7 +21,7 @@ type fileBasedStore struct {
 }
 
 // newFileBasedStore creates a new file-based store for roles.
-func newFileBasedStore() (roleStoreInterface, transaction.Transactioner) {
+func newFileBasedStore() (roleStoreInterface, providers.Transactioner) {
 	return &fileBasedStore{
 		GenericFileBasedStore: declarativeresource.NewGenericFileBasedStore(entity.KeyTypeRole),
 	}, transaction.NewNoOpTransactioner()
@@ -331,6 +318,19 @@ func (f *fileBasedStore) DeleteAssignmentsByAssignee(
 	return 0, nil
 }
 
+// GetReferencedPermissions returns no permissions for the file-based store: declarative role
+// permissions are immutable, so they are never pruned.
+func (f *fileBasedStore) GetReferencedPermissions(_ context.Context) ([]ResourcePermissions, error) {
+	return []ResourcePermissions{}, nil
+}
+
+// DeleteRolePermission is a no-op for the file-based store: declarative role permissions are
+// immutable, so there is nothing to remove.
+func (f *fileBasedStore) DeleteRolePermission(
+	_ context.Context, _, _ string) (int64, error) {
+	return 0, nil
+}
+
 // AddAssignments is not supported in file-based store.
 func (f *fileBasedStore) AddAssignments(ctx context.Context, id string, assignments []RoleAssignment) error {
 	return errors.New("AddAssignments is not supported in file-based store")
@@ -393,6 +393,50 @@ func (f *fileBasedStore) CheckRoleNameExistsExcludingID(
 	}
 
 	return false, nil
+}
+
+// GetAllPermissionsForAssignees returns every permission granted to the entity and/or groups by
+// declarative roles assigned to them, grouped by resource server.
+func (f *fileBasedStore) GetAllPermissionsForAssignees(
+	ctx context.Context, entityID string, groupIDs []string,
+) ([]ResourcePermissions, error) {
+	if entityID == "" && len(groupIDs) == 0 {
+		return []ResourcePermissions{}, nil
+	}
+
+	list, err := f.GenericFileBasedStore.List()
+	if err != nil {
+		return nil, err
+	}
+
+	groupSet := make(map[string]bool, len(groupIDs))
+	for _, groupID := range groupIDs {
+		groupSet[groupID] = true
+	}
+
+	byResourceServer := make(map[string][]string)
+	for _, item := range list {
+		roleData, err := roleFromDeclarativeData(item.ID.ID, item.Data)
+		if err != nil {
+			// Return the error rather than skipping: this enumeration feeds an authorization
+			// decision. GetAuthorizedPermissionsByResourceServer keeps skipping, since it filters
+			// against an explicit requested set.
+			log.GetLogger().Error(ctx, "Malformed declarative role while enumerating permissions",
+				log.String("roleID", item.ID.ID),
+				log.Error(err))
+			return nil, fmt.Errorf("declarative role %q could not be parsed while enumerating "+
+				"permissions: %w", item.ID.ID, err)
+		}
+		if !matchesAssignee(roleData.Assignments, entityID, groupSet) {
+			continue
+		}
+		for _, resourcePerms := range roleData.Permissions {
+			byResourceServer[resourcePerms.ResourceServerID] = append(
+				byResourceServer[resourcePerms.ResourceServerID], resourcePerms.Permissions...)
+		}
+	}
+
+	return resourcePermissionsFromMap(byResourceServer), nil
 }
 
 // GetAuthorizedPermissionsByResourceServer returns permissions from roles assigned to the entity or groups in

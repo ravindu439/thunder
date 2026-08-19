@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package actorprovider
 
@@ -38,6 +23,7 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/authnprovider/managermock"
 	"github.com/thunder-id/thunderid/tests/mocks/entityprovidermock"
 	"github.com/thunder-id/thunderid/tests/mocks/inboundclientmock"
+	"github.com/thunder-id/thunderid/tests/mocks/rolemock"
 )
 
 type UtilsTestSuite struct {
@@ -54,7 +40,8 @@ func TestUtilsTestSuite(t *testing.T) {
 func (s *UtilsTestSuite) SetupTest() {
 	s.mockInbound = inboundclientmock.NewInboundClientServiceInterfaceMock(s.T())
 	s.mockEntity = entityprovidermock.NewEntityProviderInterfaceMock(s.T())
-	s.provider = Initialize(s.mockInbound, s.mockEntity, managermock.NewAuthnProviderManagerMock(s.T()))
+	s.provider = Initialize(s.mockInbound, s.mockEntity, managermock.NewAuthnProviderManagerMock(s.T()),
+		rolemock.NewRoleServiceInterfaceMock(s.T()))
 }
 
 func (s *UtilsTestSuite) TestBuildApplication_Success() {
@@ -140,17 +127,15 @@ func (s *UtilsTestSuite) TestAssembleApplication_NoClientID() {
 
 func (s *UtilsTestSuite) TestAssembleApplication_CarriesFlowIDs() {
 	client := &providers.InboundClient{
-		ID:                   "app-1",
-		AuthFlowID:           "auth-flow",
-		SignOutFlowID:        "signout-flow",
-		IsSignOutFlowEnabled: true,
+		ID:            "app-1",
+		AuthFlowID:    "auth-flow",
+		SignOutFlowID: "signout-flow",
 	}
 
 	app := assembleApplication(client, nil)
 
 	s.Equal("auth-flow", app.AuthFlowID)
 	s.Equal("signout-flow", app.SignOutFlowID)
-	s.True(app.IsSignOutFlowEnabled)
 }
 
 func (s *UtilsTestSuite) TestBuildApplication_NotFound() {
@@ -215,7 +200,8 @@ func (s *UtilsTestSuite) TestReadEntitySystemAttributes_EmptyAttributes() {
 func TestBuildApplication_InboundClientStoreError(t *testing.T) {
 	mockInbound := inboundclientmock.NewInboundClientServiceInterfaceMock(t)
 	mockEntity := entityprovidermock.NewEntityProviderInterfaceMock(t)
-	provider := Initialize(mockInbound, mockEntity, managermock.NewAuthnProviderManagerMock(t))
+	provider := Initialize(mockInbound, mockEntity, managermock.NewAuthnProviderManagerMock(t),
+		rolemock.NewRoleServiceInterfaceMock(t))
 
 	mockInbound.On("GetInboundClientByEntityID", mock.Anything, "app-1").
 		Return((*inboundmodel.InboundClient)(nil), errors.New("db error"))

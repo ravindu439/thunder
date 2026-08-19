@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package idp
 
@@ -34,9 +19,6 @@ import (
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
-
-// subClaim is the OIDC subject identifier claim, which is always preserved during attribute mapping.
-const subClaim = "sub"
 
 // GetPropertyValue returns the plain-text value for the named property from the slice,
 // or an empty string if the property is absent or its value cannot be retrieved.
@@ -120,8 +102,14 @@ func GetAttributeMappings(idp *providers.IDPDTO, claims map[string]interface{}) 
 	return nil
 }
 
-// ApplyAttributeMappings applies external→local attribute mappings. Unmapped attributes pass through;
-// mapped values take precedence on collision. Returns attrs unchanged when no mappings are configured.
+// ApplyAttributeMappings applies external→local attribute mappings. Mappings copy rather than rename:
+// every incoming attribute is preserved and the mapped value is published under the local name as
+// well. Mapped values take precedence on collision. Returns attrs unchanged when no mappings are
+// configured.
+//
+// Copying matters because one external claim can legitimately feed two local attributes, and because
+// consuming the source silently drops it. Mapping email onto a required username, for example, would
+// otherwise leave the identity with no email at all.
 func ApplyAttributeMappings(
 	attrs map[string]interface{},
 	mappings []providers.AttributeMapping,
@@ -130,20 +118,9 @@ func ApplyAttributeMappings(
 		return attrs
 	}
 
-	mappedSources := make(map[string]bool, len(mappings))
-	for _, m := range mappings {
-		// sub is always preserved as-is; it must not be consumed by a mapping.
-		if m.ExternalAttribute == subClaim {
-			continue
-		}
-		mappedSources[m.ExternalAttribute] = true
-	}
-
-	result := make(map[string]interface{}, len(attrs))
+	result := make(map[string]interface{}, len(attrs)+len(mappings))
 	for key, value := range attrs {
-		if !mappedSources[key] {
-			result[key] = value
-		}
+		result[key] = value
 	}
 	for _, m := range mappings {
 		if value, ok := getNestedValue(attrs, m.ExternalAttribute); ok {
@@ -397,28 +374,46 @@ func validateIDPProperties(ctx context.Context, idpType providers.IDPType, prope
 		}
 	}
 
+	// Seed the email scope for GitHub IDPs
+	if idpType == providers.IDPTypeGitHub {
+		if err := ensureDefaultGitHubScopes(ctx, filteredPropsMap, logger); err != nil {
+			return nil, err
+		}
+	}
+
 	return propertyMapToSlice(filteredPropsMap), nil
 }
 
-// ensureOpenIDScope ensures that the openid scope is present in the scopes property.
+// readScopesValue reads the raw value of a scopes property. Shared by the per-provider scope defaults
+// so the failure is reported under a single i18n key rather than one per caller.
+func readScopesValue(scopesProp cmodels.Property) (string, *tidcommon.ServiceError) {
+	scopesValue, err := scopesProp.GetValue()
+	if err != nil {
+		return "", tidcommon.CustomServiceError(ErrorInvalidIDPProperty, tidcommon.I18nMessage{
+			Key:          "error.idpservice.scopes_value_get_failed_description",
+			DefaultValue: "failed to get scopes value: {{param(error)}}",
+			Params:       map[string]string{"error": err.Error()},
+		})
+	}
+	return scopesValue, nil
+}
+
+// ensureOpenIDScope ensures that the openid scope is present in the scopes property,
+// defaulting to the standard OIDC scopes (openid, email, profile) when none are supplied.
 func ensureOpenIDScope(ctx context.Context, propertyMap map[string]cmodels.Property,
 	logger *log.Logger) *tidcommon.ServiceError {
 	scopesProp, exists := propertyMap[PropScopes]
 	if !exists {
-		err := createAndAppendProperty(ctx, propertyMap, PropScopes, "openid", false, logger)
+		err := createAndAppendProperty(ctx, propertyMap, PropScopes, defaultOIDCScopes, false, logger)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	scopesValue, err := scopesProp.GetValue()
-	if err != nil {
-		return tidcommon.CustomServiceError(ErrorInvalidIDPProperty, tidcommon.I18nMessage{
-			Key:          "error.idpservice.scopes_value_get_failed_description",
-			DefaultValue: "failed to get scopes value: {{param(error)}}",
-			Params:       map[string]string{"error": err.Error()},
-		})
+	scopesValue, svcErr := readScopesValue(scopesProp)
+	if svcErr != nil {
+		return svcErr
 	}
 
 	scopes := sysutils.ParseStringArray(scopesValue, ",")
@@ -431,7 +426,7 @@ func ensureOpenIDScope(ctx context.Context, propertyMap map[string]cmodels.Prope
 	scopes = filteredScopes
 
 	if len(scopes) == 0 {
-		err := createAndAppendProperty(ctx, propertyMap, PropScopes, "openid", false, logger)
+		err := createAndAppendProperty(ctx, propertyMap, PropScopes, defaultOIDCScopes, false, logger)
 		if err != nil {
 			return err
 		}
@@ -447,6 +442,64 @@ func ensureOpenIDScope(ctx context.Context, propertyMap map[string]cmodels.Prope
 	}
 
 	return nil
+}
+
+// ensureDefaultGitHubScopes seeds the GitHub email scope when no scopes are supplied, leaving explicitly
+// configured scopes untouched. Applied here rather than through the type's default property map,
+// because those values are rewritten as URLs by resolveEndpointDefaults.
+func ensureDefaultGitHubScopes(ctx context.Context, propertyMap map[string]cmodels.Property,
+	logger *log.Logger) *tidcommon.ServiceError {
+	scopesProp, exists := propertyMap[PropScopes]
+	if !exists {
+		return createAndAppendProperty(ctx, propertyMap, PropScopes, defaultGitHubScopes, false, logger)
+	}
+
+	scopesValue, svcErr := readScopesValue(scopesProp)
+	if svcErr != nil {
+		return svcErr
+	}
+
+	for _, scope := range sysutils.ParseStringArray(scopesValue, ",") {
+		if scope != "" {
+			return nil
+		}
+	}
+
+	return createAndAppendProperty(ctx, propertyMap, PropScopes, defaultGitHubScopes, false, logger)
+}
+
+// scopesGrantEmail reports whether the effective scopes let the connection read an email address.
+// Generic OAuth is absent by design as we cannot infer an arbitrary provider's scope semantics.
+func scopesGrantEmail(idpType providers.IDPType, scopes []string) bool {
+	switch idpType {
+	case providers.IDPTypeGoogle, providers.IDPTypeOIDC:
+		return slices.Contains(scopes, emailScope)
+	case providers.IDPTypeGitHub:
+		return slices.Contains(scopes, gitHubUserEmailScope) || slices.Contains(scopes, gitHubUserScope)
+	default:
+		return false
+	}
+}
+
+// defaultUsernameSourceAttribute returns the external claim used for the default username mapping,
+// or "" when the provider has none. Google and OIDC use email, while GitHub uses its login claim.
+func defaultUsernameSourceAttribute(idpType providers.IDPType) string {
+	switch idpType {
+	case providers.IDPTypeGoogle, providers.IDPTypeOIDC:
+		return emailClaim
+	case providers.IDPTypeGitHub:
+		return gitHubLoginClaim
+	default:
+		return ""
+	}
+}
+
+// ensureAttributeConfiguration returns the attribute configuration, creating it when absent.
+func ensureAttributeConfiguration(idp *providers.IDPDTO) *providers.AttributeConfiguration {
+	if idp.AttributeConfiguration == nil {
+		idp.AttributeConfiguration = &providers.AttributeConfiguration{}
+	}
+	return idp.AttributeConfiguration
 }
 
 // createAndAppendProperty creates a new property and appends it to the property map.

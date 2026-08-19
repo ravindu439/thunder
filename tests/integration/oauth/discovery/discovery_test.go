@@ -1,37 +1,29 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package discovery
 
 import (
 	"encoding/json"
+	"io"
 
 	"net/http"
+	"strings"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 const (
 	oauth2DiscoveryEndpoint = "/.well-known/oauth-authorization-server"
 	oidcDiscoveryEndpoint   = "/.well-known/openid-configuration"
 	testServerURL           = testutils.TestServerURL
+	// oidcCIBAGrantType is the OpenID Connect CIBA grant type identifier (providers.GrantTypeCIBA).
+	oidcCIBAGrantType = "urn:openid:params:grant-type:ciba"
+	// cibaBackchannelAuthEndpointPath is the backchannel authentication endpoint path
+	// (oauth2const.OAuth2BackchannelAuthEndpoint).
+	cibaBackchannelAuthEndpointPath = "/oauth2/bc-authorize"
 )
 
 // OAuth2AuthorizationServerMetadata represents OAuth2 Authorization Server Metadata (RFC 8414)
@@ -39,15 +31,17 @@ type OAuth2AuthorizationServerMetadata struct {
 	Issuer                                     string   `json:"issuer"`
 	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
 	TokenEndpoint                              string   `json:"token_endpoint"`
-	UserInfoEndpoint                           string   `json:"userinfo_endpoint,omitempty"`
 	JWKSUri                                    string   `json:"jwks_uri"`
 	RevocationEndpoint                         string   `json:"revocation_endpoint,omitempty"`
 	IntrospectionEndpoint                      string   `json:"introspection_endpoint,omitempty"`
 	RegistrationEndpoint                       string   `json:"registration_endpoint,omitempty"`
-	ScopesSupported                            []string `json:"scopes_supported"`
+	BackchannelAuthenticationEndpoint          string   `json:"backchannel_authentication_endpoint,omitempty"`
+	BackchannelTokenDeliveryModesSupported     []string `json:"backchannel_token_delivery_modes_supported,omitempty"`
+	BackchannelUserCodeParameterSupported      bool     `json:"backchannel_user_code_parameter_supported"`
 	ResponseTypesSupported                     []string `json:"response_types_supported"`
 	GrantTypesSupported                        []string `json:"grant_types_supported"`
 	TokenEndpointAuthMethodsSupported          []string `json:"token_endpoint_auth_methods_supported"`
+	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported"`
 	CodeChallengeMethodsSupported              []string `json:"code_challenge_methods_supported,omitempty"`
 	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
 }
@@ -55,6 +49,8 @@ type OAuth2AuthorizationServerMetadata struct {
 // OIDCProviderMetadata represents OpenID Connect Provider Metadata (OIDC Discovery 1.0)
 type OIDCProviderMetadata struct {
 	OAuth2AuthorizationServerMetadata
+	UserInfoEndpoint                 string   `json:"userinfo_endpoint"`
+	ScopesSupported                  []string `json:"scopes_supported"`
 	SubjectTypesSupported            []string `json:"subject_types_supported"`
 	IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
 	ClaimsSupported                  []string `json:"claims_supported"`
@@ -87,8 +83,15 @@ func (ts *DiscoveryTestSuite) TestOAuth2AuthorizationServerMetadata_GET_Success(
 	ts.Equal(http.StatusOK, resp.StatusCode)
 	ts.Equal("application/json", resp.Header.Get("Content-Type"))
 
+	body, err := io.ReadAll(resp.Body)
+	ts.Require().NoError(err)
+
 	var metadata OAuth2AuthorizationServerMetadata
-	err = json.NewDecoder(resp.Body).Decode(&metadata)
+	err = json.Unmarshal(body, &metadata)
+	ts.Require().NoError(err)
+
+	var rawMetadata map[string]json.RawMessage
+	err = json.Unmarshal(body, &rawMetadata)
 	ts.Require().NoError(err)
 
 	// Verify required fields are present
@@ -106,9 +109,9 @@ func (ts *DiscoveryTestSuite) TestOAuth2AuthorizationServerMetadata_GET_Success(
 	ts.Contains(metadata.RegistrationEndpoint, "/oauth2/dcr/register", "RegistrationEndpoint should contain correct path")
 	ts.Contains(metadata.IntrospectionEndpoint, "/oauth2/introspect", "IntrospectionEndpoint should contain correct path")
 
-	// Verify userinfo endpoint is present
-	ts.NotEmpty(metadata.UserInfoEndpoint, "UserInfoEndpoint should be present")
-	ts.Contains(metadata.UserInfoEndpoint, "/oauth2/userinfo", "UserInfoEndpoint should contain correct path")
+	// Verify OIDC-specific fields are not present
+	ts.NotContains(rawMetadata, "userinfo_endpoint", "OAuth metadata should not include the UserInfo endpoint")
+	ts.NotContains(rawMetadata, "scopes_supported", "OAuth metadata should not include OIDC scopes")
 
 	// Verify revocation endpoint is present
 	ts.NotEmpty(metadata.RevocationEndpoint, "RevocationEndpoint should be present")
@@ -132,13 +135,16 @@ func (ts *DiscoveryTestSuite) TestOAuth2AuthorizationServerMetadata_GET_Success(
 	ts.Contains(metadata.TokenEndpointAuthMethodsSupported, "client_secret_post", "Should support client_secret_post")
 	ts.Contains(metadata.TokenEndpointAuthMethodsSupported, "none", "Should support none")
 
+	// Verify token endpoint auth signing algs are advertised with FAPI 2.0 permitted algorithms (RFC 8414)
+	ts.NotEmpty(metadata.TokenEndpointAuthSigningAlgValuesSupported,
+		"token_endpoint_auth_signing_alg_values_supported should be present (FAPI 2.0)")
+	ts.Contains(metadata.TokenEndpointAuthSigningAlgValuesSupported, "PS256", "Should advertise PS256")
+	ts.Contains(metadata.TokenEndpointAuthSigningAlgValuesSupported, "ES256", "Should advertise ES256")
+	ts.Contains(metadata.TokenEndpointAuthSigningAlgValuesSupported, "EdDSA", "Should advertise EdDSA")
+
 	// Verify only S256 code challenge method is supported (plain is prohibited per OAuth 2.0 Security BCP)
 	ts.Equal([]string{"S256"}, metadata.CodeChallengeMethodsSupported,
 		"CodeChallengeMethodsSupported should contain exactly S256")
-
-	// Verify supported scopes
-	ts.NotEmpty(metadata.ScopesSupported, "ScopesSupported should not be empty")
-	ts.Contains(metadata.ScopesSupported, "openid", "Should support openid scope")
 
 	// Verify RFC 9207 issuer identification support
 	ts.True(metadata.AuthorizationResponseIssParameterSupported,
@@ -189,6 +195,10 @@ func (ts *DiscoveryTestSuite) TestOIDCDiscovery_GET_Success() {
 	ts.Contains(metadata.IDTokenSigningAlgValuesSupported, "RS256", "Should support RS256 signing algorithm")
 
 	ts.NotEmpty(metadata.ClaimsSupported, "ClaimsSupported should not be empty")
+	ts.NotEmpty(metadata.UserInfoEndpoint, "UserInfoEndpoint should be present")
+	ts.Contains(metadata.UserInfoEndpoint, "/oauth2/userinfo", "UserInfoEndpoint should contain correct path")
+	ts.NotEmpty(metadata.ScopesSupported, "ScopesSupported should not be empty")
+	ts.Contains(metadata.ScopesSupported, "openid", "Should support openid scope")
 	// Verify standard JWT claims
 	ts.Contains(metadata.ClaimsSupported, "sub", "Should support sub claim")
 	ts.Contains(metadata.ClaimsSupported, "iss", "Should support iss claim")
@@ -232,6 +242,34 @@ func (ts *DiscoveryTestSuite) TestOIDCDiscovery_AcrValuesSupported() {
 	}
 	ts.ElementsMatch(expectedACRs, metadata.AcrValuesSupported,
 		"acr_values_supported must contain exactly the ACR values from the ACR-AMR config")
+}
+
+// TestOIDCDiscovery_CIBAMetadata verifies the OIDC discovery document advertises CIBA support in
+// poll-only mode: the backchannel authentication endpoint, poll-only delivery mode, no user_code
+// parameter support, and the CIBA grant type in grant_types_supported. Ping/push delivery is not
+// implemented, so only "poll" must appear.
+func (ts *DiscoveryTestSuite) TestOIDCDiscovery_CIBAMetadata() {
+	req, err := http.NewRequest("GET", testServerURL+oidcDiscoveryEndpoint, nil)
+	ts.Require().NoError(err)
+
+	resp, err := ts.client.Do(req)
+	ts.Require().NoError(err)
+	defer resp.Body.Close()
+
+	ts.Equal(http.StatusOK, resp.StatusCode)
+
+	var metadata OIDCProviderMetadata
+	err = json.NewDecoder(resp.Body).Decode(&metadata)
+	ts.Require().NoError(err)
+
+	ts.Contains(metadata.GrantTypesSupported, oidcCIBAGrantType,
+		"grant_types_supported must include the CIBA grant type")
+	ts.NotEmpty(metadata.BackchannelAuthenticationEndpoint, "BackchannelAuthenticationEndpoint should be present")
+	ts.True(strings.HasSuffix(metadata.BackchannelAuthenticationEndpoint, cibaBackchannelAuthEndpointPath),
+		"BackchannelAuthenticationEndpoint should end with the bc-authorize path")
+	ts.Equal([]string{"poll"}, metadata.BackchannelTokenDeliveryModesSupported,
+		"only poll-mode delivery is implemented")
+	ts.False(metadata.BackchannelUserCodeParameterSupported, "user_code is not supported")
 }
 
 // TestOIDCDiscovery_OPTIONS_Success tests OPTIONS request for CORS
@@ -283,8 +321,6 @@ func (ts *DiscoveryTestSuite) TestOAuth2MetadataConsistency() {
 	ts.Equal(oauth2Metadata.ResponseTypesSupported, oidcMetadata.ResponseTypesSupported, "ResponseTypesSupported should match")
 	ts.Equal(oauth2Metadata.TokenEndpointAuthMethodsSupported, oidcMetadata.TokenEndpointAuthMethodsSupported, "TokenEndpointAuthMethodsSupported should match")
 	ts.Equal(oauth2Metadata.CodeChallengeMethodsSupported, oidcMetadata.CodeChallengeMethodsSupported, "CodeChallengeMethodsSupported should match")
-	// ScopesSupported order may differ, so we check that they contain the same scopes
-	ts.ElementsMatch(oauth2Metadata.ScopesSupported, oidcMetadata.ScopesSupported, "ScopesSupported should contain the same scopes")
 }
 
 // TestDiscoveryEndpointsAccessibility tests that discovery endpoints are accessible without authentication

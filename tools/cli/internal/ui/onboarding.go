@@ -1,25 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ui
 
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -58,19 +45,32 @@ func (d onboardingDelegate) Render(w io.Writer, m list.Model, index int, item li
 
 	isSelected := index == m.Index()
 
+	// Emoji glyphs render at inconsistent cell widths across terminals/fonts, so the
+	// description line pads to the title's actual rendered width instead of a fixed
+	// column count — otherwise it drifts out of alignment depending on which emoji
+	// a given item uses.
+	var prefix string
+	switch {
+	case i.comingSoon, !isSelected:
+		prefix = "    " + i.emoji + "  "
+	default:
+		prefix = "  ❯ " + i.emoji + "  "
+	}
+	descIndent := strings.Repeat(" ", lipgloss.Width(prefix))
+
 	if i.comingSoon {
-		fmt.Fprintln(w, "    "+Dim(i.emoji+"  "+i.title)+"  "+Dim("· Coming Soon")) //nolint:errcheck
-		fmt.Fprint(w, "      "+Dim(i.description))                                  //nolint:errcheck
+		fmt.Fprintln(w, Dim(prefix+i.title)+"  "+Dim("· Coming Soon")) //nolint:errcheck
+		fmt.Fprint(w, descIndent+Dim(i.description))                   //nolint:errcheck
 		return
 	}
 
 	if isSelected {
 		//nolint:errcheck
 		fmt.Fprintln(w, "  "+brandStyle.Render("❯ ")+Bold(brandStyle.Render(i.emoji+"  "+i.title)))
-		fmt.Fprint(w, "      "+i.description) //nolint:errcheck
+		fmt.Fprint(w, descIndent+i.description) //nolint:errcheck
 	} else {
-		fmt.Fprintln(w, "    "+i.emoji+"  "+i.title) //nolint:errcheck
-		fmt.Fprint(w, "      "+Dim(i.description))   //nolint:errcheck
+		fmt.Fprintln(w, prefix+i.title)              //nolint:errcheck
+		fmt.Fprint(w, descIndent+Dim(i.description)) //nolint:errcheck
 	}
 }
 
@@ -133,7 +133,7 @@ func (m *ReplModel) selectOnboarding() tea.Cmd {
 		}
 	}
 
-	m.tryingOut = true
-	m.input.Blur()
-	return makeTryCmd(item.sampleName, m.installPath, m.verbose, sample.Options{})
+	return m.launchTry(item.sampleName, sample.Options{
+		Features: item.sampleFeatures, Port: m.effectivePort(),
+	})
 }

@@ -1,28 +1,14 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
+import type {Application} from '@thunderid/configure-applications';
 import {Box, Typography, TextField, Autocomplete, CircularProgress, Alert} from '@wso2/oxygen-ui';
 import {useTranslation, Trans} from 'react-i18next';
 import {Link} from 'react-router';
+import RouteConfig from '../../../../../configs/RouteConfig';
 import useGetFlows from '../../../../flows/api/useGetFlows';
 import {FlowType} from '../../../../flows/models/flows';
-import type {Application} from '../../../models/application';
 
 /**
  * Props for the {@link SignOutFlowSection} component.
@@ -52,7 +38,6 @@ interface SignOutFlowSectionProps {
  * Section component for selecting the signout flow.
  *
  * Provides:
- * - Toggle switch to enable/disable signout
  * - Autocomplete dropdown to select from available signout flows
  * - Loading state while fetching flows
  *
@@ -72,29 +57,26 @@ export default function SignOutFlowSection({
 
   return (
     <SettingsCard
-      title={t('applications:edit.flows.labels.signoutFlow', 'Sign Out')}
+      title={t('applications:edit.flows.labels.signOutFlow', 'Sign Out Flow')}
       description={t(
-        'applications:edit.flows.labels.signoutFlow.description',
-        'Confirm and terminate the SSO session when people sign out of this {{entity}}.',
+        'applications:edit.flows.labels.signOutFlow.description',
+        'Terminate the SSO session when people sign out of this {{entity}}.',
         {entity: entityLabel},
       )}
-      enabled={editedApp.isSignOutFlowEnabled ?? application.isSignOutFlowEnabled ?? false}
-      onToggle={application.isReadOnly ? undefined : (enabled) => onFieldChange('isSignOutFlowEnabled', enabled)}
     >
       {(editedApp.signOutFlowId ?? application.signOutFlowId) && (
         <Alert severity="info" sx={{mb: 2}}>
           <Trans
-            i18nKey="applications:edit.flows.signoutFlow.alert"
-            defaults="Edit the <0>selected signout flow</0> or <1>create a new one</1>."
+            i18nKey="applications:edit.flows.signOutFlow.alert"
             components={[
               <Link
                 key="edit"
-                to={`/flows/signout/${editedApp.signOutFlowId ?? application.signOutFlowId}`}
+                to={RouteConfig.flows.detail(editedApp.signOutFlowId ?? application.signOutFlowId ?? '')}
                 style={{color: 'inherit', fontWeight: 'bold', textDecoration: 'underline'}}
               />,
               <Link
                 key="create"
-                to="/flows"
+                to={RouteConfig.flows.list()}
                 style={{color: 'inherit', fontWeight: 'bold', textDecoration: 'underline'}}
               />,
             ]}
@@ -114,9 +96,9 @@ export default function SignOutFlowSection({
         renderInput={(params) => (
           <TextField
             {...params}
-            placeholder={t('applications:edit.flows.signoutFlow.placeholder', 'Select a signout flow')}
+            placeholder={t('applications:edit.flows.signOutFlow.placeholder', 'Select a sign-out flow')}
             helperText={t(
-              'applications:edit.flows.signoutFlow.hint',
+              'applications:edit.flows.signOutFlow.hint',
               'The flow that runs when a user logs out of this {{entity}}.',
               {entity: entityLabel},
             )}

@@ -1,29 +1,16 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {CollisionPriority} from '@dnd-kit/abstract';
-import {Box, Typography, type SxProps, type Theme} from '@wso2/oxygen-ui';
-import {ChevronDown, ChevronLeft, ChevronRight, ChevronUp} from '@wso2/oxygen-ui-icons-react';
+import {getStackGridSx, parseStackItems} from '@thunderid/design';
+import {Box, Button, Menu, MenuItem, Typography, type SxProps, type Theme} from '@wso2/oxygen-ui';
+import {ChevronDown, ChevronLeft, ChevronRight, ChevronUp, PlusIcon} from '@wso2/oxygen-ui-icons-react';
 import {useReactFlow, type Node} from '@xyflow/react';
-import classNames from 'classnames';
-import {useMemo, useCallback, type ReactElement} from 'react';
+import {useMemo, useCallback, useState, type MouseEvent, type ReactElement} from 'react';
+import {useTranslation} from 'react-i18next';
 import Droppable from '../../../dnd/Droppable';
 import Handle from '../../../dnd/Handle';
+import dashedAddButtonSx from '../../steps/view/dashedAddButtonSx';
 import ReorderableFlowElement from '../../steps/view/ReorderableElement';
 import VisualFlowConstants from '@/features/flows/constants/VisualFlowConstants';
 import useFlowPlugins from '@/features/flows/hooks/useFlowPlugins';
@@ -32,14 +19,15 @@ import generateResourceId from '@/features/flows/utils/generateResourceId';
 
 /**
  * Stack element type with layout configuration at top level.
- * When `columns` >= 2, the stack uses CSS Grid instead of flexbox.
+ * With a valid `items` count of two or more the stack uses CSS Grid; anything else
+ * (absent, 1, or malformed) keeps the flex layout.
  */
 export type StackElement = FlowElement & {
   direction?: 'row' | 'column';
   gap?: number;
   align?: string;
   justify?: string;
-  /** Number of equal slots. 1 = flex mode, ≥2 = grid mode with that many slots. */
+  /** Number of slots across the main axis. Absent keeps the flex layout. */
   items?: number;
 };
 
@@ -114,13 +102,31 @@ const SLOT_SX: SxProps<Theme> = {
 /**
  * sx for empty placeholder slots.
  */
+/**
+ * Chrome that outlines the stack itself, mirroring the Form adapter so a stack's
+ * children visibly belong to it.
+ */
+const CONTAINER_SX: SxProps<Theme> = {
+  borderRadius: 'calc(2 * var(--oxygen-shape-borderRadius))',
+  border: '1px dashed var(--oxygen-palette-divider)',
+  backgroundColor: 'var(--oxygen-palette-background-paper)',
+  boxSizing: 'border-box',
+  px: 2,
+  py: 1.5,
+};
+
+// An empty slot marks reserved space rather than an action, so it reads as a dashed
+// outline instead of a filled box. That keeps it distinct from the "Add Component"
+// button, which is filled and carries a label.
 const EMPTY_SLOT_SX: SxProps<Theme> = {
   ...SLOT_SX,
-  backgroundColor: 'action.hover',
-  minHeight: '44px',
+  backgroundColor: 'transparent',
+  border: '1.5px dashed',
+  borderColor: 'divider',
+  minHeight: '40px',
   padding: '8px',
-  transition: 'background-color 150ms ease',
-  '&:hover': {backgroundColor: 'action.selected'},
+  transition: 'border-color 150ms ease, background-color 150ms ease',
+  '&:hover': {borderColor: 'primary.main', backgroundColor: 'action.hover'},
 };
 
 /**
@@ -138,12 +144,18 @@ function StackAdapter({
   onAddElementToForm = undefined,
 }: StackAdapterPropsInterface): ReactElement {
   const stackElement = resource as StackElement;
-  const items = stackElement?.items ?? 1;
-  const useGrid = items >= 2;
-  const isRow = (stackElement?.direction ?? 'row') === 'row';
+  const gridSx = getStackGridSx(stackElement);
+  const items = parseStackItems(stackElement?.items);
+  const useGrid = gridSx !== null;
+  // Grid resolves any non-column direction to the row axis, so the move controls have
+  // to follow the same rule or a custom direction shows Up/Down beside a row grid.
+  const isColumnAxis = (stackElement?.direction ?? '').startsWith('column');
+  const isRow = useGrid ? !isColumnAxis : (stackElement?.direction ?? 'row') === 'row';
 
+  const {t} = useTranslation();
   const {updateNodeData} = useReactFlow();
   const {emitElementFilter} = useFlowPlugins();
+  const [addAnchorEl, setAddAnchorEl] = useState<null | HTMLElement>(null);
 
   const handleMove = useCallback(
     (componentId: string, delta: -1 | 1): void => {
@@ -178,34 +190,35 @@ function StackAdapter({
     return resource.components.filter((component: FlowElement) => emitElementFilter(component));
   }, [resource?.components, emitElementFilter]);
 
-  // In grid mode: always fill defined slots — show placeholders for every unoccupied slot.
-  // In flex mode: show a single placeholder only when there are no children.
-  let emptySlotCount: number;
-  if (useGrid) {
-    emptySlotCount = Math.max(0, items - filteredComponents.length);
-  } else {
-    emptySlotCount = filteredComponents.length === 0 ? 1 : 0;
-  }
+  // In grid mode the placeholders convey the slot structure, so every unoccupied cell
+  // gets one, including the trailing cells of a partially filled last track.
+  // A flex stack has no slots to convey, and an empty one already shows the
+  // "Add Component" button, so a placeholder there would just be a second empty box.
+  const slots = items ?? 1;
+  const occupiedTracks = Math.max(1, Math.ceil(filteredComponents.length / slots));
+  const emptySlotCount: number = useGrid ? occupiedTracks * slots - filteredComponents.length : 0;
 
-  const layoutSx: SxProps<Theme> = useGrid
-    ? {
-        display: 'grid',
-        gridTemplateColumns: `repeat(${items}, 1fr)`,
-        gap: stackElement?.gap ?? 1,
-        alignItems: stackElement?.align ?? 'start',
-        px: 2,
-      }
-    : {
-        display: 'flex',
-        flexDirection: stackElement?.direction ?? 'row',
-        flexWrap: 'wrap',
-        gap: stackElement?.gap ?? 2,
-        alignItems: stackElement?.align ?? 'center',
-        justifyContent: stackElement?.justify ?? 'center',
-        px: 2,
-      };
+  const layoutSx: SxProps<Theme> = gridSx ?? {
+    display: 'flex',
+    flexDirection: stackElement?.direction ?? 'row',
+    flexWrap: 'wrap',
+    gap: stackElement?.gap ?? 2,
+    alignItems: stackElement?.align ?? 'center',
+    justifyContent: stackElement?.justify ?? 'center',
+  };
 
-  return (
+  const addableElements: FlowElement[] = availableElements.filter(
+    (element: FlowElement) =>
+      VisualFlowConstants.FLOW_BUILDER_STACK_ALLOWED_RESOURCE_TYPES.includes(element.type) &&
+      element.display?.showOnResourcePanel !== false,
+  );
+
+  const handleAddComponent = (element: FlowElement): void => {
+    setAddAnchorEl(null);
+    onAddElementToForm?.(element, resource.id);
+  };
+
+  const droppable = (
     <Droppable
       id={generateResourceId(`${VisualFlowConstants.FLOW_BUILDER_STACK_ID}_${resource.id}`)}
       data={{droppedOn: resource, stepId}}
@@ -255,7 +268,6 @@ function StackAdapter({
             id={component.id}
             index={index}
             element={component}
-            className={classNames('flow-builder-step-content-form-field')}
             group={resource.id}
             type={resource.id}
             accept={[resource.id, ...VisualFlowConstants.FLOW_BUILDER_STACK_ALLOWED_RESOURCE_TYPES]}
@@ -263,7 +275,6 @@ function StackAdapter({
             onAddElementToForm={onAddElementToForm}
             hideDrag
             hideEdit
-            hideDelete
             extraActions={moveActions}
             sx={SLOT_SX}
             dropIndicatorStyles={{
@@ -287,6 +298,43 @@ function StackAdapter({
         </Box>
       ))}
     </Droppable>
+  );
+
+  // The add affordance lives inside the container chrome so the stack's outline
+  // encloses it, the same way a form encloses its own add button.
+  return (
+    <Box sx={CONTAINER_SX}>
+      {droppable}
+      {addableElements.length > 0 && (
+        <Button
+          fullWidth
+          size="small"
+          className="nodrag"
+          data-testid="stack-add-component-button"
+          startIcon={<PlusIcon size={15} />}
+          onClick={(event: MouseEvent<HTMLElement>) => {
+            event.stopPropagation();
+            setAddAnchorEl(event.currentTarget);
+          }}
+          sx={{...dashedAddButtonSx, mt: 1.5}}
+        >
+          {t('flows:core.steps.view.addComponent', 'Add Component')}
+        </Button>
+      )}
+      <Menu
+        anchorEl={addAnchorEl}
+        open={Boolean(addAnchorEl)}
+        onClose={() => setAddAnchorEl(null)}
+        anchorOrigin={{vertical: 'bottom', horizontal: 'right'}}
+        transformOrigin={{vertical: 'top', horizontal: 'right'}}
+      >
+        {addableElements.map((element: FlowElement) => (
+          <MenuItem key={element.id} onClick={() => handleAddComponent(element)} sx={{minWidth: 200}}>
+            {element.display?.label ?? element.type}
+          </MenuItem>
+        ))}
+      </Menu>
+    </Box>
   );
 }
 

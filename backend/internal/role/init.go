@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -30,7 +15,8 @@ import (
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
+	"github.com/thunder-id/thunderid/internal/system/sysauthz"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // Initialize initializes the role service and registers its routes.
@@ -41,6 +27,7 @@ func Initialize(
 	ouService oupkg.OrganizationUnitServiceInterface,
 	resourceService resourcepkg.ResourceServiceInterface,
 	entityTypeService entitytype.EntityTypeServiceInterface,
+	authzService sysauthz.SystemAuthorizationServiceInterface,
 ) (
 	RoleServiceInterface, RoleAssignmentServiceInterface, oupkg.OURoleResolver,
 	declarativeresource.ResourceExporter, error,
@@ -54,7 +41,7 @@ func Initialize(
 	// Step 2: Create service with store
 	roleService := newRoleService(
 		roleStore, entityService, groupService, ouService, resourceService,
-		transactioner,
+		transactioner, authzService,
 	)
 
 	// Step 3: Load declarative resources into store (if applicable)
@@ -65,7 +52,7 @@ func Initialize(
 	}
 
 	assignmentService := newRoleAssignmentService(
-		roleStore, entityService, groupService, entityTypeService, transactioner,
+		roleStore, entityService, groupService, entityTypeService, transactioner, authzService,
 	)
 	roleHandler := newRoleHandler(roleService, assignmentService)
 	registerRoutes(mux, roleHandler)
@@ -104,7 +91,7 @@ func Initialize(
 // only in composite mode. Callers in those modes invoke loadDeclarativeResources after the
 // role service has been constructed so it can resolve ou_handle.
 func initializeStore() (
-	roleStoreInterface, transaction.Transactioner, *fileBasedStore, roleStoreInterface, error,
+	roleStoreInterface, providers.Transactioner, *fileBasedStore, roleStoreInterface, error,
 ) {
 	storeMode := getRoleStoreMode()
 

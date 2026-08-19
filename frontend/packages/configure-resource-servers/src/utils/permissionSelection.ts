@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {ResourcePermissions} from '../models/resource-server';
 
@@ -28,18 +13,33 @@ export function isPermissionSelected(
   return list.some((entry) => entry.resourceServerId === resourceServerId && entry.permissions.includes(permission));
 }
 
+/**
+ * Lists the permissions of the resources a permission sits under, nearest first. Permission strings
+ * are built as `parent + delimiter + handle` and handles may not contain the delimiter, so every
+ * prefix of a permission is exactly one of its ancestors.
+ */
+export function ancestorPermissions(permission: string, delimiter: string): string[] {
+  if (!delimiter) return [];
+  const segments = permission.split(delimiter);
+  return segments.slice(0, -1).map((_, index) => segments.slice(0, index + 1).join(delimiter));
+}
+
 export function togglePermission(
   list: ResourcePermissions[],
   resourceServerId: string,
   permission: string,
+  delimiter: string,
 ): ResourcePermissions[] {
   const existing = list.find((entry) => entry.resourceServerId === resourceServerId);
   if (!existing) {
     return [...list, {resourceServerId, permissions: [permission]}];
   }
 
+  // An ancestor confers every permission beneath it, so dropping only the permission itself would
+  // leave the role still holding it through the ancestor.
+  const removed = new Set([permission, ...ancestorPermissions(permission, delimiter)]);
   const updatedPermissions = existing.permissions.includes(permission)
-    ? existing.permissions.filter((p) => p !== permission)
+    ? existing.permissions.filter((p) => !removed.has(p))
     : [...existing.permissions, permission];
 
   if (updatedPermissions.length === 0) {

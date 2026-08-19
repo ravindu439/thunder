@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderWithProviders, screen, fireEvent, waitFor} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -66,7 +51,7 @@ describe('AddNodeDialog', () => {
   it('renders the Add Resource title when mode is resource', () => {
     renderWithProviders(<AddNodeDialog {...defaultProps} />);
 
-    expect(screen.getByText('Add Resource')).toBeInTheDocument();
+    expect(screen.getByText('Add resource')).toBeInTheDocument();
   });
 
   it('renders the Name label when the dialog is open', () => {
@@ -144,7 +129,7 @@ describe('AddNodeDialog', () => {
   it('does not render when open is false', () => {
     renderWithProviders(<AddNodeDialog {...defaultProps} open={false} />);
 
-    expect(screen.queryByText('Add Resource')).not.toBeInTheDocument();
+    expect(screen.queryByText('Add resource')).not.toBeInTheDocument();
   });
 
   it('shows an error and disables the Add button when the handle contains the delimiter character', async () => {
@@ -159,7 +144,7 @@ describe('AddNodeDialog', () => {
       expect(handleInput).toHaveValue('foo/bar');
     });
 
-    expect(screen.getByText('Handle cannot contain the delimiter character "/".')).toBeInTheDocument();
+    expect(screen.getByText('Handle cannot contain the delimiter character /.')).toBeInTheDocument();
 
     const addButton = screen.getByRole('button', {name: /^add$/i});
     expect(addButton).toBeDisabled();
@@ -238,5 +223,92 @@ describe('AddNodeDialog', () => {
     expect(textboxes[0]).toHaveAttribute('placeholder', 'e.g. Send message');
     expect(textboxes[1]).toHaveAttribute('placeholder', 'e.g. send-message');
     expect(textboxes[2]).toHaveAttribute('placeholder', 'e.g. Sends a message to the specified channel');
+  });
+
+  it('shows the resolved catalog message inline, never the raw server text, when creating a resource fails', async () => {
+    const rawServerMessage = 'raw backend create-resource failure detail';
+    mockCreateResourceMutate.mockImplementation((_payload: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error(rawServerMessage));
+    });
+
+    renderWithProviders(<AddNodeDialog {...defaultProps} />);
+
+    const textboxes = screen.getAllByRole('textbox');
+    fireEvent.change(textboxes[0], {target: {value: 'Docs'}});
+
+    await waitFor(() => expect(textboxes[1]).toHaveValue('docs'));
+
+    fireEvent.click(screen.getByRole('button', {name: /^add$/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to add resource.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(rawServerMessage)).not.toBeInTheDocument();
+  });
+
+  it('shows the resolved catalog message inline, never the raw server text, when creating an action fails', async () => {
+    const rawServerMessage = 'raw backend create-action failure detail';
+    mockCreateActionMutate.mockImplementation((_payload: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error(rawServerMessage));
+    });
+
+    renderWithProviders(<AddNodeDialog {...defaultProps} mode="server-action" />);
+
+    const textboxes = screen.getAllByRole('textbox');
+    fireEvent.change(textboxes[0], {target: {value: 'Read'}});
+
+    await waitFor(() => expect(textboxes[1]).toHaveValue('read'));
+
+    fireEvent.click(screen.getByRole('button', {name: /^add$/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to add action.')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(rawServerMessage)).not.toBeInTheDocument();
+  });
+
+  it('clears the create error when the name field is edited again', async () => {
+    mockCreateResourceMutate.mockImplementation((_payload: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error('nope'));
+    });
+
+    renderWithProviders(<AddNodeDialog {...defaultProps} />);
+
+    const textboxes = screen.getAllByRole('textbox');
+    fireEvent.change(textboxes[0], {target: {value: 'Docs'}});
+    await waitFor(() => expect(textboxes[1]).toHaveValue('docs'));
+
+    fireEvent.click(screen.getByRole('button', {name: /^add$/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to add resource.')).toBeInTheDocument();
+    });
+
+    fireEvent.change(textboxes[0], {target: {value: 'Docs 2'}});
+
+    expect(screen.queryByText('Failed to add resource.')).not.toBeInTheDocument();
+  });
+
+  it('clears the create error and resets the fields when Cancel is clicked after a failed create', async () => {
+    mockCreateResourceMutate.mockImplementation((_payload: unknown, opts: {onError: (err: Error) => void}) => {
+      opts.onError(new Error('nope'));
+    });
+
+    renderWithProviders(<AddNodeDialog {...defaultProps} />);
+
+    const textboxes = screen.getAllByRole('textbox');
+    fireEvent.change(textboxes[0], {target: {value: 'Docs'}});
+    await waitFor(() => expect(textboxes[1]).toHaveValue('docs'));
+
+    fireEvent.click(screen.getByRole('button', {name: /^add$/i}));
+
+    await waitFor(() => {
+      expect(screen.getByText('Failed to add resource.')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', {name: 'Cancel'}));
+
+    expect(screen.queryByText('Failed to add resource.')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('textbox')[0]).toHaveValue('');
   });
 });

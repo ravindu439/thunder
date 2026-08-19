@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderWithProviders, screen, fireEvent, waitFor} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -38,6 +23,10 @@ const mockMcpResourceServer = {
   delimiter: ':',
   type: 'MCP' as const,
 };
+
+const mockReadOnlyResourceServer = {...mockResourceServer, isReadOnly: true};
+
+const mockReadOnlyMcpResourceServer = {...mockMcpResourceServer, isReadOnly: true};
 
 const mockUseGetResources = vi.fn();
 const mockUseGetServerActions = vi.fn();
@@ -89,13 +78,21 @@ vi.mock('../ResourceDetailPanel', () => ({
 }));
 
 vi.mock('../ResourceTreeNode', () => ({
-  ResourceNode: ({node, kindFilter = undefined}: {node: {name: string}; kindFilter?: string}) => (
-    <div data-testid="resource-node" data-kind-filter={kindFilter ?? 'all'}>
+  ResourceNode: ({
+    node,
+    kindFilter = undefined,
+    readOnly = false,
+  }: {
+    node: {name: string};
+    kindFilter?: string;
+    readOnly?: boolean;
+  }) => (
+    <div data-testid="resource-node" data-kind-filter={kindFilter ?? 'all'} data-read-only={String(readOnly)}>
       {node.name}
     </div>
   ),
-  ActionNode: ({action}: {action: {name: string; kind?: string}}) => (
-    <div data-testid="action-node" data-kind={action.kind ?? 'action'}>
+  ActionNode: ({action, readOnly = false}: {action: {name: string; kind?: string}; readOnly?: boolean}) => (
+    <div data-testid="action-node" data-kind={action.kind ?? 'action'} data-read-only={String(readOnly)}>
       {action.name}
     </div>
   ),
@@ -559,5 +556,70 @@ describe('ResourceTree (MCP type — Capabilities panel)', () => {
     expect(screen.getByRole('radio', {name: /^All$/})).toBeInTheDocument();
     expect(screen.getByRole('radio', {name: /^Tools$/})).toBeInTheDocument();
     expect(screen.getByRole('radio', {name: /^Resources$/})).toBeInTheDocument();
+  });
+});
+
+describe('ResourceTree (read-only resource server)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseGetResources.mockReturnValue({data: emptyResources, isLoading: false});
+    mockUseGetServerActions.mockReturnValue({data: emptyActions, isLoading: false});
+  });
+
+  it('does not render the toolbar Add button for a read-only API server', () => {
+    mockUseGetResources.mockReturnValue({data: withResources, isLoading: false});
+
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.queryByRole('button', {name: /Add/i})).not.toBeInTheDocument();
+  });
+
+  it('shows the read-only empty message instead of the add hint for a read-only API server', () => {
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.getByText(/No resources are defined for this resource server/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No resources yet/i)).not.toBeInTheDocument();
+  });
+
+  it('marks resource and action nodes as read-only for a read-only API server', () => {
+    mockUseGetResources.mockReturnValue({data: withResources, isLoading: false});
+    mockUseGetServerActions.mockReturnValue({data: withActions, isLoading: false});
+
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.getByTestId('resource-node')).toHaveAttribute('data-read-only', 'true');
+    expect(screen.getByTestId('action-node')).toHaveAttribute('data-read-only', 'true');
+  });
+
+  it('does not mark nodes as read-only for a writable API server', () => {
+    mockUseGetResources.mockReturnValue({data: withResources, isLoading: false});
+
+    renderWithProviders(<ResourceTree resourceServer={mockResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.getByTestId('resource-node')).toHaveAttribute('data-read-only', 'false');
+  });
+
+  it('does not render the header Add button for a read-only MCP server', () => {
+    mockUseGetServerActions.mockReturnValue({data: withMcpMixed, isLoading: false});
+
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyMcpResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.queryByRole('button', {name: 'Add'})).not.toBeInTheDocument();
+  });
+
+  it('does not render the empty-state add buttons for a read-only MCP server', () => {
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyMcpResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.getByText(/No capabilities are defined for this MCP server/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Add tool permission'})).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {name: 'Add resource permission'})).not.toBeInTheDocument();
+  });
+
+  it('marks MCP capability nodes as read-only for a read-only MCP server', () => {
+    mockUseGetServerActions.mockReturnValue({data: withMcpTools, isLoading: false});
+
+    renderWithProviders(<ResourceTree resourceServer={mockReadOnlyMcpResourceServer} onRefresh={vi.fn()} />);
+
+    expect(screen.getByTestId('action-node')).toHaveAttribute('data-read-only', 'true');
   });
 });

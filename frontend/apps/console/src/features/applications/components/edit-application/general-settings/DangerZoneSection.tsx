@@ -1,23 +1,8 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {SettingsCard} from '@thunderid/components';
-import {Typography, Button, Divider} from '@wso2/oxygen-ui';
+import {Typography, Button} from '@wso2/oxygen-ui';
 import type {JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 
@@ -25,22 +10,6 @@ import {useTranslation} from 'react-i18next';
  * Props for the {@link DangerZoneSection} component.
  */
 interface DangerZoneSectionProps {
-  /**
-   * Callback function to open the regenerate client secret confirmation dialog
-   */
-  onRegenerateClick?: () => void;
-  /**
-   * Whether to show the regenerate client secret section (only for confidential clients)
-   */
-  showRegenerateSecret?: boolean;
-  /**
-   * Callback function to open the regenerate Flow Secret confirmation dialog
-   */
-  onRegenerateFlowSecretClick?: () => void;
-  /**
-   * Whether to show the regenerate Flow Secret section (only for backend / non-public clients)
-   */
-  showRegenerateFlowSecret?: boolean;
   /**
    * Callback function to open the delete application confirmation dialog
    */
@@ -50,19 +19,12 @@ interface DangerZoneSectionProps {
 /**
  * Section component displaying the danger zone with destructive actions.
  *
- * Displays a regenerate client secret button (for confidential clients) and a
- * delete application button. These actions are irreversible.
+ * Displays a delete application button. This action is irreversible.
  *
  * @param props - Component props
  * @returns Danger zone UI within a SettingsCard
  */
-export default function DangerZoneSection({
-  onRegenerateClick = undefined,
-  showRegenerateSecret = false,
-  onRegenerateFlowSecretClick = undefined,
-  showRegenerateFlowSecret = false,
-  onDeleteClick,
-}: DangerZoneSectionProps): JSX.Element {
+export default function DangerZoneSection({onDeleteClick}: DangerZoneSectionProps): JSX.Element {
   const {t} = useTranslation();
 
   return (
@@ -73,40 +35,6 @@ export default function DangerZoneSection({
         'Actions in this section are irreversible. Proceed with caution.',
       )}
     >
-      {showRegenerateSecret && (
-        <>
-          <Typography variant="h6" gutterBottom color="error">
-            {t('applications:edit.general.sections.dangerZone.regenerateSecret.title', 'Regenerate Client Secret')}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
-            {t(
-              'applications:edit.general.sections.dangerZone.regenerateSecret.description',
-              'Regenerating the client secret will immediately invalidate the current client secret and cannot be undone.',
-            )}
-          </Typography>
-          <Button variant="contained" color="error" onClick={onRegenerateClick}>
-            {t('applications:edit.general.sections.dangerZone.regenerateSecret.button', 'Regenerate Client Secret')}
-          </Button>
-          <Divider sx={{my: 3}} />
-        </>
-      )}
-      {showRegenerateFlowSecret && (
-        <>
-          <Typography variant="h6" gutterBottom color="error">
-            {t('applications:edit.general.sections.dangerZone.regenerateFlowSecret.title', 'Regenerate Flow Secret')}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{mb: 3}}>
-            {t(
-              'applications:edit.general.sections.dangerZone.regenerateFlowSecret.description',
-              'Regenerating the Flow Secret immediately invalidates the current one. Server-side flow initiation will fail until the new secret is deployed.',
-            )}
-          </Typography>
-          <Button variant="contained" color="error" onClick={onRegenerateFlowSecretClick}>
-            {t('applications:edit.general.sections.dangerZone.regenerateFlowSecret.button', 'Regenerate Flow Secret')}
-          </Button>
-          <Divider sx={{my: 3}} />
-        </>
-      )}
       <Typography variant="h6" gutterBottom color="error">
         {t('applications:edit.general.sections.dangerZone.deleteApplication.title', 'Delete Application')}
       </Typography>

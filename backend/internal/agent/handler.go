@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package agent
 
@@ -27,6 +12,7 @@ import (
 	"strings"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/thunder-id/thunderid/internal/agent/model"
 	"github.com/thunder-id/thunderid/internal/system/error/apierror"
@@ -91,15 +77,30 @@ func (h *agentHandler) HandleAgentPostRequest(w http.ResponseWriter, r *http.Req
 	}
 
 	agent := &model.Agent{
-		OUID:               req.OUID,
-		OUHandle:           req.OUHandle,
-		Type:               req.Type,
-		Name:               req.Name,
-		Description:        req.Description,
-		Owner:              req.Owner,
-		Attributes:         req.Attributes,
-		InboundAuthProfile: req.InboundAuthProfile,
-		InboundAuthConfig:  req.InboundAuthConfig,
+		OUID:        req.OUID,
+		OUHandle:    req.OUHandle,
+		Type:        req.Type,
+		Name:        req.Name,
+		Description: req.Description,
+		LogoURL:     req.LogoURL,
+		Owner:       req.Owner,
+		Attributes:  req.Attributes,
+		InboundAuthProfile: providers.InboundAuthProfile{
+			AuthFlowID:                req.AuthFlowID,
+			RegistrationFlowID:        req.RegistrationFlowID,
+			IsRegistrationFlowEnabled: req.IsRegistrationFlowEnabled,
+			RecoveryFlowID:            req.RecoveryFlowID,
+			IsRecoveryFlowEnabled:     req.IsRecoveryFlowEnabled,
+			SignOutFlowID:             req.SignOutFlowID,
+			ThemeID:                   req.ThemeID,
+			LayoutID:                  req.LayoutID,
+			Assertion:                 req.Assertion,
+			LoginConsent:              req.LoginConsent,
+			AllowedUserTypes:          req.AllowedUserTypes,
+			PasskeyAllowedOrigins:     req.PasskeyAllowedOrigins,
+			Attestation:               req.Attestation,
+		},
+		InboundAuthConfig: req.InboundAuthConfig,
 	}
 
 	resp, svcErr := h.service.CreateAgent(ctx, agent)

@@ -1,24 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {useHasMultipleOUs} from '@thunderid/configure-organization-units';
+import {OrganizationUnitPickerScreen, useHasMultipleOUs} from '@thunderid/configure-organization-units';
 import {useToast} from '@thunderid/contexts';
 import {useLogger} from '@thunderid/logger/react';
+import {getErrorMessage} from '@thunderid/utils';
 import {
   Alert,
   Box,
@@ -30,18 +16,20 @@ import {
   Stack,
   Typography,
 } from '@wso2/oxygen-ui';
-import {ChevronRight, X} from '@wso2/oxygen-ui-icons-react';
+import {ChevronRight, Home, X} from '@wso2/oxygen-ui-icons-react';
 import {useCallback, useMemo, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import useCreateResourceServer from '../api/useCreateResourceServer';
+import useGetDefaultResourceServer from '../api/useGetDefaultResourceServer';
+import useSetDefaultResourceServer from '../api/useSetDefaultResourceServer';
 import ConfigureName from '../components/create-resource-server/ConfigureName';
-import ConfigureOrgUnit from '../components/create-resource-server/ConfigureOrgUnit';
 import ConfigureSeparator from '../components/create-resource-server/ConfigureSeparator';
 import ConfigureType from '../components/create-resource-server/ConfigureType';
 import {DEFAULT_PERMISSION_DELIMITER} from '../constants/permission-constants';
+import useResourceServerRoutes from '../hooks/useResourceServerRoutes';
 import type {PermissionDelimiter} from '../models/permissions';
-import type {ResourceServerType} from '../models/resource-server';
+import {isDefaultEligibleType, type ResourceServerType} from '../models/resource-server';
 
 const ResourceServerCreateStep = {
   TYPE: 'TYPE',
@@ -54,20 +42,35 @@ type ResourceServerCreateStep = keyof typeof ResourceServerCreateStep;
 
 export default function CreateResourceServerPage(): JSX.Element {
   const navigate = useNavigate();
+  const routes = useResourceServerRoutes();
   const {t} = useTranslation();
   const {showToast} = useToast();
   const logger = useLogger('CreateResourceServerPage');
   const createResourceServer = useCreateResourceServer();
+  const setDefaultResourceServer = useSetDefaultResourceServer();
+  const {data: defaultConfig, isLoading: isDefaultLoading, error: defaultError} = useGetDefaultResourceServer();
 
   const {hasMultipleOUs, isLoading: isOuLoading, ouList} = useHasMultipleOUs();
 
-  const [currentStep, setCurrentStep] = useState<ResourceServerCreateStep>(ResourceServerCreateStep.TYPE);
+  // Only trust the config once it has resolved, so the checkbox does not flicker from unticked to
+  // ticked. A declarative (read-only) default is locked: the backend rejects any write to it.
+  const isDefaultReady = !isDefaultLoading && !defaultError;
+  const isDefaultLocked = Boolean(defaultConfig?.readOnly?.resourceServerId);
+  const canSetDefault = isDefaultReady && !isDefaultLocked;
+  const hasExistingDefault = Boolean(defaultConfig?.merged?.resourceServerId);
+
+  const [currentStep, setCurrentStep] = useState<ResourceServerCreateStep>(ResourceServerCreateStep.ORGANIZATION_UNIT);
   const [selectedType, setSelectedType] = useState<ResourceServerType | undefined>(undefined);
   const [name, setName] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [delimiter, setDelimiter] = useState<PermissionDelimiter>(DEFAULT_PERMISSION_DELIMITER);
   const [ouId, setOuId] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // Only the user's explicit choice is stored. Until they make one it derives from the config, which
+  // resolves after the first render: offer to make this the default only when the deployment has
+  // none. Deriving avoids seeding state from an effect once the config arrives.
+  const [makeDefaultOverride, setMakeDefaultOverride] = useState<boolean | undefined>(undefined);
+  const makeDefault = makeDefaultOverride ?? !hasExistingDefault;
 
   const [stepReady, setStepReady] = useState<Record<ResourceServerCreateStep, boolean>>({
     TYPE: false,
@@ -76,25 +79,89 @@ export default function CreateResourceServerPage(): JSX.Element {
     ORGANIZATION_UNIT: false,
   });
 
-  const handleDelimiterChange = useCallback((newDelimiter: PermissionDelimiter): void => {
-    setDelimiter(newDelimiter);
-  }, []);
-
-  const steps: Record<ResourceServerCreateStep, {label: string; order: number}> = useMemo(
-    () => ({
-      TYPE: {label: t('resourceServers:create.steps.type', 'Type'), order: 1},
-      NAME: {label: t('resourceServers:create.steps.name', 'Name'), order: 2},
-      SEPARATOR: {label: t('resourceServers:create.steps.separator', 'Permission Delimiter'), order: 3},
-      ORGANIZATION_UNIT: {label: t('resourceServers:create.steps.organizationUnit', 'Organization'), order: 4},
-    }),
+  // Resolves an error through the `resourceServers` catalog. `t` defaults to the `common`
+  // namespace, so this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with
+  // `resourceServers:`, per getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string =>
+      t(key.includes(':') ? key : `resourceServers:${key}`, options),
     [t],
   );
 
+  // A create failure is stale once the user edits any field, so every field-change path below
+  // clears both the error state and the mutation's own error before applying the change. Only
+  // reset the mutation once it has actually failed: resetting while it's still pending would flip
+  // isPending back to false and re-enable the submit button before the in-flight request settles,
+  // letting the user fire a second concurrent create.
+  const clearCreateError = useCallback((): void => {
+    setError(null);
+    if (createResourceServer.isError) {
+      createResourceServer.reset();
+    }
+  }, [createResourceServer]);
+
+  const handleNameChange = useCallback(
+    (newName: string): void => {
+      clearCreateError();
+      setName(newName);
+    },
+    [clearCreateError],
+  );
+
+  const handleIdentifierChange = useCallback(
+    (newIdentifier: string): void => {
+      clearCreateError();
+      setIdentifier(newIdentifier);
+    },
+    [clearCreateError],
+  );
+
+  const handleOuIdChange = useCallback(
+    (newOuId: string): void => {
+      clearCreateError();
+      setOuId(newOuId);
+    },
+    [clearCreateError],
+  );
+
+  const handleDelimiterChange = useCallback(
+    (newDelimiter: PermissionDelimiter): void => {
+      clearCreateError();
+      setDelimiter(newDelimiter);
+    },
+    [clearCreateError],
+  );
+
+  const handleMakeDefaultChange = useCallback(
+    (newMakeDefault: boolean): void => {
+      clearCreateError();
+      setMakeDefaultOverride(newMakeDefault);
+    },
+    [clearCreateError],
+  );
+
+  const steps: Record<ResourceServerCreateStep, {label: string; order: number}> = useMemo(() => {
+    const ouOffset = hasMultipleOUs ? 1 : 0;
+    return {
+      ORGANIZATION_UNIT: {label: t('resourceServers:create.steps.organizationUnit', 'Organization'), order: 1},
+      TYPE: {label: t('resourceServers:create.steps.type', 'Type'), order: 1 + ouOffset},
+      NAME: {label: t('resourceServers:create.steps.name', 'Details'), order: 2 + ouOffset},
+      SEPARATOR: {label: t('resourceServers:create.steps.separator', 'Permission Delimiter'), order: 3 + ouOffset},
+    };
+  }, [t, hasMultipleOUs]);
+
   const effectiveOuId = hasMultipleOUs ? ouId : (ouList[0]?.id ?? '');
+
+  // The organization unit is the wizard's first step whenever there's a choice to make. Single-OU
+  // deployments never need it, so once that's known, skip straight past it. Adjusted during render
+  // (not an effect) so the skip happens before the OU step ever paints.
+  if (!isOuLoading && !hasMultipleOUs && currentStep === ResourceServerCreateStep.ORGANIZATION_UNIT) {
+    setCurrentStep(ResourceServerCreateStep.TYPE);
+  }
 
   const handleClose = (): void => {
     (async (): Promise<void> => {
-      await navigate('/resource-servers');
+      await navigate(routes.list());
     })().catch((err: unknown) => {
       logger.error('Failed to navigate to resource servers list', {error: err});
     });
@@ -114,25 +181,24 @@ export default function CreateResourceServerPage(): JSX.Element {
     [handleStepReadyChange],
   );
 
-  const handleOuReadyChange = useCallback(
-    (isReady: boolean): void => handleStepReadyChange(ResourceServerCreateStep.ORGANIZATION_UNIT, isReady),
-    [handleStepReadyChange],
-  );
-
   const handleTypeSelect = useCallback(
     (value: ResourceServerType): void => {
+      clearCreateError();
       setSelectedType(value);
       handleStepReadyChange(ResourceServerCreateStep.TYPE, true);
     },
-    [handleStepReadyChange],
+    [clearCreateError, handleStepReadyChange],
   );
 
-  const isLastStep =
-    currentStep === ResourceServerCreateStep.ORGANIZATION_UNIT ||
-    (currentStep === ResourceServerCreateStep.SEPARATOR && !hasMultipleOUs);
+  const isLastStep = currentStep === ResourceServerCreateStep.SEPARATOR;
 
   const handleNext = (): void => {
     setError(null);
+
+    if (currentStep === ResourceServerCreateStep.ORGANIZATION_UNIT) {
+      setCurrentStep(ResourceServerCreateStep.TYPE);
+      return;
+    }
 
     if (currentStep === ResourceServerCreateStep.TYPE) {
       setCurrentStep(ResourceServerCreateStep.NAME);
@@ -141,11 +207,6 @@ export default function CreateResourceServerPage(): JSX.Element {
 
     if (currentStep === ResourceServerCreateStep.NAME) {
       setCurrentStep(ResourceServerCreateStep.SEPARATOR);
-      return;
-    }
-
-    if (currentStep === ResourceServerCreateStep.SEPARATOR && !isOuLoading && hasMultipleOUs) {
-      setCurrentStep(ResourceServerCreateStep.ORGANIZATION_UNIT);
       return;
     }
 
@@ -160,6 +221,10 @@ export default function CreateResourceServerPage(): JSX.Element {
       delimiter,
     };
 
+    // Guard on the same conditions the checkbox renders under, so a type change after ticking it
+    // cannot carry a stale choice into the request.
+    const shouldMakeDefault = makeDefault && canSetDefault && isDefaultEligibleType(selectedType);
+
     createResourceServer.mutate(payload, {
       onSuccess: (created) => {
         showToast(
@@ -168,30 +233,67 @@ export default function CreateResourceServerPage(): JSX.Element {
             : t('resourceServers:create.success', 'Resource server created successfully.'),
           'success',
         );
-        (async (): Promise<void> => {
-          await navigate(`/resource-servers/${created.id}?tab=resources`);
-        })().catch((err: unknown) => {
-          logger.error('Failed to navigate after create', {error: err});
-        });
+
+        const goToCreated = (): void => {
+          (async (): Promise<void> => {
+            await navigate(`${routes.detail(created.id)}?tab=resources`);
+          })().catch((err: unknown) => {
+            logger.error('Failed to navigate after create', {error: err});
+          });
+        };
+
+        if (!shouldMakeDefault) {
+          goToCreated();
+          return;
+        }
+
+        // The server already exists by now, so a failure here must not read as a create failure.
+        // Warn and continue to the created server; the default can be set from its page.
+        setDefaultResourceServer.mutate(
+          {resourceServerId: created.id},
+          {
+            onSuccess: () => goToCreated(),
+            onError: (err: Error) => {
+              logger.error('Failed to set the new resource server as default', {error: err});
+              showToast(
+                t(
+                  'resourceServers:create.setDefaultError',
+                  'Resource server created, but it could not be made the default.',
+                ),
+                'warning',
+              );
+              goToCreated();
+            },
+          },
+        );
       },
       onError: (err: Error) => {
         logger.error('Failed to create resource server', {error: err});
-        setError(err.message);
+        setError(
+          getErrorMessage(err, tForErrors, 'create.error', 'Failed to create resource server. Please try again.'),
+        );
       },
     });
   };
 
   const handleBack = (): void => {
-    if (currentStep === ResourceServerCreateStep.ORGANIZATION_UNIT) {
-      setCurrentStep(ResourceServerCreateStep.SEPARATOR);
-    } else if (currentStep === ResourceServerCreateStep.SEPARATOR) {
+    if (currentStep === ResourceServerCreateStep.SEPARATOR) {
       setCurrentStep(ResourceServerCreateStep.NAME);
     } else if (currentStep === ResourceServerCreateStep.NAME) {
       setCurrentStep(ResourceServerCreateStep.TYPE);
+    } else if (currentStep === ResourceServerCreateStep.TYPE && hasMultipleOUs) {
+      setCurrentStep(ResourceServerCreateStep.ORGANIZATION_UNIT);
     }
   };
 
-  const isNextDisabled = createResourceServer.isPending || !stepReady[currentStep] || (isLastStep && isOuLoading);
+  // The wizard is spent once the create succeeds: the follow-up default request and the navigation
+  // away both still have to run, and re-enabling in between would let the user create a duplicate.
+  // Keyed off isSuccess rather than the two pending flags so it never depends on the two mutations'
+  // state changes landing in the same render.
+  const isSubmitting =
+    createResourceServer.isPending || createResourceServer.isSuccess || setDefaultResourceServer.isPending;
+
+  const isNextDisabled = isSubmitting || !stepReady[currentStep] || (isLastStep && isOuLoading);
 
   const getProgress = (): number => {
     const totalSteps = hasMultipleOUs ? 4 : 3;
@@ -200,12 +302,9 @@ export default function CreateResourceServerPage(): JSX.Element {
   };
 
   const getBreadcrumbSteps = (): ResourceServerCreateStep[] => {
-    const all: ResourceServerCreateStep[] = [
-      ResourceServerCreateStep.TYPE,
-      ResourceServerCreateStep.NAME,
-      ResourceServerCreateStep.SEPARATOR,
-    ];
+    const all: ResourceServerCreateStep[] = [];
     if (hasMultipleOUs) all.push(ResourceServerCreateStep.ORGANIZATION_UNIT);
+    all.push(ResourceServerCreateStep.TYPE, ResourceServerCreateStep.NAME, ResourceServerCreateStep.SEPARATOR);
     const idx = all.indexOf(currentStep);
     return all.slice(0, idx + 1);
   };
@@ -220,9 +319,12 @@ export default function CreateResourceServerPage(): JSX.Element {
             name={name}
             identifier={identifier}
             selectedType={selectedType}
-            onNameChange={setName}
-            onIdentifierChange={setIdentifier}
+            canSetDefault={canSetDefault}
+            makeDefault={makeDefault}
+            onNameChange={handleNameChange}
+            onIdentifierChange={handleIdentifierChange}
             onReadyChange={handleNameReadyChange}
+            onMakeDefaultChange={handleMakeDefaultChange}
           />
         );
       case ResourceServerCreateStep.SEPARATOR:
@@ -233,19 +335,37 @@ export default function CreateResourceServerPage(): JSX.Element {
             onReadyChange={handleSeparatorReadyChange}
           />
         );
-      case ResourceServerCreateStep.ORGANIZATION_UNIT:
-        return (
-          <ConfigureOrgUnit
-            selectedOuId={ouId}
-            selectedType={selectedType}
-            onOuIdChange={setOuId}
-            onReadyChange={handleOuReadyChange}
-          />
-        );
       default:
         return null;
     }
   };
+
+  if (currentStep === ResourceServerCreateStep.ORGANIZATION_UNIT) {
+    if (isOuLoading || !hasMultipleOUs) {
+      return (
+        <Box sx={{minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+          <CircularProgress />
+        </Box>
+      );
+    }
+
+    return (
+      <OrganizationUnitPickerScreen
+        icon={<Home size={26} />}
+        title={t('resourceServers:create.orgUnit.title', 'Choose an organization unit')}
+        subtitle={t(
+          'resourceServers:create.orgUnit.subtitle',
+          'Select which organization unit this resource server belongs to.',
+        )}
+        value={ouId}
+        onChange={handleOuIdChange}
+        onBack={handleClose}
+        onContinue={handleNext}
+        backLabel={t('common:actions.back', 'Back')}
+        continueLabel={t('common:actions.continue', 'Continue')}
+      />
+    );
+  }
 
   return (
     <Box sx={{minHeight: '100vh', display: 'flex', flexDirection: 'column'}}>
@@ -286,14 +406,13 @@ export default function CreateResourceServerPage(): JSX.Element {
                 flex: 1,
                 display: 'flex',
                 flexDirection: 'column',
-                py: 8,
-                px: 20,
-                mx: 'auto',
+                py: 4,
+                px: {xs: 4, md: 10},
               }}
             >
               <Box sx={{width: '100%', maxWidth: 800, display: 'flex', flexDirection: 'column'}}>
                 {error && (
-                  <Alert severity="error" sx={{mb: 4}} onClose={() => setError(null)}>
+                  <Alert severity="error" sx={{mb: 4}} onClose={clearCreateError}>
                     {error}
                   </Alert>
                 )}
@@ -305,26 +424,22 @@ export default function CreateResourceServerPage(): JSX.Element {
                   sx={{
                     mt: 4,
                     display: 'flex',
-                    justifyContent: currentStep === ResourceServerCreateStep.TYPE ? 'flex-end' : 'space-between',
+                    justifyContent:
+                      currentStep === ResourceServerCreateStep.TYPE && !hasMultipleOUs ? 'flex-end' : 'space-between',
                     gap: 2,
                   }}
                 >
-                  {currentStep !== ResourceServerCreateStep.TYPE && (
-                    <Button
-                      variant="outlined"
-                      onClick={handleBack}
-                      sx={{minWidth: 100}}
-                      disabled={createResourceServer.isPending}
-                    >
+                  {!(currentStep === ResourceServerCreateStep.TYPE && !hasMultipleOUs) && (
+                    <Button variant="outlined" onClick={handleBack} sx={{minWidth: 100}} disabled={isSubmitting}>
                       {t('common:actions.back', 'Back')}
                     </Button>
                   )}
 
                   <Box sx={{display: 'flex', alignItems: 'center', gap: 2}}>
-                    {createResourceServer.isPending && <CircularProgress size={20} />}
+                    {isSubmitting && <CircularProgress size={20} />}
                     <Button variant="contained" disabled={isNextDisabled} sx={{minWidth: 100}} onClick={handleNext}>
                       {isLastStep
-                        ? createResourceServer.isPending
+                        ? isSubmitting
                           ? t('resourceServers:create.creating', 'Creating…')
                           : selectedType === 'MCP'
                             ? t('resourceServers:create.submitMcp', 'Create MCP server')

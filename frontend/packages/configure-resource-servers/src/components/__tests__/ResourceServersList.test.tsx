@@ -1,29 +1,16 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {renderWithProviders, screen} from '@thunderid/test-utils';
+import * as thunderIdReactModule from '@thunderid/react';
+import {renderWithProviders, screen, fireEvent} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
 import type {DefaultResourceServerConfigResponse, ResourceServerListResponse} from '../../models/resource-server';
 import ResourceServersList from '../ResourceServersList';
 
-vi.mock('@thunderid/react', () => ({
-  useThunderID: () => ({http: {request: vi.fn()}}),
-}));
+vi.mock('@thunderid/react', {spy: true});
+
+// eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- vi.mock({spy:true}) type inference doesn't resolve for this package's conditional exports
+vi.mocked(thunderIdReactModule.useThunderID).mockImplementation(() => ({http: {request: vi.fn()}}) as never);
 
 vi.mock('@thunderid/contexts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@thunderid/contexts')>();
@@ -50,7 +37,13 @@ vi.mock('../ResourceServerDeleteDialog', () => ({
   default: () => null,
 }));
 
+vi.mock('../SetDefaultResourceServerDialog', () => ({
+  default: ({open, resourceServer}: {open: boolean; resourceServer: {name: string} | null}) =>
+    open ? <div data-testid="set-default-dialog">{resourceServer?.name}</div> : null,
+}));
+
 const mockUseGetResourceServers = vi.fn();
+const mockRefetch = vi.fn();
 
 vi.mock('../../api/useGetResourceServers', () => ({
   default: (...args: unknown[]) =>
@@ -58,6 +51,7 @@ vi.mock('../../api/useGetResourceServers', () => ({
       data: ResourceServerListResponse | undefined;
       isLoading: boolean;
       error: Error | null;
+      refetch: () => void;
     },
 }));
 
@@ -99,6 +93,7 @@ describe('ResourceServersList', () => {
       data: twoRowsResponse,
       isLoading: false,
       error: null,
+      refetch: mockRefetch,
     });
     mockUseGetDefaultResourceServer.mockReturnValue({
       data: {readOnly: {}, writable: {}, merged: {resourceServerId: 'rs-1'}},
@@ -149,5 +144,167 @@ describe('ResourceServersList', () => {
     renderWithProviders(<ResourceServersList />);
 
     expect(screen.queryByText('Default')).not.toBeInTheDocument();
+  });
+
+  it('renders the resolved catalog message in the error state, never the raw server text, when the fetch fails', () => {
+    mockUseGetResourceServers.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('raw backend list failure detail'),
+      refetch: mockRefetch,
+    });
+
+    renderWithProviders(<ResourceServersList />);
+
+    expect(screen.getByText('Failed to load resource servers')).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.queryByText('raw backend list failure detail')).not.toBeInTheDocument();
+  });
+
+  it('retries the fetch when Refresh is clicked in the error state', () => {
+    mockUseGetResourceServers.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetch,
+    });
+
+    renderWithProviders(<ResourceServersList />);
+
+    fireEvent.click(screen.getByRole('button', {name: /Refresh/i}));
+
+    expect(mockRefetch).toHaveBeenCalled();
+  });
+});
+
+describe('ResourceServersList make default action', () => {
+  const eligibleRow = {
+    id: 'rs-eligible',
+    name: 'Billing API',
+    identifier: 'https://billing.example.com',
+    ouId: 'ou-1',
+    delimiter: ':',
+    type: 'API' as const,
+  };
+
+  const listWith = (...resourceServers: ResourceServerListResponse['resourceServers']): ResourceServerListResponse => ({
+    totalResults: resourceServers.length,
+    startIndex: 0,
+    count: resourceServers.length,
+    resourceServers,
+  });
+
+  const renderWithDefault = (
+    rows: ResourceServerListResponse,
+    defaultConfig: DefaultResourceServerConfigResponse | undefined,
+    defaultQueryState: {isLoading?: boolean; error?: Error | null} = {},
+  ): void => {
+    mockUseGetResourceServers.mockReturnValue({data: rows, isLoading: false, error: null, refetch: mockRefetch});
+    mockUseGetDefaultResourceServer.mockReturnValue({
+      data: defaultConfig,
+      isLoading: defaultQueryState.isLoading ?? false,
+      error: defaultQueryState.error ?? null,
+    });
+    renderWithProviders(<ResourceServersList />);
+  };
+
+  const noDefault: DefaultResourceServerConfigResponse = {readOnly: {}, writable: {}, merged: {}};
+  const moreButton = () => screen.queryByRole('button', {name: /more actions/i});
+
+  const openMakeDefaultItem = (): HTMLElement => {
+    fireEvent.click(moreButton()!);
+    return screen.getByRole('menuitem', {name: /make default resource server/i});
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('keeps the actions menu available on every editable row', () => {
+    renderWithDefault(listWith(eligibleRow), noDefault);
+
+    expect(moreButton()).toBeInTheDocument();
+  });
+
+  it('enables the action for a resource server that could become the default', () => {
+    renderWithDefault(listWith(eligibleRow), noDefault);
+
+    expect(openMakeDefaultItem()).not.toHaveAttribute('aria-disabled', 'true');
+  });
+
+  it('disables the action for the resource server that is already the default', () => {
+    renderWithDefault(listWith(eligibleRow), {
+      readOnly: {},
+      writable: {resourceServerId: eligibleRow.id},
+      merged: {resourceServerId: eligibleRow.id},
+    });
+
+    const item = openMakeDefaultItem();
+
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(/already the default/i);
+  });
+
+  it('disables the action for an MCP server', () => {
+    renderWithDefault(listWith({...eligibleRow, type: 'MCP'}), noDefault);
+
+    const item = openMakeDefaultItem();
+
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(/only api and custom/i);
+  });
+
+  it('disables the action when a declarative default has locked it', () => {
+    renderWithDefault(listWith(eligibleRow), {
+      readOnly: {resourceServerId: 'rs-locked'},
+      writable: {},
+      merged: {resourceServerId: 'rs-locked'},
+    });
+
+    const item = openMakeDefaultItem();
+
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(/deployment configuration/i);
+  });
+
+  it('does not offer any actions for a read-only resource server', () => {
+    renderWithDefault(listWith({...eligibleRow, isReadOnly: true}), noDefault);
+
+    expect(moreButton()).toBeNull();
+  });
+
+  it('opens the set default dialog for the chosen resource server', () => {
+    renderWithDefault(listWith(eligibleRow), noDefault);
+
+    fireEvent.click(openMakeDefaultItem());
+
+    expect(screen.getByTestId('set-default-dialog')).toHaveTextContent('Billing API');
+  });
+
+  it('does not open the set default dialog when the action is disabled', () => {
+    renderWithDefault(listWith(eligibleRow), {
+      readOnly: {resourceServerId: 'rs-locked'},
+      writable: {},
+      merged: {resourceServerId: 'rs-locked'},
+    });
+
+    fireEvent.click(openMakeDefaultItem());
+
+    expect(screen.queryByTestId('set-default-dialog')).toBeNull();
+  });
+
+  it('disables the action while the default configuration is still loading', () => {
+    renderWithDefault(listWith(eligibleRow), undefined, {isLoading: true});
+
+    const item = openMakeDefaultItem();
+
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(item).toHaveTextContent(/checking the current default/i);
+  });
+
+  it('disables the action when the default configuration failed to load', () => {
+    renderWithDefault(listWith(eligibleRow), undefined, {error: new Error('boom')});
+
+    expect(openMakeDefaultItem()).toHaveAttribute('aria-disabled', 'true');
   });
 });

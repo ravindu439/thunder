@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package user
 
@@ -26,8 +11,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 type SelfUserEndpointsSuite struct {
@@ -81,9 +66,9 @@ func (s *SelfUserEndpointsSuite) SetupSuite() {
 	s.Require().NoError(err)
 
 	userID, err := testutils.CreateUser(testutils.User{
-		OUID:             ouID,
-		Type:             s.userType,
-		Attributes:       attrs,
+		OUID:       ouID,
+		Type:       s.userType,
+		Attributes: attrs,
 	})
 	s.Require().NoError(err)
 	s.userID = userID
@@ -202,4 +187,137 @@ func (s *SelfUserEndpointsSuite) TestSelfUserUpdateCredentials() {
 	var userResp testutils.User
 	s.Require().NoError(json.NewDecoder(verifyResp.Body).Decode(&userResp))
 	s.Equal(s.userID, userResp.ID)
+}
+
+func (s *SelfUserEndpointsSuite) TestSelfUserGetMetadata() {
+	resp, err := s.doUserRequest(http.MethodGet, "/users/me/meta", nil)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	s.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var res map[string]interface{}
+	s.Require().NoError(json.NewDecoder(resp.Body).Decode(&res))
+
+	schema, ok := res["schema"].(map[string]interface{})
+	s.Require().True(ok, "response should contain schema map")
+	s.Require().NotNil(schema["username"])
+	s.Require().NotNil(schema["email"])
+}
+
+// selfProfileAttributes reads the caller's own attributes, so a rejected update can be checked
+// against stored state rather than only against the error response.
+func (s *SelfUserEndpointsSuite) selfProfileAttributes() map[string]interface{} {
+	s.T().Helper()
+
+	resp, err := s.doUserRequest(http.MethodGet, "/users/me", nil)
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	s.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var userResp testutils.User
+	s.Require().NoError(json.NewDecoder(resp.Body).Decode(&userResp))
+
+	var attrs map[string]interface{}
+	s.Require().NoError(json.Unmarshal(userResp.Attributes, &attrs))
+	return attrs
+}
+
+// requireSelfError asserts a self-service response carries the exact status and product error code.
+func (s *SelfUserEndpointsSuite) requireSelfError(resp *http.Response, status int, code string) {
+	s.T().Helper()
+
+	body, err := io.ReadAll(resp.Body)
+	s.Require().NoError(err)
+	s.Require().Equal(status, resp.StatusCode, "error body: %s", string(body))
+
+	var errResp struct {
+		Code string `json:"code"`
+	}
+	s.Require().NoError(json.Unmarshal(body, &errResp), "error body: %s", string(body))
+	s.Equal(code, errResp.Code, "error body: %s", string(body))
+}
+
+// TestSelfUserUpdateProfileEmptyBodyRejected verifies that a self-update carrying no attributes is
+// refused rather than treated as a no-op, and that the profile is untouched.
+func (s *SelfUserEndpointsSuite) TestSelfUserUpdateProfileEmptyBodyRejected() {
+	before := s.selfProfileAttributes()
+
+	resp, err := s.doUserRequest(http.MethodPut, "/users/me", map[string]interface{}{})
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	s.requireSelfError(resp, http.StatusBadRequest, "USR-1001")
+
+	s.Equal(before, s.selfProfileAttributes(), "a rejected update must leave the profile unchanged")
+}
+
+// TestSelfUserUpdateProfileEmptyAttributeObjectRejected verifies that an explicitly empty attribute
+// object is refused by schema validation rather than accepted as a wipe. This is a different
+// rejection from the empty body above: `{}` leaves Attributes unset and is caught in the handler
+// (USR-1001), whereas `{"attributes": {}}` is a present-but-empty object that reaches the service
+// and fails the schema's required fields (USR-1019). Both must leave the profile intact.
+func (s *SelfUserEndpointsSuite) TestSelfUserUpdateProfileEmptyAttributeObjectRejected() {
+	before := s.selfProfileAttributes()
+
+	resp, err := s.doUserRequest(http.MethodPut, "/users/me", map[string]interface{}{
+		"attributes": map[string]interface{}{},
+	})
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	s.requireSelfError(resp, http.StatusBadRequest, "USR-1019")
+
+	s.Equal(before, s.selfProfileAttributes(),
+		"a rejected empty-attribute update must not clear the stored attributes")
+}
+
+// TestSelfUserUpdateProfileSchemaInvalidAttributeRejected verifies that a self-update is validated
+// against the user type schema: email is declared as a string, so a number is refused and the
+// stored value survives.
+//
+// The payload carries the current valid username alongside the bad email. Sending the email alone
+// would omit a required attribute — this endpoint replaces the whole attribute set — and the missing
+// username produces USR-1019 on its own, so the test could pass without the numeric email ever
+// being type-checked.
+func (s *SelfUserEndpointsSuite) TestSelfUserUpdateProfileSchemaInvalidAttributeRejected() {
+	before := s.selfProfileAttributes()
+
+	resp, err := s.doUserRequest(http.MethodPut, "/users/me", map[string]interface{}{
+		"attributes": map[string]interface{}{
+			"username": s.username,
+			"email":    12345,
+		},
+	})
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	s.requireSelfError(resp, http.StatusBadRequest, "USR-1019")
+
+	s.Equal(before, s.selfProfileAttributes(),
+		"a rejected update must leave the whole profile unchanged")
+}
+
+// TestSelfUserUpdateCredentialsMissingAttributesRejected verifies that a credential update with an
+// empty attribute set is refused as missing credentials, and that the existing password still
+// authenticates afterwards. The endpoint reports this distinctly from a malformed body: an empty
+// object is a well-formed request that names no credential to change.
+func (s *SelfUserEndpointsSuite) TestSelfUserUpdateCredentialsMissingAttributesRejected() {
+	resp, err := s.doUserRequest(http.MethodPost, "/users/me/update-credentials",
+		map[string]interface{}{"attributes": map[string]interface{}{}})
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+
+	s.requireSelfError(resp, http.StatusBadRequest, "USR-1017")
+
+	// The rejected call must not have rotated or cleared the password.
+	client, err := testutils.GetHTTPClientForUser(s.username, s.password)
+	s.Require().NoError(err, "the existing password must still authenticate")
+
+	req, err := http.NewRequest(http.MethodGet, testutils.TestServerURL+"/users/me", nil)
+	s.Require().NoError(err)
+	verifyResp, err := client.Do(req)
+	s.Require().NoError(err)
+	defer verifyResp.Body.Close()
+	s.Equal(http.StatusOK, verifyResp.StatusCode, "the existing password must still grant access")
 }

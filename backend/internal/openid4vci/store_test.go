@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package openid4vci
 
@@ -38,6 +23,12 @@ func (errRuntimeStore) Put(context.Context, providers.RuntimeStoreNamespace, str
 	return errors.New("store failure")
 }
 
+func (errRuntimeStore) PutIfNotExists(
+	context.Context, providers.RuntimeStoreNamespace, string, []byte, int64,
+) (bool, error) {
+	return false, errors.New("store failure")
+}
+
 func (errRuntimeStore) Get(context.Context, providers.RuntimeStoreNamespace, string) ([]byte, error) {
 	return nil, errors.New("store failure")
 }
@@ -56,6 +47,12 @@ func (errRuntimeStore) Take(context.Context, providers.RuntimeStoreNamespace, st
 
 func (errRuntimeStore) ExtendTTL(context.Context, providers.RuntimeStoreNamespace, string, int64) error {
 	return errors.New("store failure")
+}
+
+func (errRuntimeStore) CompareFieldAndSwap(
+	context.Context, providers.RuntimeStoreNamespace, string, string, string, []byte,
+) (bool, error) {
+	return false, errors.New("store failure")
 }
 
 // OpenID4VCIStoreTestSuite exercises the openID4VCIStore adapter against a real in-memory

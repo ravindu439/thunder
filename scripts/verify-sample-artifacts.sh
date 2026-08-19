@@ -13,7 +13,7 @@ set -e
 echo "📦 Verifying sample artifacts..."
 
 # Define expected sample apps
-SAMPLE_APPS=("react-vanilla" "react-sdk" "react-api-based" "wayfinder")
+SAMPLE_APPS=("vanilla" "react-sdk" "react-api-based" "wayfinder")
 
 # Track any missing artifacts
 MISSING_COUNT=0

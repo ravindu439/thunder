@@ -1,25 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import {ReactFlowProvider} from '@xyflow/react';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
+import FlowPluginContext, {type FlowPluginContextProps} from '../../../context/FlowPluginContext';
 import InteractionContext from '../../../context/InteractionContext';
 import UIPanelContext from '../../../context/UIPanelContext';
 import type {Base} from '../../../models/base';
@@ -45,14 +31,15 @@ vi.mock('@xyflow/react', async () => {
   };
 });
 
-// Mock ResourceProperties component
-vi.mock('../ResourceProperties', () => ({
+// Mock CommonResourceProperties component
+vi.mock('../CommonResourceProperties', () => ({
   default: () => <div data-testid="resource-properties">Resource Properties Content</div>,
 }));
 
 describe('ResourcePropertyPanel', () => {
   const mockSetIsOpenResourcePropertiesPanel = vi.fn();
   const mockOnComponentDelete = vi.fn();
+  const mockEmitNodeElementDelete = vi.fn().mockReturnValue(true);
 
   const mockBaseResource: Base = {
     id: 'resource-1',
@@ -105,9 +92,13 @@ describe('ResourcePropertyPanel', () => {
     function Wrapper({children}: {children: ReactNode}) {
       return (
         <ReactFlowProvider>
-          <UIPanelContext.Provider value={uiPanelValue}>
-            <InteractionContext.Provider value={interactionValue}>{children}</InteractionContext.Provider>
-          </UIPanelContext.Provider>
+          <FlowPluginContext.Provider
+            value={{emitNodeElementDelete: mockEmitNodeElementDelete} as unknown as FlowPluginContextProps}
+          >
+            <UIPanelContext.Provider value={uiPanelValue}>
+              <InteractionContext.Provider value={interactionValue}>{children}</InteractionContext.Provider>
+            </UIPanelContext.Provider>
+          </FlowPluginContext.Provider>
         </ReactFlowProvider>
       );
     }
@@ -125,7 +116,7 @@ describe('ResourcePropertyPanel', () => {
       expect(screen.getByText('Test Panel Heading')).toBeInTheDocument();
     });
 
-    it('should render ResourceProperties component', () => {
+    it('should render CommonResourceProperties component', () => {
       render(<ResourcePropertyPanel open onComponentDelete={mockOnComponentDelete} />, {wrapper: createWrapper()});
 
       expect(screen.getByTestId('resource-properties')).toBeInTheDocument();
@@ -189,6 +180,32 @@ describe('ResourcePropertyPanel', () => {
 
       expect(mockOnComponentDelete).toHaveBeenCalledWith('step-1', mockBaseResource);
       expect(mockSetIsOpenResourcePropertiesPanel).toHaveBeenCalledWith(false);
+    });
+
+    it('should emit onNodeElementDelete before removing the component', () => {
+      render(<ResourcePropertyPanel open onComponentDelete={mockOnComponentDelete} />, {wrapper: createWrapper()});
+
+      fireEvent.click(screen.getByRole('button', {name: 'Delete', hidden: true}));
+
+      expect(mockEmitNodeElementDelete).toHaveBeenCalledWith('step-1', mockBaseResource);
+      expect(mockEmitNodeElementDelete.mock.invocationCallOrder[0]).toBeLessThan(
+        mockOnComponentDelete.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should not emit onNodeElementDelete when resource is a Step', () => {
+      const stepResource: Base = {
+        ...mockBaseResource,
+        resourceType: ResourceTypes.Step,
+      };
+
+      render(<ResourcePropertyPanel open onComponentDelete={mockOnComponentDelete} />, {
+        wrapper: createWrapper({}, {lastInteractedResource: stepResource}),
+      });
+
+      fireEvent.click(screen.getByRole('button', {name: 'Delete', hidden: true}));
+
+      expect(mockEmitNodeElementDelete).not.toHaveBeenCalled();
     });
 
     it('should not render delete button when lastInteractedResource is null', () => {

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package oauth
 
@@ -126,6 +111,35 @@ var (
 		ErrorDescription: tidcommon.I18nMessage{
 			Key:          "error.authoauthservice.invalid_token_response_description",
 			DefaultValue: "The token response received from the identity provider is invalid",
+		},
+	}
+	// ErrorUserProfileRetrievalFailed is the error when the provider's profile endpoint rejects the request.
+	ErrorUserProfileRetrievalFailed = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AUTH-OAUTH-1009",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.authoauthservice.user_profile_retrieval_failed",
+			DefaultValue: "Failed to retrieve the user profile",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.authoauthservice.user_profile_retrieval_failed_description",
+			DefaultValue: "The identity provider rejected the request to the configured user profile " +
+				"endpoint. Verify the endpoint URL and that the configured scopes grant access to it",
+		},
+	}
+	// ErrorNoUserProfileSource is the error when no profile endpoint is configured and the access
+	// token carries no subject.
+	ErrorNoUserProfileSource = tidcommon.ServiceError{
+		Type: tidcommon.ClientErrorType,
+		Code: "AUTH-OAUTH-1010",
+		Error: tidcommon.I18nMessage{
+			Key:          "error.authoauthservice.no_user_profile_source",
+			DefaultValue: "No user profile source available",
+		},
+		ErrorDescription: tidcommon.I18nMessage{
+			Key: "error.authoauthservice.no_user_profile_source_description",
+			DefaultValue: "The identity provider has no user profile endpoint configured and the access " +
+				"token carries no subject identifier. Configure a user profile endpoint on the connection",
 		},
 	}
 )

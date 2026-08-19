@@ -1,31 +1,18 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {ResourceAvatar, getInitials} from '@thunderid/components';
+import {QueryErrorNotice, ResourceAvatar, getInitials} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
-import {IconButton, Tooltip, Typography, Snackbar, Alert, ListingTable, DataGrid} from '@wso2/oxygen-ui';
+import {IconButton, Tooltip, Typography, ListingTable, DataGrid} from '@wso2/oxygen-ui';
 import {Eye, Pencil, Trash2} from '@wso2/oxygen-ui-icons-react';
 import {useMemo, useState, useCallback} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import UserDeleteDialog from './UserDeleteDialog';
 import useGetUsers from '../api/useGetUsers';
+import UserConstants from '../constants/user-constants';
+import useUserRoutes from '../hooks/useUserRoutes';
 import type {UserWithDetails} from '../models/users';
 
 export default function UsersList() {
@@ -33,27 +20,12 @@ export default function UsersList() {
   const {t} = useTranslation();
   const logger = useLogger('UsersList');
   const dataGridLocaleText = useDataGridLocaleText();
+  const routes = useUserRoutes();
 
-  const {data: userData, isLoading, error: usersRequestError} = useGetUsers();
+  const {data: userData, isLoading, error, refetch} = useGetUsers();
 
-  const error = usersRequestError;
-
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  // Show snackbar when error occurs
-  const [prevError, setPrevError] = useState<typeof error>(null);
-  if (prevError !== error) {
-    setPrevError(error);
-    if (error) {
-      setSnackbarOpen(true);
-    }
-  }
-
-  const handleCloseSnackbar = () => {
-    setSnackbarOpen(false);
-  };
 
   const handleDeleteClick = useCallback((userId: string): void => {
     setSelectedUserId(userId);
@@ -63,12 +35,12 @@ export default function UsersList() {
   const handleEditClick = useCallback(
     (userId: string): void => {
       (async (): Promise<void> => {
-        await navigate(`/users/${userId}`);
+        await navigate(routes.detail(userId));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to user details', {error: _error, userId});
       });
     },
-    [logger, navigate],
+    [logger, navigate, routes],
   );
 
   const handleDeleteCancel = () => {
@@ -91,7 +63,13 @@ export default function UsersList() {
           return (
             <ListingTable.CellIcon
               sx={{width: '100%'}}
-              icon={<ResourceAvatar value={picture} size={30} fallback={getInitials(displayVal)} />}
+              icon={
+                <ResourceAvatar
+                  value={picture}
+                  size={30}
+                  fallback={`${UserConstants.DEFAULT_AVATAR_PREFIX}${getInitials(displayVal)}`}
+                />
+              }
               primary={displayVal}
             />
           );
@@ -170,6 +148,18 @@ export default function UsersList() {
     [handleDeleteClick, handleEditClick, t],
   );
 
+  if (error) {
+    return (
+      <QueryErrorNotice
+        error={error}
+        t={t}
+        variant="block"
+        title={t('users:listing.error', 'Failed to load users')}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+
   return (
     <>
       <ListingTable.Provider variant="data-grid-card" loading={isLoading}>
@@ -188,6 +178,8 @@ export default function UsersList() {
             }}
             pageSizeOptions={[5, 10, 25, 50]}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             autoHeight
             sx={{
@@ -201,17 +193,6 @@ export default function UsersList() {
 
       {/* Delete Confirmation Dialog */}
       <UserDeleteDialog open={deleteDialogOpen} userId={selectedUserId} onClose={handleDeleteCancel} />
-
-      <Snackbar
-        open={snackbarOpen}
-        autoHideDuration={6000}
-        onClose={handleCloseSnackbar}
-        anchorOrigin={{vertical: 'top', horizontal: 'right'}}
-      >
-        <Alert onClose={handleCloseSnackbar} severity="error" sx={{width: '100%'}}>
-          {error?.message ?? t('common:messages.saveError')}
-        </Alert>
-      </Snackbar>
     </>
   );
 }

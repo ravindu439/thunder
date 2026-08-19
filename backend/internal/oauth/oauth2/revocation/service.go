@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package revocation
 
@@ -24,6 +9,7 @@ import (
 	"time"
 
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
+	sharedrevocation "github.com/thunder-id/thunderid/internal/revocation"
 	syscontext "github.com/thunder-id/thunderid/internal/system/context"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/log"
@@ -31,9 +17,13 @@ import (
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
-// RevocationServiceInterface defines the OAuth2 token revocation service (RFC 7009).
+// RevocationServiceInterface is the OAuth2 revocation write service. It covers single-token revocation
+// (the RFC 7009 endpoint and single-use refresh rotation, recorded on the JTI deny list) and
+// token-family revocation (recorded on the criteria deny list). The enforcement service is the
+// matching read path.
 type RevocationServiceInterface interface {
 	RefreshTokenRevokerInterface
+	CriteriaRevokerInterface
 
 	// RevokeToken revokes the presented token on behalf of the authenticated client.
 	//
@@ -57,27 +47,61 @@ type RefreshTokenRevokerInterface interface {
 	RevokeRefreshToken(ctx context.Context, jti string, expiryTime time.Time) error
 }
 
+// CriteriaRevokerInterface is the narrow write seam for criteria-based (many-token) revocation: it
+// records a revocation criterion so every token matching it is rejected. The only criterion today is
+// token_family, which revokes a whole authorization grant by its token family id (tfid); the seam is
+// shaped so future criteria (e.g. by subject or client) reuse the same writer and store. It is
+// consumed by the refresh grant (reuse), the RFC 7009 endpoint (explicit), the authorization service
+// (code replay), and session sign-out (logout).
+type CriteriaRevokerInterface interface {
+	// RevokeByCriteria records an idempotent many-token revocation.
+	RevokeByCriteria(ctx context.Context, revocation CriteriaRevocation) error
+
+	// RevokeTokenFamily records a terminal revocation of the token family identified by tokenFamilyID, so
+	// every access and refresh token carrying that tfid is rejected. An empty tokenFamilyID is a
+	// no-op. The write is idempotent.
+	RevokeTokenFamily(ctx context.Context, tokenFamilyID string, reason RevocationReason) error
+}
+
+// defaultTokenFamilyRevocationTTL bounds a family revocation entry when no refresh-token lifetime is
+// configured. It is a safe upper bound: the entry only needs to outlive the longest-lived token of
+// the family, and expired tokens are rejected on their own exp regardless.
+const defaultTokenFamilyRevocationTTL = 30 * 24 * time.Hour
+
 // revocationService implements RevocationServiceInterface.
 type revocationService struct {
-	jwtService       jwt.JWTServiceInterface
-	store            RevokedTokenStoreInterface
-	observabilitySvc providers.ObservabilityProvider
-	logger           *log.Logger
+	jwtService          jwt.JWTServiceInterface
+	store               revocationStoreInterface
+	tokenFamilyLifetime time.Duration
+	revokeTokenFamily   bool
+	observabilitySvc    providers.ObservabilityProvider
+	logger              *log.Logger
 }
 
 // newRevocationService creates a new revocationService (internal use). It returns
-// RevocationServiceInterface; the same instance is handed to the refresh grant narrowed to the
-// embedded RefreshTokenRevokerInterface subset, so the grant cannot invoke the full revocation API.
+// RevocationServiceInterface; consumers receive it narrowed to the embedded RefreshTokenRevokerInterface
+// or CriteriaRevokerInterface subset, so they cannot invoke the full revocation API (e.g. RevokeToken).
+// When revokeTokenFamily is true, an explicit revocation of a token carrying a token family id also revokes
+// the whole family (so a login's access tokens drop with its refresh token). tokenFamilyLifetime bounds
+// each token-family deny-list entry (revoked_at + tokenFamilyLifetime); a non-positive value falls back
+// to defaultTokenFamilyRevocationTTL.
 func newRevocationService(
 	jwtService jwt.JWTServiceInterface,
-	store RevokedTokenStoreInterface,
+	store revocationStoreInterface,
+	tokenFamilyLifetime time.Duration,
+	revokeTokenFamily bool,
 	observabilitySvc providers.ObservabilityProvider,
 ) RevocationServiceInterface {
+	if tokenFamilyLifetime <= 0 {
+		tokenFamilyLifetime = defaultTokenFamilyRevocationTTL
+	}
 	return &revocationService{
-		jwtService:       jwtService,
-		store:            store,
-		observabilitySvc: observabilitySvc,
-		logger:           log.GetLogger().With(log.String(log.LoggerKeyComponentName, "RevocationService")),
+		jwtService:          jwtService,
+		store:               store,
+		tokenFamilyLifetime: tokenFamilyLifetime,
+		revokeTokenFamily:   revokeTokenFamily,
+		observabilitySvc:    observabilitySvc,
+		logger:              log.GetLogger().With(log.String(log.LoggerKeyComponentName, "RevocationService")),
 	}
 }
 
@@ -110,10 +134,16 @@ func (s *revocationService) RevokeToken(
 		return RevokeOutcomeRevoked, nil
 	}
 
-	// Ownership enforcement: a client may only revoke tokens issued to it. ThunderID tokens carry the
-	// owning client in the client_id claim (no azp), so ownership is checked against client_id; a
-	// mismatch is rejected with invalid_grant per RFC 7009 §2.1.
+	// Ownership enforcement: a client may only revoke tokens issued to it (RFC 7009 §2.1). ThunderID
+	// records the owning client in the client_id claim on access tokens; refresh tokens carry no
+	// client_id claim but are minted with the owning client as their subject, so fall back to sub when
+	// client_id is absent. Without this fallback the check would be skipped for refresh tokens, letting
+	// any authenticated client revoke another client's refresh token (and cascade its token family). A
+	// mismatch is rejected with invalid_grant.
 	tokenClientID, _ := payload[constants.ClaimClientID].(string)
+	if tokenClientID == "" {
+		tokenClientID, _ = payload[constants.ClaimSub].(string)
+	}
 	if tokenClientID != "" && authenticatedClientID != "" && tokenClientID != authenticatedClientID {
 		s.logger.Debug(ctx, "Revocation request for a token belonging to a different client")
 		return RevokeOutcomeNotOwned, nil
@@ -127,6 +157,17 @@ func (s *revocationService) RevokeToken(
 	}
 	if err := s.store.InsertRevokedToken(ctx, revoked); err != nil {
 		return RevokeOutcomeRevoked, fmt.Errorf("failed to record token revocation: %w", err)
+	}
+
+	// When the revoked token carries a token family id, drop the whole family so revoking a login's
+	// refresh token also invalidates the access tokens issued from that same login (RFC 7009 §2.1).
+	if s.revokeTokenFamily {
+		if tokenFamilyID, _ := payload[constants.ClaimTokenFamilyID].(string); tokenFamilyID != "" {
+			if err := s.RevokeTokenFamily(ctx, tokenFamilyID,
+				RevocationReasonExplicitTokenFamily); err != nil {
+				return RevokeOutcomeRevoked, fmt.Errorf("failed to revoke token family: %w", err)
+			}
+		}
 	}
 
 	s.publishTokenRevokedEvent(ctx, authenticatedClientID, jti)
@@ -151,6 +192,78 @@ func (s *revocationService) RevokeRefreshToken(ctx context.Context, jti string, 
 	}
 	s.logger.Debug(ctx, "Revoked refresh token")
 	return nil
+}
+
+// RevokeTokenFamily records a terminal revocation of the token family (one authorization grant)
+// identified by tokenFamilyID, writing a token_family criterion to the deny list so every access and
+// refresh token carrying that tfid is rejected. The refresh grant (reuse), the authorization service
+// (code replay), and session sign-out (logout) revoke families through this same method that backs the
+// RFC 7009 endpoint's explicit-revoke family cascade. An empty tokenFamilyID is a no-op; the write is
+// idempotent.
+func (s *revocationService) RevokeTokenFamily(ctx context.Context, tokenFamilyID string,
+	reason RevocationReason) error {
+	return s.RevokeByCriteria(ctx, CriteriaRevocation{
+		Criterion: Criterion{Type: CriterionTypeTokenFamily, Value: tokenFamilyID},
+		Mode:      RevocationModeAll,
+		Reason:    reason,
+	})
+}
+
+// RevokeByCriteria records a validated many-token revocation in the criteria deny list.
+func (s *revocationService) RevokeByCriteria(ctx context.Context, revocation CriteriaRevocation) error {
+	if revocation.Criterion.Value == "" {
+		return nil
+	}
+	if !isSupportedCriterionType(revocation.Criterion.Type) {
+		return fmt.Errorf("unsupported revocation criterion type: %q", revocation.Criterion.Type)
+	}
+	if revocation.Mode != RevocationModeAll && revocation.Mode != RevocationModeBeforeAction {
+		return fmt.Errorf("unsupported revocation mode: %q", revocation.Mode)
+	}
+	if revocation.Mode == RevocationModeBeforeAction && revocation.Cutoff.IsZero() {
+		return fmt.Errorf("cutoff is required for %s", RevocationModeBeforeAction)
+	}
+	if (revocation.Mode == RevocationModeBeforeAction) != isBoundaryReason(revocation.Reason) {
+		return fmt.Errorf("revocation mode %q does not match reason %q", revocation.Mode, revocation.Reason)
+	}
+	if revocation.Mode == RevocationModeAll {
+		revocation.Cutoff = time.Time{}
+	}
+
+	now := time.Now().UTC()
+	revokedAt := now
+	if revocation.Mode == RevocationModeBeforeAction {
+		revokedAt = revocation.Cutoff.UTC()
+	}
+	if err := s.store.insertCriterion(ctx, revocationCriterion{
+		Type:       revocation.Criterion.Type,
+		Value:      revocation.Criterion.Value,
+		Reason:     revocation.Reason,
+		RevokedAt:  revokedAt,
+		ExpiryTime: now.Add(s.tokenFamilyLifetime),
+	}); err != nil {
+		return fmt.Errorf("failed to revoke tokens by criteria: %w", err)
+	}
+
+	s.logger.Debug(ctx, "Revoked tokens by criteria",
+		log.String("criterionType", string(revocation.Criterion.Type)),
+		log.String("reason", string(revocation.Reason)))
+	return nil
+}
+
+func isSupportedCriterionType(criterionType CriterionType) bool {
+	switch criterionType {
+	case CriterionTypeTokenFamily, CriterionTypeSubject, CriterionTypeApplicationID,
+		CriterionTypeApplicationKey, CriterionTypeOrganizationUnit, CriterionTypeRole,
+		CriterionTypeGroup, CriterionTypeConsent, CriterionTypeCredentialVersion:
+		return true
+	default:
+		return false
+	}
+}
+
+func isBoundaryReason(reason RevocationReason) bool {
+	return sharedrevocation.IsBoundaryReason(reason)
 }
 
 // extractExpiryTime returns the token's exp claim as a time, falling back to now when absent

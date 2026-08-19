@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package session
 
@@ -90,30 +75,24 @@ var (
 		Query: `DELETE FROM "SSO_SESSION_CONTEXT" WHERE SESSION_ID = $1 AND DEPLOYMENT_ID = $2`,
 	}
 
-	// queryListCheckpointsBySessionID returns the checkpoint ids a session has saved. It is the
-	// existence check the SSO-Check node uses to decide availability without decrypting any context.
-	queryListCheckpointsBySessionID = model.DBQuery{
-		ID: "SSO-SESS-08",
-		Query: `SELECT CHECKPOINT_ID FROM "SSO_SESSION_CONTEXT" ` +
-			`WHERE SESSION_ID = $1 AND DEPLOYMENT_ID = $2`,
-	}
-
 	// queryUpsertParticipant records an application as a participant of a session, refreshing
-	// LAST_ACTIVE_AT (but preserving FIRST_JOINED_AT) when the application has already joined. The
-	// ON CONFLICT ... DO UPDATE form is valid in both PostgreSQL and SQLite.
+	// LAST_ACTIVE_AT and the current-grant TFID (but preserving FIRST_JOINED_AT) when the application
+	// has already joined. TFID moves to the latest grant so logout revokes the most recent family.
+	// The ON CONFLICT ... DO UPDATE form is valid in both PostgreSQL and SQLite.
 	queryUpsertParticipant = model.DBQuery{
 		ID: "SSO-SESS-09",
 		Query: `INSERT INTO "SSO_SESSION_PARTICIPANT" ` +
-			`(SESSION_ID, DEPLOYMENT_ID, APP_ID, FIRST_JOINED_AT, LAST_ACTIVE_AT) ` +
-			`VALUES ($1, $2, $3, $4, $5) ` +
-			`ON CONFLICT (SESSION_ID, DEPLOYMENT_ID, APP_ID) DO UPDATE SET LAST_ACTIVE_AT = excluded.LAST_ACTIVE_AT`,
+			`(SESSION_ID, DEPLOYMENT_ID, APP_ID, FIRST_JOINED_AT, LAST_ACTIVE_AT, TFID) ` +
+			`VALUES ($1, $2, $3, $4, $5, $6) ` +
+			`ON CONFLICT (SESSION_ID, DEPLOYMENT_ID, APP_ID) DO UPDATE SET ` +
+			`LAST_ACTIVE_AT = excluded.LAST_ACTIVE_AT, TFID = excluded.TFID`,
 	}
 
 	// queryListParticipantsBySessionID returns the applications that have joined a session, oldest
 	// first.
 	queryListParticipantsBySessionID = model.DBQuery{
 		ID: "SSO-SESS-10",
-		Query: `SELECT SESSION_ID, APP_ID, FIRST_JOINED_AT, LAST_ACTIVE_AT FROM "SSO_SESSION_PARTICIPANT" ` +
+		Query: `SELECT SESSION_ID, APP_ID, FIRST_JOINED_AT, LAST_ACTIVE_AT, TFID FROM "SSO_SESSION_PARTICIPANT" ` +
 			`WHERE SESSION_ID = $1 AND DEPLOYMENT_ID = $2 ORDER BY FIRST_JOINED_AT`,
 	}
 
@@ -127,5 +106,13 @@ var (
 	queryDeleteSession = model.DBQuery{
 		ID:    "SSO-SESS-12",
 		Query: `DELETE FROM "SSO_SESSION" WHERE SESSION_ID = $1 AND DEPLOYMENT_ID = $2`,
+	}
+
+	// queryListSessionsBySubject returns all SSO sessions owned by a subject.
+	queryListSessionsBySubject = model.DBQuery{
+		ID: "SSO-SESS-13",
+		Query: `SELECT SESSION_ID, SUBJECT_ID, FLOW_ID, FLOW_VERSION, FLOW_EXECUTION_ID, HANDLE_ID, ` +
+			`AUTHENTICATED_AT, CREATED_AT, LAST_ACTIVE_AT, IDLE_EXPIRES_AT, ABSOLUTE_EXPIRES_AT, STATE, VERSION ` +
+			`FROM "SSO_SESSION" WHERE SUBJECT_ID = $1 AND DEPLOYMENT_ID = $2`,
 	}
 )

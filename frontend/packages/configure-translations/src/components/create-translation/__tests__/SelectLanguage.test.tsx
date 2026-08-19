@@ -1,33 +1,11 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
-import {render, screen} from '@thunderid/test-utils';
-import {describe, expect, it, vi, beforeEach} from 'vitest';
+import {render, renderHook, screen} from '@thunderid/test-utils';
+import {useTranslation} from 'react-i18next';
+import {describe, expect, it, vi, beforeAll, beforeEach} from 'vitest';
 import SelectLanguage from '@/components/create-translation/SelectLanguage';
-
-vi.mock('react-i18next', async () => {
-  const actual = await vi.importActual<typeof import('react-i18next')>('react-i18next');
-  return {
-    ...actual,
-    useTranslation: () => ({t: (key: string, opts?: Record<string, unknown>) => (opts ? `${key}` : key)}),
-  };
-});
 
 const mockLocales = [
   {code: 'fr-FR', displayName: 'French (France)', flag: '🇫🇷'},
@@ -49,6 +27,12 @@ const defaultProps = {
 };
 
 describe('SelectLanguage', () => {
+  let t: (key: string, options?: Record<string, unknown>) => string;
+
+  beforeAll(() => {
+    ({t} = renderHook(() => useTranslation('translations')).result.current);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -57,20 +41,22 @@ describe('SelectLanguage', () => {
     it('renders the step title and subtitle', () => {
       render(<SelectLanguage {...defaultProps} />);
 
-      expect(screen.getByText('language.create.language.title')).toBeInTheDocument();
-      expect(screen.getByText('language.create.language.subtitle')).toBeInTheDocument();
+      expect(screen.getByText(t('language.create.language.title'))).toBeInTheDocument();
+      expect(
+        screen.getByText(t('language.create.language.subtitle', {country: selectedCountry.name})),
+      ).toBeInTheDocument();
     });
 
     it('renders the language autocomplete label', () => {
       render(<SelectLanguage {...defaultProps} />);
 
-      expect(screen.getByText('language.create.language.label')).toBeInTheDocument();
+      expect(screen.getByText(t('language.create.language.label'))).toBeInTheDocument();
     });
 
     it('renders the helper tip', () => {
       render(<SelectLanguage {...defaultProps} />);
 
-      expect(screen.getByText('language.create.language.helperText')).toBeInTheDocument();
+      expect(screen.getByText(t('language.create.language.helperText'))).toBeInTheDocument();
     });
 
     it('renders the autocomplete combobox', () => {

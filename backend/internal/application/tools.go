@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package application
 
@@ -28,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/thunder-id/thunderid/internal/application/model"
+	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
 	oauth2const "github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/system/mcp/tool"
 )
@@ -228,6 +214,7 @@ func (t *applicationTools) getApplicationTemplates(
 		"spa": {
 			OUID: "<OU_ID>",
 			Name: "<APP_NAME>",
+			Type: model.ApplicationTypeBrowser,
 			InboundAuthProfile: providers.InboundAuthProfile{
 				ThemeID: "<THEME_ID>",
 			},
@@ -260,6 +247,7 @@ func (t *applicationTools) getApplicationTemplates(
 		"mobile": {
 			OUID: "<OU_ID>",
 			Name: "<APP_NAME>",
+			Type: model.ApplicationTypeMobile,
 			InboundAuthProfile: providers.InboundAuthProfile{
 				ThemeID: "<THEME_ID>",
 			},
@@ -292,6 +280,7 @@ func (t *applicationTools) getApplicationTemplates(
 		"server": {
 			OUID: "<OU_ID>",
 			Name: "<APP_NAME>",
+			Type: model.ApplicationTypeFullStack,
 			InboundAuthProfile: providers.InboundAuthProfile{
 				ThemeID: "<THEME_ID>",
 			},
@@ -323,6 +312,7 @@ func (t *applicationTools) getApplicationTemplates(
 		"m2m": {
 			OUID: "<OU_ID>",
 			Name: "<APP_NAME>",
+			Type: model.ApplicationTypeM2M,
 			InboundAuthConfig: []providers.InboundAuthConfigWithSecret{
 				{
 					Type: providers.OAuthInboundAuthType,
@@ -340,11 +330,13 @@ func (t *applicationTools) getApplicationTemplates(
 
 // getCommonSchemaModifiers returns the common schema modifiers for ApplicationDTO.
 func getCommonSchemaModifiers() []func(*jsonschema.Schema) {
+	oauthCfg := oauthconfig.FromServerRuntime()
 	return []func(*jsonschema.Schema){
-		tool.WithEnum("inbound_auth_config.config", "grant_types", oauth2const.GetSupportedGrantTypes()),
-		tool.WithEnum("inbound_auth_config.config", "response_types", oauth2const.GetSupportedResponseTypes()),
+		tool.WithEnum("inbound_auth_config.config", "grant_types", oauth2const.GetSupportedGrantTypes(oauthCfg)),
+		tool.WithEnum("inbound_auth_config.config", "response_types",
+			oauth2const.GetSupportedResponseTypes(oauthCfg)),
 		tool.WithEnum("inbound_auth_config.config", "token_endpoint_auth_method",
-			oauth2const.GetSupportedTokenEndpointAuthMethods()),
+			oauth2const.GetSupportedTokenEndpointAuthMethods(oauthCfg)),
 		tool.WithEnum("inbound_auth_config", "type", []string{string(providers.OAuthInboundAuthType)}),
 	}
 }

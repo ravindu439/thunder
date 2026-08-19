@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@thunderid/test-utils';
 import type {JSX} from 'react';
@@ -26,7 +11,7 @@ const baseCard: ConnectionCardModel = {
   id: 'google',
   vendorKey: 'google',
   backendType: 'google',
-  displayName: 'Google',
+  displayName: 'Google Login',
   descriptionKey: 'connections:vendor.google.description',
   logo: 'logo' as unknown as JSX.Element,
   categories: ['social-login'],
@@ -41,7 +26,7 @@ describe('ConnectionCard', () => {
 
   it('renders the vendor name, status, and hashtag category tags', () => {
     render(<ConnectionCard card={baseCard} onAction={onAction} />);
-    expect(screen.getByText('Google')).toBeInTheDocument();
+    expect(screen.getByText('Google Login')).toBeInTheDocument();
     expect(screen.getByText('Not configured')).toBeInTheDocument();
     expect(screen.getByText('#social login')).toBeInTheDocument();
   });
@@ -50,6 +35,30 @@ describe('ConnectionCard', () => {
     render(<ConnectionCard card={baseCard} onAction={onAction} />);
     fireEvent.click(screen.getByTestId('connection-card-action-google'));
     expect(onAction).toHaveBeenCalledWith(baseCard);
+  });
+
+  it('invokes onAction when Enter is pressed on the card', () => {
+    render(<ConnectionCard card={baseCard} onAction={onAction} />);
+    fireEvent.keyDown(screen.getByTestId('connection-card-action-google'), {key: 'Enter'});
+    expect(onAction).toHaveBeenCalledWith(baseCard);
+  });
+
+  it('invokes onAction when Space is pressed on the card', () => {
+    render(<ConnectionCard card={baseCard} onAction={onAction} />);
+    fireEvent.keyDown(screen.getByTestId('connection-card-action-google'), {key: ' '});
+    expect(onAction).toHaveBeenCalledWith(baseCard);
+  });
+
+  it('ignores unrelated key presses on the card', () => {
+    render(<ConnectionCard card={baseCard} onAction={onAction} />);
+    fireEvent.keyDown(screen.getByTestId('connection-card-action-google'), {key: 'a'});
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('shows the configured status for a configured connection', () => {
+    const configured: ConnectionCardModel = {...baseCard, status: 'configured'};
+    render(<ConnectionCard card={configured} onAction={onAction} />);
+    expect(screen.getByText('Configured')).toBeInTheDocument();
   });
 
   it('disables interaction for coming-soon cards (no clickable action area)', () => {

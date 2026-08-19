@@ -1,9 +1,25 @@
 {
   "id": "wallet",
+  "type": "mobile",
   "displayName": "Digital Wallet",
   "description": "OpenID4VCI wallet that requests verifiable credentials",
+  "quickstarts": [
+    {
+      "label": "iOS",
+      "docsUrl": "{{applications.templates.ios.docs}}"
+    },
+    {
+      "label": "Android",
+      "docsUrl": "{{applications.templates.android.docs}}"
+    },
+    {
+      "label": "Flutter",
+      "docsUrl": "{{applications.templates.flutter.docs}}"
+    }
+  ],
   "creationFlow": {
-    "steps": ["NAME", "ORGANIZATION_UNIT", "CONFIGURE", "DESIGN", "OPTIONS", "EXPERIENCE", "COMPLETE"]
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "SECURITY", "DESIGN", "CONFIGURE", "COMPLETE"],
+    "previewSteps": ["DETAILS", "SECURITY", "DESIGN"]
   },
   "defaults": {
     "name": "Digital Wallet",

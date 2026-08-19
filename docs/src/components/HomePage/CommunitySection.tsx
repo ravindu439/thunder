@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import {Box, Card, Container, Typography, useTheme} from '@wso2/oxygen-ui';
@@ -23,6 +8,7 @@ import {JSX} from 'react';
 import useIsDarkMode from '../../hooks/useIsDarkMode';
 import useScrollAnimation from '../../hooks/useScrollAnimation';
 import type {DocusaurusProductConfig} from '@site/docusaurus.product.config';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 
 interface CommunityCardProps {
   icon: JSX.Element;
@@ -168,6 +154,7 @@ function IssueIcon() {
 export default function CommunitySection(): JSX.Element {
   const theme = useTheme();
   const {ref, isVisible} = useScrollAnimation({threshold: 0.15});
+  const docsUrl = useDocsUrl();
   const {siteConfig} = useDocusaurusContext();
   const productName = (siteConfig.customFields?.product as DocusaurusProductConfig).project.name;
   const discussionsUrl = (siteConfig.customFields?.product as DocusaurusProductConfig).project.source.github
@@ -240,7 +227,7 @@ export default function CommunitySection(): JSX.Element {
               title="Contribute"
               description={`Help shape ${productName} by submitting features, fixes, or improvements.`}
               linkLabel="Start Contributing"
-              href="/docs/next/community/contributing/contribute-ideas"
+              href={docsUrl('/docs/next/community/contributing/contribute-ideas')}
             />
             <CommunityCard
               icon={<IssueIcon />}

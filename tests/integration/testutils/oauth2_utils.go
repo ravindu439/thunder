@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package testutils
 
@@ -57,20 +42,21 @@ func getFlowStepErrorMessage(step *FlowStep) string {
 
 // InitiateAuthorizationFlow starts the OAuth2 authorization flow
 func InitiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state string) (*http.Response, error) {
-	return initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, "", "", "", "", "", "")
+	return initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, "", "", "", "", "", "", "")
 }
 
 // InitiateAuthorizationFlowWithResource starts the OAuth2 authorization flow with resource parameter
 func InitiateAuthorizationFlowWithResource(clientID, redirectURI, responseType, scope, state,
 	resource string) (*http.Response, error) {
-	return initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, resource, "", "", "", "", "")
+	return initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, resource,
+		"", "", "", "", "", "")
 }
 
 // InitiateAuthorizationFlowWithPKCE starts the OAuth2 authorization flow with PKCE parameters
 func InitiateAuthorizationFlowWithPKCE(clientID, redirectURI, responseType, scope, state, resource,
 	codeChallenge, codeChallengeMethod string) (*http.Response, error) {
 	return initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, resource,
-		codeChallenge, codeChallengeMethod, "", "", "")
+		codeChallenge, codeChallengeMethod, "", "", "", "")
 }
 
 // InitiateAuthorizationFlowWithClaims starts the OAuth2 authorization flow with claims parameter
@@ -78,7 +64,16 @@ func InitiateAuthorizationFlowWithClaims(
 	clientID, redirectURI, responseType, scope, state, claimsParam string,
 ) (*http.Response, error) {
 	return initiateAuthorizationFlow(
-		clientID, redirectURI, responseType, scope, state, "", "", "", claimsParam, "", "")
+		clientID, redirectURI, responseType, scope, state, "", "", "", claimsParam, "", "", "")
+}
+
+// InitiateAuthorizationFlowWithClaimsAndPrompt starts the OAuth2 authorization flow with both the
+// claims and the prompt parameters.
+func InitiateAuthorizationFlowWithClaimsAndPrompt(
+	clientID, redirectURI, responseType, scope, state, claimsParam, prompt string,
+) (*http.Response, error) {
+	return initiateAuthorizationFlow(
+		clientID, redirectURI, responseType, scope, state, "", "", "", claimsParam, "", "", prompt)
 }
 
 // InitiateAuthorizationFlowWithClaimsLocales starts the OAuth2 authorization flow with claims_locales parameter
@@ -86,7 +81,7 @@ func InitiateAuthorizationFlowWithClaimsLocales(
 	clientID, redirectURI, responseType, scope, state, claimsLocales string,
 ) (*http.Response, error) {
 	return initiateAuthorizationFlow(
-		clientID, redirectURI, responseType, scope, state, "", "", "", "", claimsLocales, "",
+		clientID, redirectURI, responseType, scope, state, "", "", "", "", claimsLocales, "", "",
 	)
 }
 
@@ -96,15 +91,25 @@ func InitiateAuthorizationFlowWithNonce(
 ) (*http.Response, error) {
 	return initiateAuthorizationFlow(
 		clientID, redirectURI, responseType, scope, state,
-		"", "", "", "", "", nonce,
+		"", "", "", "", "", nonce, "",
+	)
+}
+
+// InitiateAuthorizationFlowWithPrompt starts the OAuth2 authorization flow with the prompt parameter
+func InitiateAuthorizationFlowWithPrompt(
+	clientID, redirectURI, responseType, scope, state, prompt string,
+) (*http.Response, error) {
+	return initiateAuthorizationFlow(
+		clientID, redirectURI, responseType, scope, state, "", "", "", "", "", "", prompt,
 	)
 }
 
 // initiateAuthorizationFlow starts the OAuth2 authorization flow with all optional parameters.
 // clientID, redirectURI, responseType, scope, and state are required parameters.
-// resource, codeChallenge, codeChallengeMethod, claimsParam, and claimsLocales, and nonce are optional parameters.
+// resource, codeChallenge, codeChallengeMethod, claimsParam, claimsLocales, nonce, and prompt are
+// optional parameters.
 func initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state, resource,
-	codeChallenge, codeChallengeMethod, claimsParam, claimsLocales, nonce string) (*http.Response, error) {
+	codeChallenge, codeChallengeMethod, claimsParam, claimsLocales, nonce, prompt string) (*http.Response, error) {
 	authURL := TestServerURL + "/oauth2/authorize"
 	params := url.Values{}
 	params.Set("client_id", clientID)
@@ -128,6 +133,9 @@ func initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state
 	if nonce != "" {
 		params.Set("nonce", nonce)
 	}
+	if prompt != "" {
+		params.Set("prompt", prompt)
+	}
 
 	req, err := http.NewRequest("GET", authURL+"?"+params.Encode(), nil)
 	if err != nil {
@@ -148,6 +156,31 @@ func initiateAuthorizationFlow(clientID, redirectURI, responseType, scope, state
 		return nil, fmt.Errorf("failed to send authorization request: %w", err)
 	}
 
+	return resp, nil
+}
+
+// SubmitAuthorizationRequest sends an arbitrary parameter set to the authorization endpoint without
+// following redirects, so the caller can assert on the redirect the server produced. Use this for
+// parameters the InitiateAuthorizationFlow variants do not cover, such as prompt.
+func SubmitAuthorizationRequest(params url.Values) (*http.Response, error) {
+	req, err := http.NewRequest("GET", TestServerURL+"/oauth2/authorize?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create authorization request: %w", err)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send authorization request: %w", err)
+	}
 	return resp, nil
 }
 
@@ -204,6 +237,58 @@ func ExecuteAuthenticationFlow(executionId string, inputs map[string]string, act
 	}
 
 	return &flowStep, nil
+}
+
+// ExecuteAuthenticationFlowExpectingError executes a flow step that is expected to fail at the engine
+// level, and returns the HTTP status along with the parsed error body. ExecuteAuthenticationFlow
+// collapses any non-200 into a Go error, which hides the errorAssertion carried in that body.
+func ExecuteAuthenticationFlowExpectingError(executionId string, inputs map[string]string,
+	action string, challengeToken ...string) (int, *FlowErrorResponse, error) {
+	flowData := map[string]interface{}{
+		"executionId": executionId,
+	}
+
+	if len(inputs) > 0 {
+		flowData["inputs"] = inputs
+	}
+	if action != "" {
+		flowData["action"] = action
+	}
+	if len(challengeToken) > 0 && challengeToken[0] != "" {
+		flowData["challengeToken"] = challengeToken[0]
+	}
+
+	flowJSON, err := json.Marshal(flowData)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to marshal flow data: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", TestServerURL+"/flow/execute", bytes.NewBuffer(flowJSON))
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to create flow request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to execute flow: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var errorResponse FlowErrorResponse
+	if err := json.Unmarshal(bodyBytes, &errorResponse); err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("failed to decode flow error response %q: %w",
+			string(bodyBytes), err)
+	}
+
+	return resp.StatusCode, &errorResponse, nil
 }
 
 // CompleteAuthorization completes the authorization using the assertion
@@ -467,9 +552,14 @@ func ObtainAccessTokenWithPassword(clientID, redirectURI, scope, username, passw
 
 	// Bind the token to a resource server via the RFC 8707 resource parameter, mirroring the
 	// console runtime config. The CONSOLE app targets the bootstrapped System resource server.
+	// optionalParams[1], when non-empty, overrides the resource indicator so a test can bind the
+	// token to a specific resource server (e.g. one declaring fine-grained system scopes).
 	resource := ""
 	if clientID == "CONSOLE" {
 		resource = SystemResourceIdentifier
+	}
+	if len(optionalParams) > 1 && optionalParams[1] != "" {
+		resource = optionalParams[1]
 	}
 
 	// Step 1: Initiate authorization flow with PKCE
@@ -694,6 +784,61 @@ func RefreshAccessToken(clientID, clientSecret, refreshToken string) (*TokenResp
 func RefreshAccessTokenWithClientCredentialsInBody(clientID, clientSecret, refreshToken string) (
 	*TokenResponse, error) {
 	return refreshAccessToken(clientID, clientSecret, refreshToken, true)
+}
+
+// RefreshAccessTokenRaw uses the refresh token to obtain a new access token with an optional scope
+// parameter, returning the raw HTTP result for both success and failure scenarios (e.g. invalid_scope).
+// client credentials are sent via HTTP Basic Auth header.
+func RefreshAccessTokenRaw(clientID, clientSecret, refreshToken, scope string) (*TokenHTTPResult, error) {
+	tokenURL := TestServerURL + "/oauth2/token"
+	tokenData := url.Values{}
+
+	tokenData.Set("grant_type", "refresh_token")
+	tokenData.Set("refresh_token", refreshToken)
+	if scope != "" {
+		tokenData.Set("scope", scope)
+	}
+
+	req, err := http.NewRequest("POST", tokenURL, bytes.NewBufferString(tokenData.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create refresh token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if clientID != "" {
+		req.SetBasicAuth(clientID, clientSecret)
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send refresh token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	result := &TokenHTTPResult{
+		StatusCode: resp.StatusCode,
+		Body:       body,
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var tokenResponse TokenResponse
+		if err := json.Unmarshal(body, &tokenResponse); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal token response: %w", err)
+		}
+		result.Token = &tokenResponse
+	}
+
+	return result, nil
 }
 
 // refreshAccessToken uses the refresh token to obtain a new access token
@@ -1334,4 +1479,15 @@ func DecodeJWTPayloadMap(token string) (map[string]any, error) {
 		return nil, err
 	}
 	return claims, nil
+}
+
+// RandomJTI returns a fresh url-safe identifier suitable for the "jti" claim.
+func RandomJTI() string {
+	return randomJTI()
+}
+
+// SignJWT signs a JWS signing input using the given private key and algorithm.
+// Supported algorithms: ES256, ES384, ES512, PS256, RS256, EdDSA.
+func SignJWT(priv crypto.Signer, alg, signingInput string) ([]byte, error) {
+	return signProof(priv, alg, signingInput)
 }

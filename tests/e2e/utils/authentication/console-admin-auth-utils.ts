@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Console Admin Authentication Utilities for Playwright E2E Tests.
@@ -35,6 +20,10 @@ import fs from "fs";
 import path from "path";
 import { Page, BrowserContext } from "@playwright/test";
 import { Timeouts } from "../../constants/timeouts";
+import { ConsoleSigninPage } from "../../pages/authentication/console-signin.page";
+
+/** Re-login this far ahead of the real expiry, so a token can't lapse mid-test. */
+const TOKEN_EXPIRY_MARGIN_MS = Timeouts.GLOBAL_TEST;
 
 export interface StorageItem {
   name: string;
@@ -100,8 +89,25 @@ export async function restoreCookies(
     return;
   }
 
-  await context.addCookies(authState.cookies);
-  console.log(`✅ Cookies restored: ${authState.cookies.length} cookies added to context`);
+  // Restore by `url` rather than the captured `domain`/`path`. Firefox's cookie manager
+  // round-trips its own `domain` field inconsistently between captures (e.g. "localhost" vs
+  // ".localhost" for the same cookie) and then rejects its own output on replay with
+  // NS_ERROR_ILLEGAL_VALUE. Every cookie here is first-party to the one origin captured
+  // alongside it, so `url` lets each browser derive scope itself instead of us replaying a
+  // browser-reported domain value back into that same browser's stricter validator.
+  const origin = authState.origins?.[0]?.origin;
+  const cookies = authState.cookies.map(({ name, value, expires, httpOnly, secure, sameSite }) => ({
+    name,
+    value,
+    expires,
+    httpOnly,
+    secure,
+    sameSite,
+    url: origin,
+  }));
+
+  await context.addCookies(cookies);
+  console.log(`✅ Cookies restored: ${cookies.length} cookies added to context`);
 }
 
 /**
@@ -142,72 +148,6 @@ export function createStorageInitScript(authState: AuthState): string {
 }
 
 /**
- * Verify that authentication is working by checking storage and session state
- */
-export async function verifyAuthState(page: Page, debug: boolean = false): Promise<boolean> {
-  const localStorage = await page.evaluate(() => {
-    const items: Record<string, string> = {};
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      if (key) {
-        items[key] = window.localStorage.getItem(key) || "";
-      }
-    }
-    return items;
-  });
-
-  const sessionStorage = await page.evaluate(() => {
-    const items: Record<string, string> = {};
-    for (let i = 0; i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      if (key) {
-        items[key] = window.sessionStorage.getItem(key) || "";
-      }
-    }
-    return items;
-  });
-
-  const isSessionActive = localStorage["thunderid-session-active"] === "true";
-  const hasSessionData = Object.keys(sessionStorage).some(key => key.includes("session_data-instance_0"));
-
-  // Check if tokens exist and are not expired
-  let tokensValid = false;
-  const sessionDataKey = Object.keys(sessionStorage).find(key => key.includes("session_data-instance_0"));
-  if (sessionDataKey) {
-    try {
-      const sessionData = JSON.parse(sessionStorage[sessionDataKey]);
-      if (sessionData.access_token && sessionData.created_at && sessionData.expires_in) {
-        const expirationTime = sessionData.created_at + sessionData.expires_in * 1000;
-        tokensValid = Date.now() < expirationTime;
-        if (debug) {
-          const timeLeft = Math.round((expirationTime - Date.now()) / 1000 / 60);
-          console.log(`🔍 [DEBUG] Token expires in: ${timeLeft} minutes`);
-          if (!tokensValid) {
-            console.log("⚠️ [DEBUG] ACCESS TOKEN EXPIRED! Need to re-run auth.setup.ts");
-          }
-        }
-      }
-    } catch {
-      if (debug) console.log("🔍 [DEBUG] Could not parse session data");
-    }
-  }
-
-  if (debug) {
-    console.log("🔍 [DEBUG] localStorage keys:", Object.keys(localStorage));
-    console.log("🔍 [DEBUG] sessionStorage keys:", Object.keys(sessionStorage));
-    console.log(
-      `🔍 [DEBUG] Session active: ${isSessionActive}, Has session data: ${hasSessionData}, Tokens valid: ${tokensValid}`
-    );
-  }
-
-  console.log(
-    `🔍 Auth verification: session active: ${isSessionActive}, has session data: ${hasSessionData}, tokens valid: ${tokensValid}`
-  );
-
-  return isSessionActive && hasSessionData && tokensValid;
-}
-
-/**
  * Setup authentication for a test by loading and injecting auth state.
  * If auth file doesn't exist or tokens are expired, performs inline login.
  */
@@ -218,8 +158,12 @@ export async function setupAuthentication(
 ): Promise<void> {
   const { debug = false, authFilePath } = options;
 
-  // Default auth file path
-  const defaultAuthPath = path.join(__dirname, "../../playwright/.auth/console-admin.json");
+  // Default auth file path. Keyed by worker index: the backend rotates refresh tokens and
+  // revokes the whole token family if a used one is replayed (see refresh_token.go), so two
+  // workers sharing one file can race a silent refresh and lock each other out. Workers run
+  // their tests sequentially, so a per-worker file never sees that race.
+  const workerIndex = process.env.TEST_PARALLEL_INDEX ?? "0";
+  const defaultAuthPath = path.join(__dirname, `../../playwright/.auth/console-admin-${workerIndex}.json`);
   const authPath = authFilePath || defaultAuthPath;
 
   console.log("Setting up authentication...");
@@ -229,25 +173,16 @@ export async function setupAuthentication(
     console.log("🔍 [DEBUG] Base URL:", baseUrl);
   }
 
-  // Check if auth file exists
-  if (!fs.existsSync(authPath)) {
-    console.log("⚠️ Auth file not found, performing inline login...");
-    await performInlineLogin(page, baseUrl, authPath, debug);
-    return;
-  }
-
-  // Load authentication state
+  // Missing, unreadable and expired all mean the same thing here: log in and rewrite the file.
   const authState = loadAuthStateNoThrow(authPath, debug);
 
   if (!authState) {
-    console.log("⚠️ Failed to load auth state, performing inline login...");
+    console.log("⚠️ No usable auth state, performing inline login...");
     await performInlineLogin(page, baseUrl, authPath, debug);
     return;
   }
 
-  // Check if tokens are expired
-  const tokensExpired = checkTokensExpired(authState, debug);
-  if (tokensExpired) {
+  if (checkTokensExpired(authState, debug)) {
     console.log("⚠️ Tokens expired, performing inline login...");
     await performInlineLogin(page, baseUrl, authPath, debug);
     return;
@@ -263,30 +198,16 @@ export async function setupAuthentication(
   // Restore cookies if any exist
   await restoreCookies(context, authState, debug);
 
-  // CRITICAL: Add init script to inject storage BEFORE page loads
+  // CRITICAL: Add init script to inject storage BEFORE page loads. checkTokensExpired above
+  // already confirmed the token isn't expired, and the test itself navigates to its real target
+  // route right after this fixture resolves - that navigation is what applies this init script,
+  // so there's no need to load the console here too just to re-check what it would find.
   const initScript = createStorageInitScript(authState);
   if (initScript) {
     await context.addInitScript(initScript);
     if (debug) {
       console.log("🔍 [DEBUG] Added init script to inject storage on page load");
     }
-  }
-
-  // Navigate to base URL - storage will be injected automatically
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-
-  if (debug) {
-    console.log("🔍 [DEBUG] Page URL after navigation:", page.url());
-  }
-
-  // Small wait for app to initialize with injected tokens
-  await page.waitForTimeout(Timeouts.AUTH_INITIALIZATION);
-
-  // Verify authentication is working
-  const isValid = await verifyAuthState(page, debug);
-  if (!isValid) {
-    console.log("⚠️ Auth verification failed, performing inline login...");
-    await performInlineLogin(page, baseUrl, authPath, debug);
   }
 }
 
@@ -320,7 +241,9 @@ function checkTokensExpired(authState: AuthState, debug: boolean): boolean {
     const sessionData = JSON.parse(sessionDataKey.value);
     if (sessionData.access_token && sessionData.created_at && sessionData.expires_in) {
       const expirationTime = sessionData.created_at + sessionData.expires_in * 1000;
-      const isExpired = Date.now() >= expirationTime;
+      // Treat a token that expires during the test as already expired - reusing one with seconds
+      // left buys nothing and costs a mid-test 401 that reads as a product failure.
+      const isExpired = Date.now() + TOKEN_EXPIRY_MARGIN_MS >= expirationTime;
       if (debug) {
         const timeLeft = Math.round((expirationTime - Date.now()) / 1000 / 60);
         console.log(`🔍 [DEBUG] Token expires in: ${timeLeft} minutes`);
@@ -339,6 +262,34 @@ function checkTokensExpired(authState: AuthState, debug: boolean): boolean {
 }
 
 /**
+ * Wait for redirect to the console page, then for the SDK to actually write the session it
+ * establishes there - checkTokensExpired() reads this same sessionStorage key, and
+ * saveAuthState() would otherwise capture storage before the token exists.
+ */
+async function waitForSessionData(page: Page): Promise<void> {
+  await page.waitForURL("**/console/**", { timeout: Timeouts.REDIRECT });
+
+  // The welcome key is the later of the two: WelcomeRedirect marks itself dismissed in
+  // sessionStorage the first time a signed-in session renders a non-/welcome route (see
+  // WelcomeRedirect.tsx), which is a useEffect that only runs once the session token exists.
+  // Capturing state before that effect commits replays a session that looks brand new to every
+  // consumer of this file, redirecting whatever page they navigate to next into /welcome instead
+  // of the page the test actually asked for. Both are still checked because a retried sign-in
+  // starts with the previous attempt's welcome key already in storage.
+  await page.waitForFunction(
+    () => {
+      const keys = Object.keys(sessionStorage);
+      return (
+        keys.some(key => key.includes("session_data-instance_0")) &&
+        keys.some(key => key.endsWith(":welcome:dismissed"))
+      );
+    },
+    undefined,
+    { timeout: Timeouts.PAGE_LOAD }
+  );
+}
+
+/**
  * Perform inline login when auth file doesn't exist or tokens expired
  */
 async function performInlineLogin(page: Page, baseUrl: string, authPath: string, debug: boolean): Promise<void> {
@@ -354,34 +305,26 @@ Please ensure they are set in your .env file or the test environment configurati
 
   console.log("🔐 Performing inline login...");
 
-  // Navigate to console page (will redirect to login)
-  await page.goto(`${baseUrl}/console`, { waitUntil: "networkidle" });
-
-  // Wait for login form
-  await page.waitForSelector('input[name="username"], input[type="text"]', { timeout: Timeouts.FORM_LOAD });
-
-  // Fill credentials
-  try {
-    await page.fill('input[name="username"]', username);
-  } catch {
-    await page.fill('input[type="text"]', username);
-  }
+  // Enter through /console rather than the sign-in route: it's the console's own redirect into
+  // the OAuth2 flow that ends with the SDK writing a session, which is what this function is for.
+  const signinPage = new ConsoleSigninPage(page, baseUrl);
+  await signinPage.gotoHome();
+  await signinPage.login(username, password);
 
   try {
-    await page.fill('input[name="password"]', password);
+    await waitForSessionData(page);
   } catch {
-    await page.fill('input[type="password"]', password);
+    // The @thunderid SDK has an unguarded race: ThunderIDProvider's and ProtectedRoute's own
+    // sign-in effects can each exchange the same single-use authorization code, and the loser
+    // gets a 400 invalid_grant with no session ever written - no amount of waiting recovers
+    // from that. Re-visiting /console rides the IdP's SSO cookie (see
+    // backend/internal/flow/session/transport.go) to a fresh code without re-entering credentials.
+    console.log(
+      "⚠️ Sign-in did not settle (SDK code-exchange race, or the welcome effect never committed), retrying..."
+    );
+    await signinPage.gotoHome();
+    await waitForSessionData(page);
   }
-
-  // Click sign in
-  const signInButton = page
-    .locator('button[type="submit"]')
-    .or(page.getByRole("button", { name: /sign in|login|submit/i }));
-  await signInButton.first().click();
-
-  // Wait for redirect to console page
-  await page.waitForURL("**/console/**", { timeout: Timeouts.REDIRECT });
-  await page.waitForLoadState("networkidle");
 
   console.log("✅ Inline login successful!");
 
@@ -402,22 +345,11 @@ async function saveAuthState(page: Page, baseUrl: string, authPath: string, debu
   }
 
   const cookies = await context.cookies();
-  const localStorage = await page.evaluate(() => {
-    const items: { name: string; value: string }[] = [];
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      if (key) items.push({ name: key, value: window.localStorage.getItem(key) || "" });
-    }
-    return items;
-  });
-
-  const sessionStorage = await page.evaluate(() => {
-    const items: { name: string; value: string }[] = [];
-    for (let i = 0; i < window.sessionStorage.length; i++) {
-      const key = window.sessionStorage.key(i);
-      if (key) items.push({ name: key, value: window.sessionStorage.getItem(key) || "" });
-    }
-    return items;
+  // context.storageState() would cover the cookies and localStorage, but never sessionStorage -
+  // which is where this app's tokens live - so both are read here in one round trip instead.
+  const { localStorage, sessionStorage } = await page.evaluate(() => {
+    const entries = (storage: Storage) => Object.entries({ ...storage }).map(([name, value]) => ({ name, value }));
+    return { localStorage: entries(window.localStorage), sessionStorage: entries(window.sessionStorage) };
   });
 
   const storageState = {

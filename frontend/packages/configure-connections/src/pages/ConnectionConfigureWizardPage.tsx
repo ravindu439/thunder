@@ -1,31 +1,19 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {FullScreenCreationWizardLayout} from '@thunderid/components';
 import {useConfig} from '@thunderid/contexts';
-import {AppBreadcrumbs, Box, Button, Paper, Stack, Typography} from '@wso2/oxygen-ui';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Box, Button, Paper, Stack, Typography} from '@wso2/oxygen-ui';
 import {type JSX, useEffect, useMemo, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate, useParams} from 'react-router';
 import useCreateConnection from '../api/useCreateConnection';
+import ConnectionCreateHint from '../components/ConnectionCreateHint';
 import ConnectionForm from '../components/ConnectionForm';
-import ConnectionFullPageLayout from '../components/ConnectionFullPageLayout';
-import {CONNECTION_FORM_FIELDS} from '../config/connectionFormFields';
+import {CONNECTION_FORM_FIELDS, fieldsForMode} from '../config/connectionFormFields';
 import {VENDOR_META_BY_TYPE} from '../config/connectionVendorMeta';
+import useConnectionRoutes from '../hooks/useConnectionRoutes';
 import type {ConnectionResponse, ConnectionType} from '../models/connection';
 import {
   type ConnectionFormValues,
@@ -33,7 +21,6 @@ import {
   formValuesToRequest,
   validateConnectionForm,
 } from '../utils/connectionFormMapping';
-import isConflictError from '../utils/isConflictError';
 
 /**
  * Full-screen wizard for configuring a branded catalog vendor: a single credentials step. The
@@ -42,6 +29,7 @@ import isConflictError from '../utils/isConflictError';
 export default function ConnectionConfigureWizardPage(): JSX.Element | null {
   const {t} = useTranslation('connections');
   const navigate = useNavigate();
+  const routes = useConnectionRoutes();
   const {getGateCallbackUrl} = useConfig();
   const {type} = useParams<{type: string}>();
 
@@ -51,13 +39,13 @@ export default function ConnectionConfigureWizardPage(): JSX.Element | null {
   const createMutation = useCreateConnection(connectionType);
 
   const [editedValues, setEditedValues] = useState<ConnectionFormValues>({});
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!meta) {
-      void navigate('/connections');
+      void navigate(routes.connections.list());
     }
-  }, [meta, navigate]);
+  }, [meta, navigate, routes]);
 
   const fields = useMemo(() => (meta ? CONNECTION_FORM_FIELDS[connectionType] : []), [meta, connectionType]);
   const redirectUri = getGateCallbackUrl();
@@ -69,28 +57,39 @@ export default function ConnectionConfigureWizardPage(): JSX.Element | null {
 
   const values: ConnectionFormValues = {...emptyValues, ...editedValues};
   // The connection name is fixed to the vendor display name, so it is hidden and excluded from validation.
-  const visibleFields = fields.filter((field) => field.name !== 'name');
+  const visibleFields = fieldsForMode(connectionType, 'create').filter((field) => field.name !== 'name');
   const formValid: boolean = Object.keys(validateConnectionForm(values, visibleFields, 'create')).length === 0;
 
   const close = (): void => {
-    void navigate('/connections');
+    void navigate(routes.connections.list());
+  };
+
+  // A create failure is stale once the user edits any field. Only reset the mutation once it has
+  // actually failed: resetting while it's still pending would flip isPending back to false and
+  // re-enable the create button before the in-flight request settles.
+  const clearCreateError = (): void => {
+    setGeneralError(null);
+    if (createMutation.isError) {
+      createMutation.reset();
+    }
   };
 
   const handleCreate = (): void => {
     if (!formValid) {
       return;
     }
-    setNameError(null);
+    setGeneralError(null);
     const payload = {
       ...formValuesToRequest(values, fields, {mode: 'create', secretReplaced: true}),
       name: meta.displayName,
     };
     createMutation.mutate(payload, {
-      onSuccess: (created: ConnectionResponse) => void navigate(`/connections/${connectionType}/${created.id}`),
+      onSuccess: (created: ConnectionResponse) => void navigate(routes.connections.detail(connectionType, created.id)),
       onError: (error: Error) => {
-        if (isConflictError(error)) {
-          setNameError(t('error.duplicateName'));
-        }
+        // The connection name here is fixed to the vendor display name and is not user-editable
+        // (see the visibleFields filter above), so a 409 duplicate-name conflict has no more
+        // specific place to go than the same general error surface as any other failure.
+        setGeneralError(getErrorMessage(error, t, 'create.error', 'Failed to create connection.'));
       },
     });
   };
@@ -102,20 +101,43 @@ export default function ConnectionConfigureWizardPage(): JSX.Element | null {
   ];
 
   return (
-    <ConnectionFullPageLayout
-      label={t('form.chrome.configure')}
+    <FullScreenCreationWizardLayout
       onClose={close}
-      breadcrumb={<AppBreadcrumbs items={crumbs} />}
+      progress={100}
+      breadcrumbItems={crumbs}
+      footer={
+        <Box sx={{display: 'flex', justifyContent: 'flex-end'}}>
+          <Button
+            variant="contained"
+            disabled={!formValid || createMutation.isPending}
+            onClick={handleCreate}
+            data-testid="wizard-create"
+          >
+            {t('form.actions.create', 'Create connection')}
+          </Button>
+        </Box>
+      }
     >
       <Stack direction="column" spacing={3}>
         <Stack direction="column" spacing={1}>
-          <Typography variant="h4" fontWeight={700}>
+          <Typography variant="h1" gutterBottom>
             {t('configure.heading', {vendor: meta.displayName})}
           </Typography>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="subtitle1" gutterBottom>
             {t('configure.subheading')}
           </Typography>
         </Stack>
+
+        {meta.createHintKey && (
+          <ConnectionCreateHint
+            instruction={t(meta.createHintKey, {
+              vendor: meta.displayName,
+              defaultValue:
+                'Create an OAuth client for {{vendor}}, then register the redirect URI below and enter the client ID and client secret it gives you.',
+            })}
+            redirectUri={redirectUri}
+          />
+        )}
 
         <Paper variant="outlined" sx={{p: 3}}>
           <ConnectionForm
@@ -125,24 +147,21 @@ export default function ConnectionConfigureWizardPage(): JSX.Element | null {
             secretReplacing={false}
             hasStoredSecret={false}
             vendorDisplayName={meta.displayName}
-            nameError={nameError}
             showNameField={false}
-            onFieldChange={(name, value) => setEditedValues((prev) => ({...prev, [name]: value}))}
+            onFieldChange={(name, value) => {
+              clearCreateError();
+              setEditedValues((prev) => ({...prev, [name]: value}));
+            }}
             onSecretReplacingChange={() => undefined}
           />
         </Paper>
 
-        <Box sx={{display: 'flex', justifyContent: 'flex-end'}}>
-          <Button
-            variant="contained"
-            disabled={!formValid || createMutation.isPending}
-            onClick={handleCreate}
-            data-testid="wizard-create"
-          >
-            {t('form.actions.create')}
-          </Button>
-        </Box>
+        {generalError && (
+          <Alert severity="error" onClose={clearCreateError} data-testid="wizard-create-error">
+            {generalError}
+          </Alert>
+        )}
       </Stack>
-    </ConnectionFullPageLayout>
+    </FullScreenCreationWizardLayout>
   );
 }

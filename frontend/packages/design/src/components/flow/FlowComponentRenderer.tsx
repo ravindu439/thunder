@@ -1,24 +1,9 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {EmbeddedFlowComponentType, EmbeddedFlowEventType, type ConsentPurpose} from '@thunderid/react';
 import type {JSX} from 'react';
-import BlockAdapter from './adapters/BlockAdapter';
+import BlockAdapter, {ResendButtonAdapter} from './adapters/BlockAdapter';
 import ConsentAdapter from './adapters/ConsentAdapter';
 import CopyableTextAdapter from './adapters/CopyableTextAdapter';
 import DividerAdapter from './adapters/DividerAdapter';
@@ -44,6 +29,7 @@ import type {FlowComponent, FlowComponentRendererProps} from '../../models/flow'
  * - `DIVIDER` → {@link DividerAdapter}
  * - `BLOCK` (form or trigger) → {@link BlockAdapter}
  * - `ACTION / TRIGGER` (standalone) → {@link StandaloneTriggerAdapter}
+ * - `RESEND` (standalone) → {@link ResendButtonAdapter}
  *
  * Consumers must wrap their submit/trigger handlers into the normalised
  * `onSubmit(action, inputs)` callback.  Setting a `key` on the rendered
@@ -58,13 +44,11 @@ export default function FlowComponentRenderer({
   isLoading,
   resolve,
   onInputChange,
+  onBlur,
   onSubmit,
   onValidate,
   maxImageSize,
   additionalData,
-  signUpFallbackUrl,
-  signInFallbackUrl,
-  forgotPasswordFallbackUrl,
 }: FlowComponentRendererProps): JSX.Element | null {
   const comp = component as FlowComponent;
 
@@ -75,17 +59,7 @@ export default function FlowComponentRenderer({
 
   // RICH_TEXT
   if (comp.type === 'RICH_TEXT') {
-    return (
-      <RichTextAdapter
-        component={comp}
-        resolve={resolve}
-        signUpFallbackUrl={signUpFallbackUrl}
-        signInFallbackUrl={signInFallbackUrl}
-        forgotPasswordFallbackUrl={forgotPasswordFallbackUrl}
-        values={values}
-        onSubmit={onSubmit}
-      />
-    );
+    return <RichTextAdapter component={comp} resolve={resolve} values={values} onSubmit={onSubmit} />;
   }
 
   // IMAGE
@@ -109,11 +83,9 @@ export default function FlowComponentRenderer({
         fieldErrors={fieldErrors}
         isLoading={isLoading}
         onInputChange={onInputChange}
+        onBlur={onBlur}
         onSubmit={onSubmit}
         onValidate={onValidate}
-        signUpFallbackUrl={signUpFallbackUrl}
-        signInFallbackUrl={signInFallbackUrl}
-        forgotPasswordFallbackUrl={forgotPasswordFallbackUrl}
       />
     );
   }
@@ -162,11 +134,10 @@ export default function FlowComponentRenderer({
             isLoading={isLoading || isExpiredOnMount}
             resolve={resolve}
             onInputChange={onInputChange}
+            onBlur={onBlur}
             onSubmit={onSubmit}
             onValidate={onValidate}
-            signUpFallbackUrl={signUpFallbackUrl}
-            signInFallbackUrl={signInFallbackUrl}
-            forgotPasswordFallbackUrl={forgotPasswordFallbackUrl}
+            additionalData={additionalData}
           />
         </>
       );
@@ -182,11 +153,10 @@ export default function FlowComponentRenderer({
         isLoading={isLoading || isExpiredOnMount}
         resolve={resolve}
         onInputChange={onInputChange}
+        onBlur={onBlur}
         onSubmit={onSubmit}
         onValidate={onValidate}
-        signUpFallbackUrl={signUpFallbackUrl}
-        signInFallbackUrl={signInFallbackUrl}
-        forgotPasswordFallbackUrl={forgotPasswordFallbackUrl}
+        additionalData={additionalData}
       />
     );
   }
@@ -199,6 +169,18 @@ export default function FlowComponentRenderer({
   // QR_CODE
   if (comp.type === 'QR_CODE') {
     return <QrCodeAdapter component={comp} additionalData={additionalData} />;
+  }
+
+  // Standalone RESEND (outside of a block, so it dispatches its own action)
+  if (comp.type === 'RESEND') {
+    return (
+      <ResendButtonAdapter
+        component={comp}
+        isLoading={isLoading}
+        resolve={resolve}
+        onClick={() => onSubmit(comp, values)}
+      />
+    );
   }
 
   // Standalone ACTION / TRIGGER (outside of a block)

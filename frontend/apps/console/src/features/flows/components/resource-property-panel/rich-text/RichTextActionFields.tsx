@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {Box, FormControl, FormControlLabel, FormLabel, Stack, Switch, TextField, Typography} from '@wso2/oxygen-ui';
 import {useEdges, useReactFlow} from '@xyflow/react';
@@ -38,6 +23,29 @@ export interface RichTextActionFieldsPropsInterface {
  */
 export interface RichTextActionInterface {
   ref?: string;
+}
+
+/**
+ * Matches a `data-action-ref` attribute and captures its value. The leading whitespace is an
+ * attribute boundary, matching `syncLabelActionRef` and the adapter's own matcher, so an
+ * attribute merely ending in `data-action-ref` cannot be mistaken for the sentinel.
+ */
+const ACTION_REF_SENTINEL = /\sdata-action-ref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+
+/**
+ * Reads the `data-action-ref` sentinels out of a rich text's label HTML, in document order.
+ *
+ * @param label - The rich text's label, which may be HTML.
+ * @returns The sentinel values, empty when the label carries none.
+ */
+function getAnchorActionRefs(label: string | undefined): string[] {
+  if (!label) {
+    return [];
+  }
+
+  return Array.from(label.matchAll(ACTION_REF_SENTINEL))
+    .map((match: RegExpMatchArray) => match[1] ?? match[2])
+    .filter((ref: string) => ref !== '');
 }
 
 /**
@@ -79,10 +87,21 @@ function RichTextActionFields({resource, onChange}: RichTextActionFieldsPropsInt
   const handleToggle = (enabled: boolean): void => {
     setIsEnabled(enabled);
     if (enabled) {
-      // Preserve the widget's predefined ref if there is one (e.g. Self Sign Up Link
-      // ships with `action_signup`). Otherwise seed an empty ref — the connect handler
-      // will fill it in with the target node's id once the author draws an edge.
-      onChange('action', {ref: action?.ref ?? ''}, resource);
+      // The ref must equal the anchor's `data-action-ref` in the label HTML, otherwise the
+      // rendered link dispatches nothing. Keep the existing ref only when an anchor still
+      // carries it — `action` writes never rebroadcast (see isEnabled), so after a toggle
+      // off and on again it can hold a value the label has since moved away from. Otherwise
+      // take the label's first sentinel, and fall back to the component id when there is
+      // none (a label with no sentinel dispatches on any anchor click).
+      const labelRefs = getAnchorActionRefs((resource as Resource & {label?: string}).label);
+      const existingRef = action?.ref === '' ? undefined : action?.ref;
+      const derivedRef =
+        (existingRef !== undefined && labelRefs.includes(existingRef) ? existingRef : undefined) ??
+        labelRefs[0] ??
+        existingRef ??
+        resource.id;
+
+      onChange('action', {ref: derivedRef}, resource);
     } else {
       // Drop any edges the author drew from this rich-text's source handle — the
       // handle is about to disappear, so orphaned edges would dangle otherwise.

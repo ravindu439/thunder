@@ -1,20 +1,5 @@
-# ------------------------------------------------------------------------------
-# Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
-#
-# WSO2 LLC. licenses this file to you under the Apache License,
-# Version 2.0 (the "License"); you may not use this file except
-# in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied. See the License for the
-# specific language governing permissions and limitations
-# under the License.
-# ------------------------------------------------------------------------------
+# Copyright 2025 The ThunderID Authors
+# SPDX-License-Identifier: Apache-2.0
 
 # Mockery configuration file for generating public mocks
 template: testify
@@ -126,6 +111,12 @@ packages:
           pkgname: revocationmock
           filename: "{{.InterfaceName}}_mock.go"
       RefreshTokenRevokerInterface:
+        config:
+          dir: tests/mocks/oauth/oauth2/revocationmock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: revocationmock
+          filename: "{{.InterfaceName}}_mock.go"
+      CriteriaRevokerInterface:
         config:
           dir: tests/mocks/oauth/oauth2/revocationmock
           structname: '{{.InterfaceName}}Mock'
@@ -289,9 +280,9 @@ packages:
       PasskeyServiceInterface:
         config:
           dir: tests/mocks/authn/passkeymock
-          structname: 'WebAuthnAuthnServiceInterfaceMock'
+          structname: 'PasskeyServiceInterfaceMock'
           pkgname: passkeymock
-          filename: "WebAuthnAuthnServiceInterface_mock.go"
+          filename: "PasskeyServiceInterface_mock.go"
 
   github.com/thunder-id/thunderid/internal/authn/common:
     config:
@@ -362,11 +353,21 @@ packages:
   
   github.com/thunder-id/thunderid/internal/ou:
     config:
-      all: true
       dir: tests/mocks/oumock
       structname: '{{.InterfaceName}}Mock'
       pkgname: oumock
       filename: "{{.InterfaceName}}_mock.go"
+    # ConfigurableOUService is intentionally excluded: it is only used for two-phase
+    # service wiring within the ou package (unused outside it), and its SetOUFlowResolver
+    # method takes the unexported ouFlowResolver interface, which cannot be referenced
+    # from this external mock package.
+    interfaces:
+      OUUserResolver:
+      OUGroupResolver:
+      OURoleResolver:
+      OrganizationUnitServiceInterface:
+      organizationUnitStoreInterface:
+      ouFlowResolver:
 
   github.com/thunder-id/thunderid/internal/flow/core:
     config:
@@ -556,6 +557,12 @@ packages:
           structname: '{{.InterfaceName}}Mock'
           pkgname: managermock
           filename: "{{.InterfaceName}}_mock.go"
+      AuthnProviderInterface:
+        config:
+          dir: tests/mocks/authnprovider/providermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: providermock
+          filename: "{{.InterfaceName}}_mock.go"
       ActorProvider:
         config:
           dir: tests/mocks/actorprovidermock
@@ -573,6 +580,36 @@ packages:
           dir: tests/mocks/consentprovidermock
           structname: '{{.InterfaceName}}Mock'
           pkgname: consentprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
+      ResourceServerProvider:
+        config:
+          dir: tests/mocks/resourceserverprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: resourceserverprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
+      OrganizationUnitProvider:
+        config:
+          dir: tests/mocks/ouprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: ouprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
+      DesignProvider:
+        config:
+          dir: tests/mocks/designprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: designprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
+      I18nProvider:
+        config:
+          dir: tests/mocks/i18nprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: i18nprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
+      IDPProvider:
+        config:
+          dir: tests/mocks/idpprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: idpprovidermock
           filename: "{{.InterfaceName}}_mock.go"
       AuthorizationProvider:
         config:
@@ -604,14 +641,12 @@ packages:
           structname: '{{.InterfaceName}}Mock'
           pkgname: attestationprovidermock
           filename: "{{.InterfaceName}}_mock.go"
-
-  github.com/thunder-id/thunderid/internal/authnprovider/provider:
-    config:
-      all: true
-      dir: tests/mocks/authnprovider/providermock
-      structname: '{{.InterfaceName}}Mock'
-      pkgname: providermock
-      filename: "{{.InterfaceName}}_mock.go"
+      RuntimeStoreProvider:
+        config:
+          dir: tests/mocks/runtimestoreprovidermock
+          structname: '{{.InterfaceName}}Mock'
+          pkgname: runtimestoreprovidermock
+          filename: "{{.InterfaceName}}_mock.go"
 
   github.com/thunder-id/thunderid/internal/system/sysauthz:
     interfaces:

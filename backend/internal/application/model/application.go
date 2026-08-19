@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package model defines the data structures for the application module.
 //
@@ -28,13 +13,14 @@ import (
 
 // ApplicationDTO represents the data transfer object for application service operations.
 type ApplicationDTO struct {
-	ID          string `json:"id,omitempty" jsonschema:"Application ID. Auto-generated unique identifier."`
-	OUID        string `json:"ouId,omitempty" jsonschema:"Organization unit ID. The OU this application belongs to."`
-	OUHandle    string `json:"ouHandle,omitempty" jsonschema:"Organization unit handle. Resolved to an ID by the service layer."`
-	Name        string `json:"name" jsonschema:"Application name."`
-	Description string `json:"description,omitempty" jsonschema:"Optional description of the application's purpose or functionality."`
-	Template    string `json:"template,omitempty" jsonschema:"Application template. Optional. Pre-configured application type template."`
-	FlowSecret  string `json:"flowSecret,omitempty" jsonschema:"Flow Secret. Returned once on creation for backend/server-side apps — non-public clients that do not use the redirect-based authorization_code flow. Used to authenticate when initiating a flow directly via the Flow Execution API."`
+	ID          string          `json:"id,omitempty" jsonschema:"Application ID. Auto-generated unique identifier."`
+	OUID        string          `json:"ouId,omitempty" jsonschema:"Organization unit ID. The OU this application belongs to."`
+	OUHandle    string          `json:"ouHandle,omitempty" jsonschema:"Organization unit handle. Resolved to an ID by the service layer."`
+	Name        string          `json:"name" jsonschema:"Application name."`
+	Description string          `json:"description,omitempty" jsonschema:"Optional description of the application's purpose or functionality."`
+	Type        ApplicationType `json:"type,omitempty" jsonschema:"Application type. Canonical platform/client class: browser, fullstack, mobile, m2m, mcp, or custom. Required at creation and immutable."`
+	Template    string          `json:"template,omitempty" jsonschema:"Application template. Optional. Display metadata identifying the frontend template used to create the application."`
+	FlowSecret  string          `json:"flowSecret,omitempty" jsonschema:"Flow Secret used to authenticate when initiating a flow directly via the Flow Execution API. Issued once on creation only to full-stack, custom, and mcp applications that either have no OAuth 2.0 configuration (embedded) or are configured as a confidential, non-redirect OAuth 2.0 client. Browser, mobile, and m2m applications are never issued one."`
 
 	URL       string   `json:"url,omitempty" jsonschema:"Application home URL. Optional. The main URL where your application is hosted."`
 	LogoURL   string   `json:"logoUrl,omitempty" jsonschema:"Logo image URL. Optional. Displayed in login pages and application listings."`
@@ -58,9 +44,9 @@ type BasicApplicationDTO struct {
 	RecoveryFlowID            string
 	IsRecoveryFlowEnabled     bool
 	SignOutFlowID             string
-	IsSignOutFlowEnabled      bool
 	ThemeID                   string
 	LayoutID                  string
+	Type                      ApplicationType
 	Template                  string
 	ClientID                  string
 	LogoURL                   string
@@ -69,11 +55,12 @@ type BasicApplicationDTO struct {
 
 // ApplicationProcessedDTO represents the processed data transfer object for application service operations.
 type ApplicationProcessedDTO struct {
-	ID          string `yaml:"id,omitempty"`
-	OUID        string `yaml:"ouId,omitempty"`
-	Name        string `yaml:"name,omitempty"`
-	Description string `yaml:"description,omitempty"`
-	Template    string `yaml:"template,omitempty"`
+	ID          string          `yaml:"id,omitempty"`
+	OUID        string          `yaml:"ouId,omitempty"`
+	Name        string          `yaml:"name,omitempty"`
+	Description string          `yaml:"description,omitempty"`
+	Type        ApplicationType `yaml:"type,omitempty"`
+	Template    string          `yaml:"template,omitempty"`
 
 	URL       string `yaml:"url,omitempty"`
 	LogoURL   string `yaml:"logoUrl,omitempty"`
@@ -88,77 +75,85 @@ type ApplicationProcessedDTO struct {
 
 // ApplicationRequest represents the request structure for creating or updating an application.
 type ApplicationRequest struct {
-	OUID        string   `json:"ouId,omitempty" yaml:"ouId,omitempty"`
-	Name        string   `json:"name" yaml:"name" native:"required,min=3,max=100"`
-	Description string   `json:"description" yaml:"description"`
-	Template    string   `json:"template,omitempty" yaml:"template,omitempty"`
-	FlowSecret  string   `json:"flowSecret,omitempty" yaml:"flowSecret,omitempty"`
-	URL         string   `json:"url,omitempty" yaml:"url,omitempty" native:"omitempty,url,max=2048"`
-	LogoURL     string   `json:"logoUrl,omitempty" yaml:"logoUrl,omitempty" native:"omitempty,url,max=2048"`
-	TosURI      string   `json:"tosUri,omitempty" yaml:"tosUri,omitempty" native:"omitempty,url,max=2048"`
-	PolicyURI   string   `json:"policyUri,omitempty" yaml:"policyUri,omitempty" native:"omitempty,url,max=2048"`
-	Contacts    []string `json:"contacts,omitempty" yaml:"contacts,omitempty"`
+	OUID        string          `json:"ouId,omitempty" yaml:"ouId,omitempty"`
+	Name        string          `json:"name" yaml:"name" native:"required,min=1,max=100"`
+	Description string          `json:"description" yaml:"description"`
+	Type        ApplicationType `json:"type,omitempty" yaml:"type,omitempty"`
+	Template    string          `json:"template,omitempty" yaml:"template,omitempty"`
+	FlowSecret  string          `json:"flowSecret,omitempty" yaml:"flowSecret,omitempty"`
+	URL         string          `json:"url,omitempty" yaml:"url,omitempty" native:"omitempty,url,max=2048"`
+	LogoURL     string          `json:"logoUrl,omitempty" yaml:"logoUrl,omitempty" native:"omitempty,url,max=2048"`
+	TosURI      string          `json:"tosUri,omitempty" yaml:"tosUri,omitempty" native:"omitempty,url,max=2048"`
+	PolicyURI   string          `json:"policyUri,omitempty" yaml:"policyUri,omitempty" native:"omitempty,url,max=2048"`
+	Contacts    []string        `json:"contacts,omitempty" yaml:"contacts,omitempty"`
 
-	providers.InboundAuthProfile `yaml:",inline"`
-	InboundAuthConfig            []providers.InboundAuthConfigWithSecret `json:"inboundAuthConfig,omitempty" yaml:"inboundAuthConfig,omitempty"`
-	Metadata                     map[string]interface{}                  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	inboundmodel.InboundAuthProfileReq `yaml:",inline"`
+
+	InboundAuthConfig []providers.InboundAuthConfigWithSecret `json:"inboundAuthConfig,omitempty" yaml:"inboundAuthConfig,omitempty"`
+	Metadata          map[string]interface{}                  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // ApplicationRequestWithID represents the request structure for importing an application using file based runtime.
 type ApplicationRequestWithID struct {
-	ID          string   `json:"id" yaml:"id"`
-	OUID        string   `json:"ouId,omitempty" yaml:"ouId,omitempty"`
-	OUHandle    string   `json:"ouHandle,omitempty" yaml:"ouHandle,omitempty"`
-	Name        string   `json:"name" yaml:"name"`
-	Description string   `json:"description" yaml:"description"`
-	Template    string   `json:"template,omitempty" yaml:"template,omitempty"`
-	FlowSecret  string   `json:"flowSecret,omitempty" yaml:"flowSecret,omitempty"`
-	URL         string   `json:"url,omitempty" yaml:"url,omitempty"`
-	LogoURL     string   `json:"logoUrl,omitempty" yaml:"logoUrl,omitempty"`
-	TosURI      string   `json:"tosUri,omitempty" yaml:"tosUri,omitempty"`
-	PolicyURI   string   `json:"policyUri,omitempty" yaml:"policyUri,omitempty"`
-	Contacts    []string `json:"contacts,omitempty" yaml:"contacts,omitempty"`
+	ID          string          `json:"id" yaml:"id"`
+	OUID        string          `json:"ouId,omitempty" yaml:"ouId,omitempty"`
+	OUHandle    string          `json:"ouHandle,omitempty" yaml:"ouHandle,omitempty"`
+	Name        string          `json:"name" yaml:"name"`
+	Description string          `json:"description" yaml:"description"`
+	Type        ApplicationType `json:"type,omitempty" yaml:"type,omitempty"`
+	Template    string          `json:"template,omitempty" yaml:"template,omitempty"`
+	FlowSecret  string          `json:"flowSecret,omitempty" yaml:"flowSecret,omitempty"`
+	URL         string          `json:"url,omitempty" yaml:"url,omitempty"`
+	LogoURL     string          `json:"logoUrl,omitempty" yaml:"logoUrl,omitempty"`
+	TosURI      string          `json:"tosUri,omitempty" yaml:"tosUri,omitempty"`
+	PolicyURI   string          `json:"policyUri,omitempty" yaml:"policyUri,omitempty"`
+	Contacts    []string        `json:"contacts,omitempty" yaml:"contacts,omitempty"`
 
-	providers.InboundAuthProfile `yaml:",inline"`
-	InboundAuthConfig            []providers.InboundAuthConfigWithSecret `json:"inboundAuthConfig,omitempty" yaml:"inboundAuthConfig,omitempty"`
-	Metadata                     map[string]interface{}                  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	inboundmodel.InboundAuthProfileReq `yaml:",inline"`
+
+	InboundAuthConfig []providers.InboundAuthConfigWithSecret `json:"inboundAuthConfig,omitempty" yaml:"inboundAuthConfig,omitempty"`
+	Metadata          map[string]interface{}                  `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // ApplicationCompleteResponse represents the complete response structure for an application.
 type ApplicationCompleteResponse struct {
-	ID          string   `json:"id,omitempty"`
-	OUID        string   `json:"ouId,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	ClientID    string   `json:"clientId,omitempty"`
-	Template    string   `json:"template,omitempty"`
-	FlowSecret  string   `json:"flowSecret,omitempty"`
-	URL         string   `json:"url,omitempty"`
-	LogoURL     string   `json:"logoUrl,omitempty"`
-	TosURI      string   `json:"tosUri,omitempty"`
-	PolicyURI   string   `json:"policyUri,omitempty"`
-	Contacts    []string `json:"contacts,omitempty"`
+	ID          string          `json:"id,omitempty"`
+	OUID        string          `json:"ouId,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	ClientID    string          `json:"clientId,omitempty"`
+	Type        ApplicationType `json:"type,omitempty"`
+	Template    string          `json:"template,omitempty"`
+	FlowSecret  string          `json:"flowSecret,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	LogoURL     string          `json:"logoUrl,omitempty"`
+	TosURI      string          `json:"tosUri,omitempty"`
+	PolicyURI   string          `json:"policyUri,omitempty"`
+	Contacts    []string        `json:"contacts,omitempty"`
 
-	providers.InboundAuthProfile
+	inboundmodel.InboundAuthProfileReq
+
 	InboundAuthConfig []providers.InboundAuthConfigWithSecret `json:"inboundAuthConfig,omitempty"`
 	Metadata          map[string]interface{}                  `json:"metadata,omitempty"`
 }
 
 // ApplicationGetResponse represents the response structure for getting an application.
 type ApplicationGetResponse struct {
-	ID          string   `json:"id,omitempty"`
-	OUID        string   `json:"ouId,omitempty"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	ClientID    string   `json:"clientId,omitempty"`
-	Template    string   `json:"template,omitempty"`
-	URL         string   `json:"url,omitempty"`
-	LogoURL     string   `json:"logoUrl,omitempty"`
-	TosURI      string   `json:"tosUri,omitempty"`
-	PolicyURI   string   `json:"policyUri,omitempty"`
-	Contacts    []string `json:"contacts,omitempty"`
+	ID          string          `json:"id,omitempty"`
+	OUID        string          `json:"ouId,omitempty"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	ClientID    string          `json:"clientId,omitempty"`
+	Type        ApplicationType `json:"type,omitempty"`
+	Template    string          `json:"template,omitempty"`
+	URL         string          `json:"url,omitempty"`
+	LogoURL     string          `json:"logoUrl,omitempty"`
+	TosURI      string          `json:"tosUri,omitempty"`
+	PolicyURI   string          `json:"policyUri,omitempty"`
+	Contacts    []string        `json:"contacts,omitempty"`
 
-	providers.InboundAuthProfile
+	inboundmodel.InboundAuthProfileReq
+
 	InboundAuthConfig []inboundmodel.InboundAuthConfig `json:"inboundAuthConfig,omitempty"`
 	Metadata          map[string]interface{}           `json:"metadata,omitempty"`
 }
@@ -167,22 +162,23 @@ type ApplicationGetResponse struct {
 // Only carries the subset of inbound-profile fields that make sense in the list view, so it
 // does not embed InboundAuthProfile (which carries Assertion/LoginConsent/etc.).
 type BasicApplicationResponse struct {
-	ID                        string `json:"id,omitempty" jsonschema:"Application ID."`
-	Name                      string `json:"name" jsonschema:"Application name."`
-	Description               string `json:"description,omitempty" jsonschema:"Application description."`
-	ClientID                  string `json:"clientId,omitempty" jsonschema:"OAuth Client ID."`
-	LogoURL                   string `json:"logoUrl,omitempty" jsonschema:"Logo URL."`
-	AuthFlowID                string `json:"authFlowId,omitempty" jsonschema:"Authentication Flow ID."`
-	RegistrationFlowID        string `json:"registrationFlowId,omitempty" jsonschema:"Registration Flow ID."`
-	IsRegistrationFlowEnabled bool   `json:"isRegistrationFlowEnabled" jsonschema:"Registration enabled status."`
-	RecoveryFlowID            string `json:"recoveryFlowId,omitempty" jsonschema:"Recovery Flow ID."`
-	IsRecoveryFlowEnabled     bool   `json:"isRecoveryFlowEnabled" jsonschema:"Recovery enabled status."`
-	SignOutFlowID             string `json:"signOutFlowId,omitempty" jsonschema:"Sign-out flow ID."`
-	IsSignOutFlowEnabled      bool   `json:"isSignOutFlowEnabled" jsonschema:"Sign-out enabled status."`
-	ThemeID                   string `json:"themeId,omitempty" jsonschema:"Theme ID."`
-	LayoutID                  string `json:"layoutId,omitempty" jsonschema:"Layout ID."`
-	Template                  string `json:"template,omitempty" jsonschema:"Application Template."`
-	IsReadOnly                bool   `json:"isReadOnly" jsonschema:"Indicates if the application is read-only (declarative/immutable)."`
+	ID                        string          `json:"id,omitempty" jsonschema:"Application ID."`
+	Name                      string          `json:"name" jsonschema:"Application name."`
+	Description               string          `json:"description,omitempty" jsonschema:"Application description."`
+	ClientID                  string          `json:"clientId,omitempty" jsonschema:"OAuth Client ID."`
+	LogoURL                   string          `json:"logoUrl,omitempty" jsonschema:"Logo URL."`
+	AuthFlowID                string          `json:"authFlowId,omitempty" jsonschema:"Authentication Flow ID."`
+	RegistrationFlowID        string          `json:"registrationFlowId,omitempty" jsonschema:"Registration Flow ID."`
+	IsRegistrationFlowEnabled bool            `json:"isRegistrationFlowEnabled" jsonschema:"Registration enabled status."`
+	RecoveryFlowID            string          `json:"recoveryFlowId,omitempty" jsonschema:"Recovery Flow ID."`
+	IsRecoveryFlowEnabled     bool            `json:"isRecoveryFlowEnabled" jsonschema:"Recovery enabled status."`
+	SignOutFlowID             string          `json:"signOutFlowId,omitempty" jsonschema:"Sign-out flow ID."`
+	IsSignOutFlowEnabled      bool            `json:"isSignOutFlowEnabled" jsonschema:"Sign-out enabled status."`
+	ThemeID                   string          `json:"themeId,omitempty" jsonschema:"Theme ID."`
+	LayoutID                  string          `json:"layoutId,omitempty" jsonschema:"Layout ID."`
+	Type                      ApplicationType `json:"type,omitempty" jsonschema:"Application type (browser, fullstack, mobile, m2m, mcp, custom)."`
+	Template                  string          `json:"template,omitempty" jsonschema:"Application Template."`
+	IsReadOnly                bool            `json:"isReadOnly" jsonschema:"Indicates if the application is read-only (declarative/immutable)."`
 }
 
 // ApplicationListResponse represents the response structure for listing applications.

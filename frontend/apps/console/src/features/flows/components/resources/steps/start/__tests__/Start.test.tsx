@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen} from '@testing-library/react';
 import {describe, it, expect, vi} from 'vitest';
@@ -33,9 +18,6 @@ vi.mock('@xyflow/react', () => ({
   },
 }));
 
-// Mock SCSS
-vi.mock('../Start.scss', () => ({}));
-
 describe('Start', () => {
   describe('Rendering', () => {
     it('should render the Start node', () => {
@@ -51,11 +33,10 @@ describe('Start', () => {
       expect(fab).toBeInTheDocument();
     });
 
-    it('should render with start class on Fab', () => {
+    it('should render the Fab in the primary color', () => {
       render(<Start />);
 
-      const fab = screen.getByRole('button');
-      expect(fab).toHaveClass('start');
+      expect(screen.getByRole('button', {name: 'start'})).toHaveClass('MuiFab-primary');
     });
   });
 
@@ -81,15 +62,6 @@ describe('Start', () => {
       // Handle id should contain 'start' and '_NEXT' suffix
       expect(handle.getAttribute('data-handle-id')).toContain('start');
       expect(handle.getAttribute('data-handle-id')).toContain('_NEXT');
-    });
-
-    it('should have hidden-handle class', () => {
-      // Note: Since we're mocking Handle, we can't directly test the class
-      // but the component should pass the className prop
-      render(<Start />);
-
-      const handle = screen.getByTestId('handle-source');
-      expect(handle).toBeInTheDocument();
     });
   });
 

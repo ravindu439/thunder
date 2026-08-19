@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package importer
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +20,7 @@ import (
 	agentmodel "github.com/thunder-id/thunderid/internal/agent/model"
 	"github.com/thunder-id/thunderid/internal/application"
 	"github.com/thunder-id/thunderid/internal/application/model"
+	layoutmgt "github.com/thunder-id/thunderid/internal/design/layout/mgt"
 	thememgt "github.com/thunder-id/thunderid/internal/design/theme/mgt"
 	"github.com/thunder-id/thunderid/internal/entitytype"
 	flowmgt "github.com/thunder-id/thunderid/internal/flow/mgt"
@@ -43,7 +30,9 @@ import (
 	"github.com/thunder-id/thunderid/internal/ou"
 	"github.com/thunder-id/thunderid/internal/resource"
 	"github.com/thunder-id/thunderid/internal/role"
+	"github.com/thunder-id/thunderid/internal/system/cmodels"
 	"github.com/thunder-id/thunderid/internal/system/config"
+	"github.com/thunder-id/thunderid/internal/system/kmprovider/defaultkm"
 	"github.com/thunder-id/thunderid/internal/user"
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
 
@@ -54,6 +43,27 @@ import (
 // testCryptoKey is the shared key used so secret property encryption works in tests
 // that round-trip a connection with a secret field through the declarative parser.
 const testCryptoKey = "0579f866ac7c9273580d0ff163fa01a7b2401a7ff3ddc3e3b14ae3136fa6025e"
+
+// TestMain wires cmodels' package-level config crypto provider once for the whole test
+// binary, so secret Property encryption works regardless of which test's setup last
+// reset the server runtime.
+func TestMain(m *testing.M) {
+	config.ResetServerRuntime()
+	if err := config.InitializeServerRuntime("/tmp/test", &config.Config{
+		Crypto: config.CryptoConfig{Encryption: engineconfig.EncryptionConfig{Key: testCryptoKey}},
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize server runtime: %v\n", err)
+		os.Exit(1)
+	}
+	_, cfgCryptoSvc, err := defaultkm.Initialize(nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize default crypto provider: %v\n", err)
+		os.Exit(1)
+	}
+	cmodels.SetConfigCryptoProvider(cfgCryptoSvc)
+	config.ResetServerRuntime()
+	os.Exit(m.Run())
+}
 
 func boolPtr(v bool) *bool {
 	return &v
@@ -356,15 +366,96 @@ func (f *fakeThemeService) UpdateTheme(_ context.Context,
 	return updated, nil
 }
 
+type fakeLayoutService struct {
+	created   []layoutmgt.CreateLayoutRequestWithID
+	updated   []layoutmgt.UpdateLayoutRequest
+	byID      map[string]*layoutmgt.Layout
+	byHandle  map[string]*layoutmgt.Layout
+	createErr *tidcommon.ServiceError
+	updateErr *tidcommon.ServiceError
+}
+
+func layoutNotFoundErr() *tidcommon.ServiceError {
+	return &tidcommon.ServiceError{
+		Type:  tidcommon.ClientErrorType,
+		Code:  layoutmgt.ErrorLayoutNotFound.Code,
+		Error: tidcommon.I18nMessage{DefaultValue: "not found"},
+	}
+}
+
+func (f *fakeLayoutService) CreateLayout(_ context.Context,
+	layout layoutmgt.CreateLayoutRequestWithID,
+) (*layoutmgt.Layout, *tidcommon.ServiceError) {
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+
+	id := layout.ID
+	if id == "" {
+		id = "generated-layout-id"
+	}
+
+	created := &layoutmgt.Layout{
+		ID:          id,
+		Handle:      layout.Handle,
+		DisplayName: layout.DisplayName,
+		Description: layout.Description,
+		Layout:      layout.Layout,
+	}
+	f.created = append(f.created, layout)
+	if f.byID == nil {
+		f.byID = map[string]*layoutmgt.Layout{}
+	}
+	if f.byHandle == nil {
+		f.byHandle = map[string]*layoutmgt.Layout{}
+	}
+	f.byID[created.ID] = created
+	f.byHandle[created.Handle] = created
+	return created, nil
+}
+
+func (f *fakeLayoutService) GetLayout(_ context.Context, id string) (*layoutmgt.Layout, *tidcommon.ServiceError) {
+	if existing, ok := f.byID[id]; ok {
+		return existing, nil
+	}
+
+	return nil, layoutNotFoundErr()
+}
+
+func (f *fakeLayoutService) UpdateLayout(_ context.Context,
+	id string, layout layoutmgt.UpdateLayoutRequest,
+) (*layoutmgt.Layout, *tidcommon.ServiceError) {
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+
+	if _, ok := f.byID[id]; !ok {
+		return nil, layoutNotFoundErr()
+	}
+
+	updated := &layoutmgt.Layout{
+		ID:          id,
+		Handle:      layout.Handle,
+		DisplayName: layout.DisplayName,
+		Description: layout.Description,
+		Layout:      layout.Layout,
+	}
+	f.updated = append(f.updated, layout)
+	f.byID[id] = updated
+	f.byHandle[updated.Handle] = updated
+	return updated, nil
+}
+
 type fakeEntityTypeService struct {
-	created []entitytype.CreateEntityTypeRequestWithID
-	updated []entitytype.UpdateEntityTypeRequest
-	byID    map[string]*entitytype.EntityType
-	byName  map[string]*entitytype.EntityType
+	created          []entitytype.CreateEntityTypeRequestWithID
+	updated          []entitytype.UpdateEntityTypeRequest
+	createCategories []entitytype.TypeCategory
+	byID             map[string]*entitytype.EntityType
+	byName           map[string]*entitytype.EntityType
 }
 
 func (f *fakeEntityTypeService) CreateEntityType(
-	_ context.Context, _ entitytype.TypeCategory, request entitytype.CreateEntityTypeRequestWithID,
+	_ context.Context, category entitytype.TypeCategory, request entitytype.CreateEntityTypeRequestWithID,
 ) (*entitytype.EntityType, *tidcommon.ServiceError) {
 	id := request.ID
 	if id == "" {
@@ -379,6 +470,7 @@ func (f *fakeEntityTypeService) CreateEntityType(
 		Schema:                request.Schema,
 	}
 	f.created = append(f.created, request)
+	f.createCategories = append(f.createCategories, category)
 	if f.byID == nil {
 		f.byID = map[string]*entitytype.EntityType{}
 	}
@@ -1592,6 +1684,41 @@ func TestImportResources_OrganizationUnitUpsertCreatePreservesID(t *testing.T) {
 	assert.Equal(t, "ou-123", ouSvc.created[0].ID)
 }
 
+func TestImportResources_OrganizationUnitCarriesDefaultFlowFields(t *testing.T) {
+	ouSvc := &fakeOUService{existing: map[string]providers.OrganizationUnit{}}
+	svc := newImportService(
+		nil, nil, nil, nil, ouSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	content := strings.Join([]string{
+		"resource_type: organization_unit",
+		"id: ou-456",
+		"handle: eng",
+		"name: Engineering",
+		"authFlowId: auth-flow-1",
+		"registrationFlowId: reg-flow-1",
+		"isRegistrationFlowEnabled: true",
+		"recoveryFlowId: recovery-flow-1",
+		"isRecoveryFlowEnabled: true",
+		"signOutFlowId: signout-flow-1",
+		"",
+	}, "\n")
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{Content: content})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	require.Len(t, ouSvc.created, 1)
+	assert.Equal(t, "auth-flow-1", ouSvc.created[0].AuthFlowID)
+	assert.Equal(t, "reg-flow-1", ouSvc.created[0].RegistrationFlowID)
+	assert.True(t, ouSvc.created[0].IsRegistrationFlowEnabled)
+	assert.Equal(t, "recovery-flow-1", ouSvc.created[0].RecoveryFlowID)
+	assert.True(t, ouSvc.created[0].IsRecoveryFlowEnabled)
+	assert.Equal(t, "signout-flow-1", ouSvc.created[0].SignOutFlowID)
+}
+
 func TestImportResources_FlowUpsertCreatePreservesID(t *testing.T) {
 	flowSvc := &fakeFlowService{
 		byID:  map[string]*providers.CompleteFlowDefinition{},
@@ -1746,6 +1873,173 @@ func TestImportResources_ThemeUpsertCreatePreservesID(t *testing.T) {
 	assert.Equal(t, "thm-123", themeSvc.created[0].ID)
 }
 
+func layoutImportContent() string {
+	return strings.Join([]string{
+		"resource_type: layout",
+		"id: lay-123",
+		"handle: default-layout",
+		"displayName: Default Layout",
+		"layout:",
+		"  head:",
+		"    stylesheets: []",
+		"",
+	}, "\n")
+}
+
+func newLayoutImportService(layoutSvc *fakeLayoutService) ImportServiceInterface {
+	return newImportService(
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, layoutSvc, nil, nil, nil, nil, nil, nil,
+	)
+}
+
+// Upsert with an ID that does not exist falls back to a create that preserves the ID.
+func TestImportResources_LayoutUpsertCreatePreservesID(t *testing.T) {
+	layoutSvc := &fakeLayoutService{byID: map[string]*layoutmgt.Layout{}, byHandle: map[string]*layoutmgt.Layout{}}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(true)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	assert.Equal(t, operationCreate, resp.Results[0].Operation)
+	assert.Equal(t, "lay-123", resp.Results[0].ResourceID)
+	require.Len(t, layoutSvc.created, 1)
+	assert.Equal(t, "lay-123", layoutSvc.created[0].ID)
+	assert.Empty(t, layoutSvc.updated)
+}
+
+// Upsert with an existing ID updates in place instead of creating.
+func TestImportResources_LayoutUpsertUpdatesExisting(t *testing.T) {
+	layoutSvc := &fakeLayoutService{
+		byID:     map[string]*layoutmgt.Layout{"lay-123": {ID: "lay-123", Handle: "default-layout"}},
+		byHandle: map[string]*layoutmgt.Layout{"default-layout": {ID: "lay-123", Handle: "default-layout"}},
+	}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(true)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	assert.Equal(t, operationUpdate, resp.Results[0].Operation)
+	assert.Equal(t, "lay-123", resp.Results[0].ResourceID)
+	require.Len(t, layoutSvc.updated, 1)
+	assert.Empty(t, layoutSvc.created)
+}
+
+// A non-not-found error from update surfaces as a failed update outcome without attempting a create.
+//
+//nolint:dupl // Parallel error-path tests differ only by the failing operation and error code.
+func TestImportResources_LayoutUpsertUpdateError(t *testing.T) {
+	layoutSvc := &fakeLayoutService{
+		byID:     map[string]*layoutmgt.Layout{},
+		byHandle: map[string]*layoutmgt.Layout{},
+		updateErr: &tidcommon.ServiceError{
+			Type:  tidcommon.ServerErrorType,
+			Code:  "LAY-5000",
+			Error: tidcommon.I18nMessage{DefaultValue: "update failed"},
+		},
+	}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(true), ContinueOnError: boolPtr(true)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusFailed, resp.Results[0].Status)
+	assert.Equal(t, operationUpdate, resp.Results[0].Operation)
+	assert.Equal(t, "LAY-5000", resp.Results[0].Code)
+	assert.Empty(t, layoutSvc.created)
+}
+
+// When update reports not-found but the fallback create fails, it surfaces as a failed create outcome.
+//
+//nolint:dupl // Parallel error-path tests differ only by the failing operation and error code.
+func TestImportResources_LayoutUpsertCreateError(t *testing.T) {
+	layoutSvc := &fakeLayoutService{
+		byID:     map[string]*layoutmgt.Layout{},
+		byHandle: map[string]*layoutmgt.Layout{},
+		createErr: &tidcommon.ServiceError{
+			Type:  tidcommon.ServerErrorType,
+			Code:  "LAY-5001",
+			Error: tidcommon.I18nMessage{DefaultValue: "create failed"},
+		},
+	}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(true), ContinueOnError: boolPtr(true)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusFailed, resp.Results[0].Status)
+	assert.Equal(t, operationCreate, resp.Results[0].Operation)
+	assert.Equal(t, "LAY-5001", resp.Results[0].Code)
+	assert.Empty(t, layoutSvc.updated)
+}
+
+// Without upsert, a create that preserves the ID is issued directly.
+func TestImportResources_LayoutCreatePreservesID(t *testing.T) {
+	layoutSvc := &fakeLayoutService{byID: map[string]*layoutmgt.Layout{}, byHandle: map[string]*layoutmgt.Layout{}}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(false)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	assert.Equal(t, operationCreate, resp.Results[0].Operation)
+	assert.Equal(t, "lay-123", resp.Results[0].ResourceID)
+	require.Len(t, layoutSvc.created, 1)
+	assert.Equal(t, "lay-123", layoutSvc.created[0].ID)
+}
+
+// Without upsert, a create failure surfaces as a failed create outcome.
+func TestImportResources_LayoutCreateError(t *testing.T) {
+	layoutSvc := &fakeLayoutService{
+		byID:     map[string]*layoutmgt.Layout{},
+		byHandle: map[string]*layoutmgt.Layout{},
+		createErr: &tidcommon.ServiceError{
+			Type:  tidcommon.ServerErrorType,
+			Code:  "LAY-5001",
+			Error: tidcommon.I18nMessage{DefaultValue: "create failed"},
+		},
+	}
+	svc := newLayoutImportService(layoutSvc)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: layoutImportContent(),
+		Options: &ImportOptions{Upsert: boolPtr(false), ContinueOnError: boolPtr(true)},
+	})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusFailed, resp.Results[0].Status)
+	assert.Equal(t, operationCreate, resp.Results[0].Operation)
+	assert.Equal(t, "LAY-5001", resp.Results[0].Code)
+}
+
 //nolint:dupl // Test pattern repeated across resource types to verify ID preservation behavior
 func TestImportResources_EntityTypeUpsertCreatePreservesID(t *testing.T) {
 	entityTypeSvc := &fakeEntityTypeService{
@@ -1897,6 +2191,100 @@ func TestImportResources_EntityTypeOUHandlePassedToService(t *testing.T) {
 	require.Len(t, entityTypeSvc.created, 1)
 	assert.Equal(t, "default", entityTypeSvc.created[0].OUHandle)
 	assert.Equal(t, "", entityTypeSvc.created[0].OUID)
+}
+
+func TestImportResources_AgentTypeDefaultsToAgentCategory(t *testing.T) {
+	entityTypeSvc := &fakeEntityTypeService{
+		byID:   map[string]*entitytype.EntityType{},
+		byName: map[string]*entitytype.EntityType{},
+	}
+	svc := newImportService(
+		nil, nil, nil, nil, nil, entityTypeSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	content := strings.Join([]string{
+		"resource_type: agent_type",
+		"id: agtt-123",
+		"name: support-agent",
+		"ouId: ou-1",
+		"schema:",
+		"  type: object",
+		"  properties: {}",
+		"",
+	}, "\n")
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{Content: content})
+
+	require.Nil(t, err)
+	require.NotNil(t, resp)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	assert.Equal(t, operationCreate, resp.Results[0].Operation)
+	assert.Equal(t, "agtt-123", resp.Results[0].ResourceID)
+	require.Len(t, entityTypeSvc.created, 1)
+	assert.Equal(t, "agtt-123", entityTypeSvc.created[0].ID)
+	require.Len(t, entityTypeSvc.createCategories, 1)
+	assert.Equal(t, entitytype.TypeCategoryAgent, entityTypeSvc.createCategories[0])
+}
+
+func TestImportResources_AgentTypeExplicitCategoryTakesPrecedence(t *testing.T) {
+	entityTypeSvc := &fakeEntityTypeService{
+		byID:   map[string]*entitytype.EntityType{},
+		byName: map[string]*entitytype.EntityType{},
+	}
+	svc := newImportService(
+		nil, nil, nil, nil, nil, entityTypeSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	content := strings.Join([]string{
+		"resource_type: agent_type",
+		"id: agtt-124",
+		"name: support-agent",
+		"category: user",
+		"ouId: ou-1",
+		"schema:",
+		"  type: object",
+		"  properties: {}",
+		"",
+	}, "\n")
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{Content: content})
+
+	require.Nil(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	require.Len(t, entityTypeSvc.createCategories, 1)
+	assert.Equal(t, entitytype.TypeCategoryUser, entityTypeSvc.createCategories[0])
+}
+
+func TestImportResources_UserTypeExplicitAgentCategoryStillWorks(t *testing.T) {
+	entityTypeSvc := &fakeEntityTypeService{
+		byID:   map[string]*entitytype.EntityType{},
+		byName: map[string]*entitytype.EntityType{},
+	}
+	svc := newImportService(
+		nil, nil, nil, nil, nil, entityTypeSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	content := strings.Join([]string{
+		"resource_type: user_type",
+		"id: usrs-124",
+		"name: support-agent",
+		"category: agent",
+		"ouId: ou-1",
+		"schema:",
+		"  type: object",
+		"  properties: {}",
+		"",
+	}, "\n")
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{Content: content})
+
+	require.Nil(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	require.Len(t, entityTypeSvc.createCategories, 1)
+	assert.Equal(t, entitytype.TypeCategoryAgent, entityTypeSvc.createCategories[0])
 }
 
 func TestImportResources_StripsClientSecretForPublicClientWithNoneAuthMethod(t *testing.T) {
@@ -2059,6 +2447,28 @@ func TestImportResources_ApplicationOUHandlePassedToService(t *testing.T) {
 	assert.Equal(t, "default", appSvc.created[0].OUHandle)
 }
 
+func TestImportResources_ApplicationTypePassedToService(t *testing.T) {
+	appSvc := &fakeApplicationService{existing: map[string]*providers.Application{}}
+	svc := newImportService(
+		appSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+
+	resp, err := svc.ImportResources(context.Background(), &ImportRequest{
+		Content: strings.Join([]string{
+			"resource_type: application",
+			"name: My App",
+			"type: browser",
+			"",
+		}, "\n"),
+	})
+
+	require.Nil(t, err)
+	require.Len(t, resp.Results, 1)
+	assert.Equal(t, statusSuccess, resp.Results[0].Status)
+	require.Len(t, appSvc.created, 1)
+	assert.Equal(t, model.ApplicationTypeBrowser, appSvc.created[0].Type)
+}
+
 func TestImportResources_ApplicationAuthFlowHandlePassedToService(t *testing.T) {
 	appSvc := &fakeApplicationService{existing: map[string]*providers.Application{}}
 	svc := newImportService(
@@ -2201,8 +2611,11 @@ func (f *fakeAgentService) UpdateAgent(
 	return &agentmodel.AgentCompleteResponse{ID: agentID, Name: req.Name}, nil
 }
 
+const testAgentLogo = "avatar:shape=circle,variant=anonymous_entity,content=bot_head,colors=0"
+
 const agentYAML = "resource_type: agent\n" +
-	"id: agent-1\ntype: default\nouId: root\nname: Test Agent\ndescription: desc\n"
+	"id: agent-1\ntype: default\nouId: root\nname: Test Agent\ndescription: desc\n" +
+	"logoUrl: \"" + testAgentLogo + "\"\n"
 
 func TestImportAgent_Create(t *testing.T) {
 	agentSvc := &fakeAgentService{existing: map[string]*agentmodel.AgentGetResponse{}}
@@ -2219,6 +2632,7 @@ func TestImportAgent_Create(t *testing.T) {
 	assert.Equal(t, operationCreate, resp.Results[0].Operation)
 	assert.Len(t, agentSvc.created, 1)
 	assert.Equal(t, "Test Agent", agentSvc.created[0].Name)
+	assert.Equal(t, testAgentLogo, agentSvc.created[0].LogoURL)
 }
 
 func TestImportAgent_UpsertUpdate(t *testing.T) {
@@ -2240,6 +2654,7 @@ func TestImportAgent_UpsertUpdate(t *testing.T) {
 	assert.Equal(t, statusSuccess, resp.Results[0].Status)
 	assert.Equal(t, operationUpdate, resp.Results[0].Operation)
 	assert.Len(t, agentSvc.updated, 1)
+	assert.Equal(t, testAgentLogo, agentSvc.updated[0].LogoURL)
 }
 
 func TestImportAgent_UpsertFallbackCreate(t *testing.T) {

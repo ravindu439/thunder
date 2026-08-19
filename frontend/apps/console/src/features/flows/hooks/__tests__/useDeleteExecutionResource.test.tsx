@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {renderHook} from '@testing-library/react';
 import {ReactFlowProvider} from '@xyflow/react';
@@ -31,7 +16,6 @@ const {
   mockGetEdges,
   mockGetNodes,
   mockUpdateNodeData,
-  mockSetNodes,
   mockSetIsOpenResourcePropertiesPanel,
   registeredHandlers,
   mockUnsubscribes,
@@ -39,7 +23,6 @@ const {
   mockGetEdges: vi.fn().mockReturnValue([]),
   mockGetNodes: vi.fn().mockReturnValue([]),
   mockUpdateNodeData: vi.fn(),
-  mockSetNodes: vi.fn(),
   mockSetIsOpenResourcePropertiesPanel: vi.fn(),
   registeredHandlers: {} as Record<string, ((...args: unknown[]) => Promise<boolean>)[]>,
   mockUnsubscribes: {} as Record<string, ReturnType<typeof vi.fn>[]>,
@@ -54,14 +37,7 @@ const mockOnNodeDelete = vi.fn().mockImplementation((handler: (...args: unknown[
   return unsub;
 });
 
-const mockOnNodeElementDelete = vi.fn().mockImplementation((handler: (...args: unknown[]) => Promise<boolean>) => {
-  if (!registeredHandlers.onNodeElementDelete) registeredHandlers.onNodeElementDelete = [];
-  registeredHandlers.onNodeElementDelete.push(handler);
-  const unsub = vi.fn();
-  if (!mockUnsubscribes.onNodeElementDelete) mockUnsubscribes.onNodeElementDelete = [];
-  mockUnsubscribes.onNodeElementDelete.push(unsub);
-  return unsub;
-});
+const mockOnNodeElementDelete = vi.fn().mockReturnValue(vi.fn());
 
 const mockFlowPlugins = {
   onPropertyChange: vi.fn().mockReturnValue(vi.fn()),
@@ -89,7 +65,6 @@ vi.mock('@xyflow/react', async () => {
       getEdges: mockGetEdges,
       getNodes: mockGetNodes,
       updateNodeData: mockUpdateNodeData,
-      setNodes: mockSetNodes,
     }),
   };
 });
@@ -141,14 +116,7 @@ describe('useDeleteExecutionResource', () => {
       mockUnsubscribes.onNodeDelete.push(unsub);
       return unsub;
     });
-    mockOnNodeElementDelete.mockImplementation((handler: (...args: unknown[]) => Promise<boolean>) => {
-      if (!registeredHandlers.onNodeElementDelete) registeredHandlers.onNodeElementDelete = [];
-      registeredHandlers.onNodeElementDelete.push(handler);
-      const unsub = vi.fn();
-      if (!mockUnsubscribes.onNodeElementDelete) mockUnsubscribes.onNodeElementDelete = [];
-      mockUnsubscribes.onNodeElementDelete.push(unsub);
-      return unsub;
-    });
+    mockOnNodeElementDelete.mockReturnValue(vi.fn());
   });
 
   describe('Plugin Registration', () => {
@@ -159,7 +127,17 @@ describe('useDeleteExecutionResource', () => {
 
       // Check that handlers are registered
       expect(mockOnNodeDelete).toHaveBeenCalledWith(expect.any(Function));
-      expect(mockOnNodeElementDelete).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    it('should not subscribe to element deletion', () => {
+      renderHook(() => useDeleteExecutionResource(), {
+        wrapper: createWrapper(),
+      });
+
+      // Deleting a button never removes the execution node it points to, so the hook
+      // has no element-deletion handler. Guards against reintroducing the shared-node
+      // deletion (a button and an upstream step can target the same execution node).
+      expect(mockOnNodeElementDelete).not.toHaveBeenCalled();
     });
 
     it('should call unsubscribe functions on unmount', () => {
@@ -171,7 +149,6 @@ describe('useDeleteExecutionResource', () => {
 
       // Check that unsubscribe functions are called
       mockUnsubscribes.onNodeDelete?.forEach((unsub) => expect(unsub).toHaveBeenCalled());
-      mockUnsubscribes.onNodeElementDelete?.forEach((unsub) => expect(unsub).toHaveBeenCalled());
     });
   });
 
@@ -217,16 +194,6 @@ describe('useDeleteExecutionResource', () => {
     });
   });
 
-  describe('deleteExecutionNode', () => {
-    it('should register the handler for element deletion', () => {
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      expect(mockOnNodeElementDelete).toHaveBeenCalledWith(expect.any(Function));
-    });
-  });
-
   describe('Context Integration', () => {
     it('should use setIsOpenResourcePropertiesPanel from context', () => {
       renderHook(() => useDeleteExecutionResource(), {
@@ -235,7 +202,6 @@ describe('useDeleteExecutionResource', () => {
 
       // The hook should have access to context
       expect(mockOnNodeDelete).toHaveBeenCalledTimes(1);
-      expect(mockOnNodeElementDelete).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -327,82 +293,6 @@ describe('useDeleteExecutionResource', () => {
     });
   });
 
-  describe('deleteExecutionNode Handler', () => {
-    it('should return true for non-action elements', async () => {
-      mockGetNodes.mockReturnValue([]);
-
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      const deleteElementHandler = registeredHandlers.onNodeElementDelete?.[0];
-      expect(deleteElementHandler).toBeDefined();
-
-      const element = {
-        id: 'input-1',
-        type: 'INPUT',
-        category: 'FIELD',
-      };
-
-      const result = await deleteElementHandler('step-1', element);
-      expect(result).toBe(true);
-    });
-
-    it('should delete execution node when action element with next type is deleted', async () => {
-      const executionNode: Node = {
-        id: 'execution-1',
-        type: 'TASK_EXECUTION',
-        position: {x: 100, y: 0},
-        data: {},
-      };
-
-      mockGetNodes.mockReturnValue([executionNode]);
-
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      const deleteElementHandler = registeredHandlers.onNodeElementDelete?.[0];
-      expect(deleteElementHandler).toBeDefined();
-
-      const element = {
-        id: 'button-1',
-        type: 'ACTION',
-        category: 'ACTION',
-        action: {
-          type: 'NEXT',
-          onSuccess: 'execution-1',
-        },
-      };
-
-      const result = await deleteElementHandler('step-1', element);
-      expect(result).toBe(true);
-      expect(mockSetNodes).toHaveBeenCalled();
-    });
-
-    it('should not delete execution node when action has different type', async () => {
-      mockGetNodes.mockReturnValue([]);
-
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      const deleteElementHandler = registeredHandlers.onNodeElementDelete?.[0];
-
-      const element = {
-        id: 'button-1',
-        type: 'ACTION',
-        category: 'ACTION',
-        action: {
-          type: 'SUBMIT',
-        },
-      };
-
-      const result = await deleteElementHandler('step-1', element);
-      expect(result).toBe(true);
-    });
-  });
-
   describe('deleteExecutionActionNode Handler - Callback Execution', () => {
     it('should execute updateNodeData callback to filter action components', async () => {
       const executionNode: Node = {
@@ -490,107 +380,6 @@ describe('useDeleteExecutionResource', () => {
       await deleteNodeHandler([executionNode]);
 
       expect(mockSetIsOpenResourcePropertiesPanel).toHaveBeenCalledWith(false);
-    });
-  });
-
-  describe('deleteExecutionNode Handler - Callback Execution', () => {
-    it('should execute setNodes callback to filter execution nodes', async () => {
-      const executionNode: Node = {
-        id: 'execution-1',
-        type: 'TASK_EXECUTION',
-        position: {x: 100, y: 0},
-        data: {},
-      };
-
-      const viewNode: Node = {
-        id: 'view-1',
-        type: 'VIEW',
-        position: {x: 0, y: 0},
-        data: {},
-      };
-
-      mockGetNodes.mockReturnValue([viewNode, executionNode]);
-
-      // Capture the callback passed to setNodes
-      let capturedCallback: ((nodes: Node[]) => Node[]) | null = null;
-      mockSetNodes.mockImplementation((callback: (nodes: Node[]) => Node[]) => {
-        capturedCallback = callback;
-      });
-
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      const deleteElementHandler = registeredHandlers.onNodeElementDelete?.[0];
-
-      const element = {
-        id: 'button-1',
-        type: 'ACTION',
-        category: 'ACTION',
-        action: {
-          type: 'NEXT',
-          onSuccess: 'execution-1',
-        },
-      };
-
-      await deleteElementHandler('step-1', element);
-
-      expect(mockSetNodes).toHaveBeenCalled();
-      expect(capturedCallback).not.toBeNull();
-
-      // Execute the callback
-      const result = capturedCallback!([viewNode, executionNode]);
-
-      // Should filter out the execution node with matching id and type
-      expect(result).toHaveLength(1);
-      expect(result[0]).toEqual(viewNode);
-    });
-
-    it('should keep nodes that do not match both id and type', async () => {
-      const executionNode: Node = {
-        id: 'execution-1',
-        type: 'TASK_EXECUTION',
-        position: {x: 100, y: 0},
-        data: {},
-      };
-
-      const otherExecutionNode: Node = {
-        id: 'execution-2',
-        type: 'TASK_EXECUTION',
-        position: {x: 200, y: 0},
-        data: {},
-      };
-
-      mockGetNodes.mockReturnValue([executionNode, otherExecutionNode]);
-
-      let capturedCallback: ((nodes: Node[]) => Node[]) | null = null;
-      mockSetNodes.mockImplementation((callback: (nodes: Node[]) => Node[]) => {
-        capturedCallback = callback;
-      });
-
-      renderHook(() => useDeleteExecutionResource(), {
-        wrapper: createWrapper(),
-      });
-
-      const deleteElementHandler = registeredHandlers.onNodeElementDelete?.[0];
-
-      const element = {
-        id: 'button-1',
-        type: 'ACTION',
-        category: 'ACTION',
-        action: {
-          type: 'NEXT',
-          onSuccess: 'execution-1',
-        },
-      };
-
-      await deleteElementHandler('step-1', element);
-
-      const result = capturedCallback!([executionNode, otherExecutionNode]);
-
-      // Should only filter out execution-1, keep execution-2
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('execution-2');
     });
   });
 });

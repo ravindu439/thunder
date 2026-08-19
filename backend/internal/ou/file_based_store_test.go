@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package ou
 
@@ -508,13 +493,19 @@ func (s *FileBasedStoreTestSuite) TestCreate_StorerInterface() {
 
 func (s *FileBasedStoreTestSuite) TestCreateAndRetrieveWithDesignFields() {
 	ou := providers.OrganizationUnit{
-		ID:       "design-ou-1",
-		Handle:   "design-test",
-		Name:     "Design Test OU",
-		Parent:   nil,
-		ThemeID:  "theme-123",
-		LayoutID: "layout-456",
-		LogoURL:  "https://example.com/logo.png",
+		ID:                        "design-ou-1",
+		Handle:                    "design-test",
+		Name:                      "Design Test OU",
+		Parent:                    nil,
+		ThemeID:                   "theme-123",
+		LayoutID:                  "layout-456",
+		AuthFlowID:                "auth-flow-123",
+		RegistrationFlowID:        "registration-flow-123",
+		IsRegistrationFlowEnabled: true,
+		RecoveryFlowID:            "recovery-flow-123",
+		IsRecoveryFlowEnabled:     true,
+		SignOutFlowID:             "signout-flow-123",
+		LogoURL:                   "https://example.com/logo.png",
 	}
 
 	err := s.store.CreateOrganizationUnit(context.Background(), ou)
@@ -525,6 +516,12 @@ func (s *FileBasedStoreTestSuite) TestCreateAndRetrieveWithDesignFields() {
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), "theme-123", retrieved.ThemeID)
 	assert.Equal(s.T(), "layout-456", retrieved.LayoutID)
+	assert.Equal(s.T(), "auth-flow-123", retrieved.AuthFlowID)
+	assert.Equal(s.T(), "registration-flow-123", retrieved.RegistrationFlowID)
+	assert.True(s.T(), retrieved.IsRegistrationFlowEnabled)
+	assert.Equal(s.T(), "recovery-flow-123", retrieved.RecoveryFlowID)
+	assert.True(s.T(), retrieved.IsRecoveryFlowEnabled)
+	assert.Equal(s.T(), "signout-flow-123", retrieved.SignOutFlowID)
 	assert.Equal(s.T(), "https://example.com/logo.png", retrieved.LogoURL)
 }
 

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable react/require-default-props */
 
@@ -27,6 +12,7 @@ import FlowsList from '../FlowsList';
 
 // Mock logger with accessible mock functions
 const mockLoggerError = vi.fn();
+const mockRefetch = vi.fn();
 vi.mock('@thunderid/logger/react', () => ({
   useLogger: () => ({
     debug: vi.fn(),
@@ -45,7 +31,7 @@ vi.mock('@thunderid/logger/react', () => ({
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: string | Record<string, unknown>) => {
       const translations: Record<string, string> = {
         'flows:listing.columns.name': 'Name',
         'flows:listing.columns.flowType': 'Type',
@@ -55,8 +41,14 @@ vi.mock('react-i18next', () => ({
         'flows:listing.error.unknown': 'Unknown error occurred',
         'common:actions.edit': 'Edit',
         'common:actions.delete': 'Delete',
+        'common:actions.refresh': 'Refresh',
       };
-      return translations[key] || key;
+      if (translations[key] !== undefined) return translations[key];
+      if (typeof options === 'string') return options || key;
+      if (options && typeof options === 'object' && 'defaultValue' in options) {
+        return (options.defaultValue as string) || '';
+      }
+      return key;
     },
   }),
 }));
@@ -104,6 +96,7 @@ let mockUseGetFlowsReturn = {
   data: mockFlowsData,
   isLoading: false,
   error: null as Error | null,
+  refetch: mockRefetch,
 };
 
 vi.mock('../../api/useGetFlows', () => ({
@@ -209,6 +202,21 @@ vi.mock('@wso2/oxygen-ui', async () => {
         </>
       ),
       RowActions: ({children}: {children: React.ReactNode}): React.ReactElement => children as React.ReactElement,
+      EmptyState: ({
+        title = undefined,
+        description = undefined,
+        action = undefined,
+      }: {
+        title?: string;
+        description?: string;
+        action?: React.ReactNode;
+      }): React.ReactElement => (
+        <div>
+          {title && <h2>{title}</h2>}
+          {description && <p>{description}</p>}
+          {action}
+        </div>
+      ),
     },
   };
 });
@@ -220,6 +228,7 @@ describe('FlowsList', () => {
       data: mockFlowsData,
       isLoading: false,
       error: null,
+      refetch: mockRefetch,
     };
     capturedColumns.value = [];
   });
@@ -270,6 +279,7 @@ describe('FlowsList', () => {
         data: null as unknown as {flows: BasicFlowDefinition[]},
         isLoading: true,
         error: null,
+        refetch: mockRefetch,
       };
 
       render(
@@ -283,28 +293,12 @@ describe('FlowsList', () => {
   });
 
   describe('Error State', () => {
-    it('should display error message when error occurs', () => {
+    it('should render a resolved error message via QueryErrorNotice, never the raw server text', () => {
       mockUseGetFlowsReturn = {
         data: null as unknown as {flows: BasicFlowDefinition[]},
         isLoading: false,
         error: new Error('Failed to fetch flows'),
-      };
-
-      render(
-        <MemoryRouter>
-          <FlowsList />
-        </MemoryRouter>,
-      );
-
-      expect(screen.getByText('Error loading flows')).toBeInTheDocument();
-      expect(screen.getByText('Failed to fetch flows')).toBeInTheDocument();
-    });
-
-    it('should display unknown error message when error has no message', () => {
-      mockUseGetFlowsReturn = {
-        data: null as unknown as {flows: BasicFlowDefinition[]},
-        isLoading: false,
-        error: {} as Error,
+        refetch: mockRefetch,
       };
 
       render(
@@ -315,6 +309,44 @@ describe('FlowsList', () => {
 
       expect(screen.getByText('Error loading flows')).toBeInTheDocument();
       expect(screen.getByText('Unknown error occurred')).toBeInTheDocument();
+      expect(screen.queryByText('Failed to fetch flows')).not.toBeInTheDocument();
+    });
+
+    it('should display unknown error message when error has no message', () => {
+      mockUseGetFlowsReturn = {
+        data: null as unknown as {flows: BasicFlowDefinition[]},
+        isLoading: false,
+        error: {} as Error,
+        refetch: mockRefetch,
+      };
+
+      render(
+        <MemoryRouter>
+          <FlowsList />
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByText('Error loading flows')).toBeInTheDocument();
+      expect(screen.getByText('Unknown error occurred')).toBeInTheDocument();
+    });
+
+    it('should call refetch when the retry action is clicked', () => {
+      mockUseGetFlowsReturn = {
+        data: null as unknown as {flows: BasicFlowDefinition[]},
+        isLoading: false,
+        error: new Error('Failed to fetch flows'),
+        refetch: mockRefetch,
+      };
+
+      render(
+        <MemoryRouter>
+          <FlowsList />
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(screen.getByRole('button', {name: 'Refresh'}));
+
+      expect(mockRefetch).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -330,7 +362,7 @@ describe('FlowsList', () => {
       fireEvent.click(authFlowRow);
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-1');
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-1');
       });
     });
 
@@ -346,7 +378,28 @@ describe('FlowsList', () => {
       fireEvent.click(registrationFlowRow);
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-2');
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-2');
+      });
+    });
+
+    it('should navigate when a read-only flow row is clicked', async () => {
+      mockUseGetFlowsReturn = {
+        data: {flows: [{...mockFlowsData.flows[0], isReadOnly: true}]},
+        isLoading: false,
+        error: null,
+        refetch: mockRefetch,
+      };
+
+      render(
+        <MemoryRouter>
+          <FlowsList />
+        </MemoryRouter>,
+      );
+
+      fireEvent.click(screen.getByTestId('row-flow-1'));
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-1');
       });
     });
   });
@@ -357,6 +410,7 @@ describe('FlowsList', () => {
         data: {flows: []},
         isLoading: false,
         error: null,
+        refetch: mockRefetch,
       };
 
       render(
@@ -374,6 +428,7 @@ describe('FlowsList', () => {
         data: undefined as unknown as {flows: BasicFlowDefinition[]},
         isLoading: false,
         error: null,
+        refetch: mockRefetch,
       };
 
       render(
@@ -409,6 +464,32 @@ describe('FlowsList', () => {
       );
       expect(regContainer.querySelectorAll('button').length).toBeGreaterThan(0);
     });
+
+    it('should render a read-only flow with a single view action that navigates', async () => {
+      render(
+        <MemoryRouter>
+          <FlowsList />
+        </MemoryRouter>,
+      );
+
+      const actionsColumn = capturedColumns.value.find((col) => col.field === 'actions');
+
+      const {container} = render(
+        actionsColumn!.renderCell!({
+          row: {...mockFlowsData.flows[0], isReadOnly: true},
+        } as DataGrid.GridRenderCellParams<BasicFlowDefinition>),
+      );
+
+      // Read-only flows expose view only: no edit, no delete.
+      const buttons = container.querySelectorAll('button');
+      expect(buttons.length).toBe(1);
+
+      fireEvent.click(buttons[0]);
+
+      await waitFor(() => {
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-1');
+      });
+    });
   });
 
   describe('Navigation Error Handling', () => {
@@ -423,7 +504,7 @@ describe('FlowsList', () => {
       capturedOnRowClick.value?.({row: {id: 'flow-2', flowType: 'REGISTRATION'}});
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-2');
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-2');
       });
     });
 
@@ -686,7 +767,7 @@ describe('FlowsList', () => {
       fireEvent.click(buttons[0]);
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/flows/signin/flow-1');
+        expect(mockNavigate).toHaveBeenCalledWith('/flows/flow-1');
       });
     });
 

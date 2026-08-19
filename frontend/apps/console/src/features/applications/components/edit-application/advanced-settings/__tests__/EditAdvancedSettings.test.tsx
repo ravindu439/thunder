@@ -1,26 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {fireEvent, render, screen} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type {Application, OAuth2Config} from '@thunderid/configure-applications';
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest';
-import CertificateTypes from '../../../../constants/certificate-types';
-import type {Application} from '../../../../models/application';
-import type {OAuth2Config} from '../../../../models/oauth';
 import EditAdvancedSettings from '../EditAdvancedSettings';
 
 const {mockUseThunderID} = vi.hoisted(() => ({
@@ -31,10 +15,54 @@ vi.mock('@thunderid/react', () => ({
   useThunderID: mockUseThunderID,
 }));
 
+vi.mock('@thunderid/contexts', () => ({
+  useConfig: () => ({
+    config: {
+      client: {
+        client_id: 'CONSOLE',
+      },
+    },
+  }),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
   }),
+}));
+
+vi.mock('../../general-settings/DangerZoneSection', () => ({
+  default: ({onDeleteClick}: {onDeleteClick: () => void}) => (
+    <div data-testid="danger-zone-section">
+      <button type="button" onClick={onDeleteClick} data-testid="delete-button">
+        Delete Application
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock('../../../ApplicationDeleteDialog', () => ({
+  default: ({
+    open,
+    applicationId,
+    onClose,
+    onSuccess,
+  }: {
+    open: boolean;
+    applicationId: string;
+    onClose: () => void;
+    onSuccess?: () => void;
+  }) =>
+    open ? (
+      <div data-testid="delete-dialog" data-application-id={applicationId}>
+        <button type="button" onClick={onClose} data-testid="delete-dialog-close">
+          Cancel
+        </button>
+        <button type="button" onClick={() => onSuccess?.()} data-testid="delete-dialog-success">
+          Confirm Delete
+        </button>
+      </div>
+    ) : null,
 }));
 
 describe('EditAdvancedSettings', () => {
@@ -43,10 +71,6 @@ describe('EditAdvancedSettings', () => {
     name: 'Test Application',
     description: 'Test Description',
     template: 'custom',
-    certificate: {
-      type: CertificateTypes.NONE,
-      value: '',
-    },
     createdAt: '2025-01-01T00:00:00Z',
     updatedAt: '2025-01-15T00:00:00Z',
   } as Application;
@@ -61,7 +85,7 @@ describe('EditAdvancedSettings', () => {
   const mockOnFieldChange = vi.fn();
 
   describe('Rendering', () => {
-    it('should render all three sections', () => {
+    it('should render the OAuth 2 Configuration and Metadata sections', () => {
       render(
         <EditAdvancedSettings
           application={mockApplication}
@@ -72,42 +96,13 @@ describe('EditAdvancedSettings', () => {
       );
 
       expect(screen.getByText('applications:edit.advanced.labels.oauth2Config')).toBeInTheDocument();
-      expect(screen.getByText('applications:edit.advanced.labels.certificate')).toBeInTheDocument();
       expect(screen.getByText('applications:edit.advanced.labels.metadata')).toBeInTheDocument();
-    });
-
-    it('should not render the attestation section by default', () => {
-      render(
-        <EditAdvancedSettings
-          application={mockApplication}
-          editedApp={{}}
-          oauth2Config={mockOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-        />,
-      );
-
-      expect(screen.queryByText('applications:edit.advanced.labels.attestation')).not.toBeInTheDocument();
-    });
-
-    it('should render the attestation section when the template supports it', () => {
-      render(
-        <EditAdvancedSettings
-          application={mockApplication}
-          editedApp={{}}
-          oauth2Config={mockOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-          showAttestation
-        />,
-      );
-
-      expect(screen.getByText('applications:edit.advanced.labels.attestation')).toBeInTheDocument();
     });
 
     it('should render without OAuth2 config when not provided', () => {
       render(<EditAdvancedSettings application={mockApplication} editedApp={{}} onFieldChange={mockOnFieldChange} />);
 
       expect(screen.queryByText('applications:edit.advanced.labels.oauth2Config')).not.toBeInTheDocument();
-      expect(screen.getByText('applications:edit.advanced.labels.certificate')).toBeInTheDocument();
       expect(screen.getByText('applications:edit.advanced.labels.metadata')).toBeInTheDocument();
     });
 
@@ -126,7 +121,6 @@ describe('EditAdvancedSettings', () => {
       );
 
       expect(screen.getByText('applications:edit.advanced.labels.oauth2Config')).toBeInTheDocument();
-      expect(screen.getByText('applications:edit.advanced.labels.certificate')).toBeInTheDocument();
       expect(screen.queryByText('applications:edit.advanced.labels.metadata')).not.toBeInTheDocument();
     });
   });
@@ -145,19 +139,6 @@ describe('EditAdvancedSettings', () => {
       expect(screen.getByText('authorization_code')).toBeInTheDocument();
       expect(screen.getByText('refresh_token')).toBeInTheDocument();
       expect(screen.getByText('code')).toBeInTheDocument();
-    });
-
-    it('should pass correct props to CertificateSection', () => {
-      render(
-        <EditAdvancedSettings
-          application={mockApplication}
-          editedApp={{}}
-          oauth2Config={mockOAuth2Config}
-          onFieldChange={mockOnFieldChange}
-        />,
-      );
-
-      expect(screen.getByLabelText('applications:edit.advanced.labels.certificateType')).toBeInTheDocument();
     });
 
     it('should pass correct props to MetadataSection', () => {
@@ -215,7 +196,7 @@ describe('EditAdvancedSettings', () => {
         />,
       );
 
-      expect(screen.getByText('applications:edit.advanced.labels.certificate')).toBeInTheDocument();
+      expect(screen.getByText('applications:edit.advanced.labels.metadata')).toBeInTheDocument();
     });
 
     it('should render with minimal application data', () => {
@@ -227,7 +208,7 @@ describe('EditAdvancedSettings', () => {
 
       render(<EditAdvancedSettings application={minimalApp} editedApp={{}} onFieldChange={mockOnFieldChange} />);
 
-      expect(screen.getByText('applications:edit.advanced.labels.certificate')).toBeInTheDocument();
+      expect(screen.getByText('applications:edit.advanced.labels.passkeys')).toBeInTheDocument();
     });
   });
 
@@ -379,6 +360,256 @@ describe('EditAdvancedSettings', () => {
       );
 
       expect(onValidationChange).toHaveBeenLastCalledWith(true);
+    });
+  });
+
+  describe('PasskeysSection Integration', () => {
+    it('renders the Passkeys section', () => {
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByText('applications:edit.advanced.labels.passkeys')).toBeInTheDocument();
+    });
+
+    it('displays existing passkeyAllowedOrigins from the application', () => {
+      const appWithOrigins: Application = {
+        ...mockApplication,
+        passkeyAllowedOrigins: ['https://app.example.com'],
+      };
+
+      render(
+        <EditAdvancedSettings
+          application={appWithOrigins}
+          editedApp={{}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('https://app.example.com')).toBeInTheDocument();
+    });
+
+    it('prefers editedApp.passkeyAllowedOrigins over application.passkeyAllowedOrigins', () => {
+      const appWithOrigins: Application = {
+        ...mockApplication,
+        passkeyAllowedOrigins: ['https://old.example.com'],
+      };
+
+      render(
+        <EditAdvancedSettings
+          application={appWithOrigins}
+          editedApp={{passkeyAllowedOrigins: ['https://new.example.com']}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('https://new.example.com')).toBeInTheDocument();
+      expect(screen.queryByDisplayValue('https://old.example.com')).not.toBeInTheDocument();
+    });
+
+    it('calls onFieldChange with passkeyAllowedOrigins when origins change', async () => {
+      const user = userEvent.setup();
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      await user.click(
+        screen.getByRole('button', {name: /applications:edit.advanced.passkeys.allowedOrigins.addOrigin/i}),
+      );
+
+      expect(mockOnFieldChange).toHaveBeenCalledWith('passkeyAllowedOrigins', ['', '']);
+    });
+
+    it('passes disabled=true to PasskeysSection when the application is read-only', () => {
+      const readOnlyApp: Application = {...mockApplication, isReadOnly: true};
+
+      render(
+        <EditAdvancedSettings
+          application={readOnlyApp}
+          editedApp={{}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      // In read-only mode the Add Origin button should not be present
+      expect(screen.queryByRole('button', {name: /Add Origin/i})).not.toBeInTheDocument();
+    });
+
+    it('reports hasErrors=true via onValidationChange when an origin is empty', () => {
+      const onValidationChange = vi.fn();
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{passkeyAllowedOrigins: ['']}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          onValidationChange={onValidationChange}
+        />,
+      );
+
+      // An empty string origin is immediately invalid; the effect fires on mount.
+      expect(onValidationChange).toHaveBeenCalledWith(true);
+    });
+
+    it('reports hasErrors=true via onValidationChange when an origin is not a valid URL', () => {
+      const onValidationChange = vi.fn();
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{passkeyAllowedOrigins: ['not-a-url']}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          onValidationChange={onValidationChange}
+        />,
+      );
+
+      expect(onValidationChange).toHaveBeenCalledWith(true);
+    });
+
+    it('reports hasErrors=false via onValidationChange when all origins are valid URLs', () => {
+      const onValidationChange = vi.fn();
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{passkeyAllowedOrigins: ['https://app.example.com']}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          onValidationChange={onValidationChange}
+        />,
+      );
+
+      expect(onValidationChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it('reports hasErrors=false via onValidationChange when the origins list is empty', () => {
+      const onValidationChange = vi.fn();
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{passkeyAllowedOrigins: []}}
+          oauth2Config={mockOAuth2Config}
+          onFieldChange={mockOnFieldChange}
+          onValidationChange={onValidationChange}
+        />,
+      );
+
+      expect(onValidationChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  describe('Danger Zone', () => {
+    const confidentialConfig: OAuth2Config = {
+      clientId: 'client-123',
+      clientSecret: 'secret-456',
+      tokenEndpointAuthMethod: 'client_secret_basic',
+    } as OAuth2Config;
+
+    it('should render DangerZoneSection', () => {
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{}}
+          oauth2Config={confidentialConfig}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
+    });
+
+    it('should not render DangerZoneSection for the system console client', () => {
+      const consoleConfig: OAuth2Config = {
+        clientId: 'console',
+        tokenEndpointAuthMethod: 'client_secret_basic',
+      } as OAuth2Config;
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{}}
+          oauth2Config={consoleConfig}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.queryByTestId('danger-zone-section')).not.toBeInTheDocument();
+    });
+
+    it('should not render DangerZoneSection for a read-only application', () => {
+      const readOnlyApp: Application = {...mockApplication, isReadOnly: true};
+
+      render(
+        <EditAdvancedSettings
+          application={readOnlyApp}
+          editedApp={{}}
+          oauth2Config={confidentialConfig}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.queryByTestId('danger-zone-section')).not.toBeInTheDocument();
+    });
+
+    it('should open delete dialog when delete button is clicked', () => {
+      render(<EditAdvancedSettings application={mockApplication} editedApp={{}} onFieldChange={mockOnFieldChange} />);
+
+      fireEvent.click(screen.getByTestId('delete-button'));
+
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+    });
+
+    it('should pass application id to delete dialog', () => {
+      render(<EditAdvancedSettings application={mockApplication} editedApp={{}} onFieldChange={mockOnFieldChange} />);
+
+      fireEvent.click(screen.getByTestId('delete-button'));
+
+      expect(screen.getByTestId('delete-dialog')).toHaveAttribute('data-application-id', 'test-app-id');
+    });
+
+    it('should close delete dialog when cancel is triggered', () => {
+      render(<EditAdvancedSettings application={mockApplication} editedApp={{}} onFieldChange={mockOnFieldChange} />);
+
+      fireEvent.click(screen.getByTestId('delete-button'));
+      expect(screen.getByTestId('delete-dialog')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('delete-dialog-close'));
+
+      expect(screen.queryByTestId('delete-dialog')).not.toBeInTheDocument();
+    });
+
+    it('should call onDeleteSuccess when delete is confirmed', () => {
+      const mockOnDeleteSuccess = vi.fn();
+
+      render(
+        <EditAdvancedSettings
+          application={mockApplication}
+          editedApp={{}}
+          onFieldChange={mockOnFieldChange}
+          onDeleteSuccess={mockOnDeleteSuccess}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('delete-button'));
+      fireEvent.click(screen.getByTestId('delete-dialog-success'));
+
+      expect(mockOnDeleteSuccess).toHaveBeenCalledTimes(1);
     });
   });
 });

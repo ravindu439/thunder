@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import type {MutateOptions, MutationFunctionContext} from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
@@ -52,7 +37,7 @@ vi.mock('../../api/useRegenerateAgentSecret', () => ({
 // Mock translations
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => {
+    t: (key: string, fallback?: string | {defaultValue?: string}) => {
       const translations: Record<string, string> = {
         'agents:regenerateSecret.dialog.title': 'Regenerate client secret?',
         'agents:regenerateSecret.dialog.message':
@@ -61,10 +46,12 @@ vi.mock('react-i18next', () => ({
           'This action cannot be undone. The current client secret will be invalidated as soon as you confirm.',
         'agents:regenerateSecret.dialog.confirmButton': 'Regenerate',
         'agents:regenerateSecret.dialog.regenerating': 'Regenerating…',
-        'agents:regenerateSecret.dialog.error': 'Failed to regenerate client secret',
         'common:actions.cancel': 'Cancel',
       };
-      return translations[key] ?? fallback ?? key;
+      if (translations[key]) return translations[key];
+      if (typeof fallback === 'string') return fallback || key;
+      if (fallback && typeof fallback === 'object') return fallback.defaultValue ?? key;
+      return key;
     },
   }),
 }));
@@ -203,14 +190,15 @@ describe('RegenerateSecretDialog', () => {
   });
 
   describe('Error Handling', () => {
-    it('should display error message when regeneration fails', async () => {
+    it('should display the resolved catalog message, never the raw server error text, when regeneration fails', async () => {
+      const rawServerMessage = 'raw backend regenerate failure detail';
       mockMutate.mockImplementation(
         (
           vars: RegenerateAgentSecretVariables,
           options?: MutateOptions<RegenerateAgentSecretResult, Error, RegenerateAgentSecretVariables>,
         ) => {
           const mockContext = {} as MutationFunctionContext;
-          options?.onError?.(new Error('Failed to regenerate client secret'), vars, undefined, mockContext);
+          options?.onError?.(new Error(rawServerMessage), vars, undefined, mockContext);
         },
       );
 
@@ -223,16 +211,17 @@ describe('RegenerateSecretDialog', () => {
       await waitFor(() => {
         expect(screen.getByText('Failed to regenerate client secret')).toBeInTheDocument();
       });
+      expect(screen.queryByText(rawServerMessage)).not.toBeInTheDocument();
     });
 
-    it('should call onError callback when regeneration fails', async () => {
+    it('should call onError callback with the resolved message when regeneration fails', async () => {
       mockMutate.mockImplementation(
         (
           vars: RegenerateAgentSecretVariables,
           options?: MutateOptions<RegenerateAgentSecretResult, Error, RegenerateAgentSecretVariables>,
         ) => {
           const mockContext = {} as MutationFunctionContext;
-          options?.onError?.(new Error('Failed to regenerate client secret'), vars, undefined, mockContext);
+          options?.onError?.(new Error('raw backend regenerate failure detail'), vars, undefined, mockContext);
         },
       );
 
@@ -287,7 +276,7 @@ describe('RegenerateSecretDialog', () => {
       await user.click(screen.getByRole('button', {name: 'Regenerate'}));
 
       await waitFor(() => {
-        expect(screen.getByText('Some error')).toBeInTheDocument();
+        expect(screen.getByText('Failed to regenerate client secret')).toBeInTheDocument();
       });
 
       await user.click(screen.getByRole('button', {name: 'Cancel'}));

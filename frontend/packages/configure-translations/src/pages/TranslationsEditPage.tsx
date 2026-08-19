@@ -1,36 +1,19 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {QueryErrorNotice, UnsavedChangesBar} from '@thunderid/components';
+import {useToast} from '@thunderid/contexts';
 import {useGetTranslations, useUpdateTranslation, NamespaceConstants, I18nDefaultConstants} from '@thunderid/i18n';
 import {useLogger} from '@thunderid/logger/react';
-import {Alert, PageContent, Snackbar, useColorScheme} from '@wso2/oxygen-ui';
+import {getErrorMessage} from '@thunderid/utils';
+import {Alert, Box, PageContent, useColorScheme} from '@wso2/oxygen-ui';
 import {useCallback, useMemo, useState, type JSX, type SyntheticEvent} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate, useParams} from 'react-router';
 import NamespaceSelector from '@/components/edit-translation/NamespaceSelector';
 import TranslationEditorCard from '@/components/edit-translation/TranslationEditorCard';
 import TranslationEditorHeader from '@/components/edit-translation/TranslationEditorHeader';
-
-interface ToastState {
-  open: boolean;
-  message: string;
-  severity: 'success' | 'error';
-}
+import useTranslationRoutes from '@/hooks/useTranslationRoutes';
 
 /**
  * Page for editing translation key-value pairs for a specific language.
@@ -59,27 +42,34 @@ export default function TranslationsEditPage(): JSX.Element {
   const {t} = useTranslation('translations');
   const navigate = useNavigate();
   const logger = useLogger('TranslationsEditPage');
+  const {showToast} = useToast();
   const {language: languageParam} = useParams<{language: string}>();
   const selectedLanguage = languageParam ?? null;
+  const routes = useTranslationRoutes();
 
   const {mode, systemMode} = useColorScheme();
   const colorMode: 'light' | 'dark' =
     ((mode === 'system' ? systemMode : mode) ?? 'light') === 'dark' ? 'dark' : 'light';
 
   const [selectedNamespace, setSelectedNamespace] = useState<string | null>(null);
-  const [editView, setEditView] = useState<'fields' | 'json'>('fields');
+  const [editView, setEditView] = useState<'fields' | 'json'>('json');
   const [search, setSearch] = useState('');
   const [localChanges, setLocalChanges] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
-  const [toast, setToast] = useState<ToastState>({open: false, message: '', severity: 'success'});
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const {data: translationsData, isLoading: translationsLoading} = useGetTranslations({
+  const {
+    data: translationsData,
+    isLoading: translationsLoading,
+    error: translationsError,
+    refetch: refetchTranslations,
+  } = useGetTranslations({
     language: selectedLanguage ?? '',
     enabled: !!selectedLanguage,
   });
 
   // Fetch the default (en) translations for "Reset to Default"
-  const {data: defaultTranslationsData} = useGetTranslations({
+  const {data: defaultTranslationsData, error: defaultTranslationsError} = useGetTranslations({
     language: 'en',
     enabled: !!selectedLanguage && selectedLanguage !== 'en',
   });
@@ -102,6 +92,7 @@ export default function TranslationsEditPage(): JSX.Element {
     setSelectedNamespace(null);
     setLocalChanges({});
     setSearch('');
+    setSaveError(null);
   }
 
   // Initialize namespace once API data arrives
@@ -115,6 +106,7 @@ export default function TranslationsEditPage(): JSX.Element {
     setPrevNamespace(selectedNamespace);
     setLocalChanges({});
     setSearch('');
+    setSaveError(null);
   }
 
   const serverValues: Record<string, string> = useMemo(
@@ -134,10 +126,12 @@ export default function TranslationsEditPage(): JSX.Element {
   const hasDirtyChanges = dirtyKeys.length > 0;
 
   const handleFieldChange = useCallback((key: string, value: string) => {
+    setSaveError(null);
     setLocalChanges((prev) => ({...prev, [key]: value}));
   }, []);
 
   const handleResetField = useCallback((key: string) => {
+    setSaveError(null);
     setLocalChanges((prev) => {
       const next = {...prev};
       delete next[key];
@@ -146,12 +140,14 @@ export default function TranslationsEditPage(): JSX.Element {
   }, []);
 
   const handleJsonChange = useCallback((changes: Record<string, string>) => {
+    setSaveError(null);
     setLocalChanges(changes);
   }, []);
 
   const handleSave = async () => {
     if (!selectedLanguage || !selectedNamespace || dirtyKeys.length === 0) return;
     setIsSaving(true);
+    setSaveError(null);
 
     const results = await Promise.allSettled(
       dirtyKeys.map((key) =>
@@ -164,23 +160,35 @@ export default function TranslationsEditPage(): JSX.Element {
       ),
     );
 
-    const failed = results.filter((r) => r.status === 'rejected').length;
+    const firstRejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     setIsSaving(false);
 
-    if (failed > 0) {
-      setToast({open: true, message: t('editor.jsonSaveError'), severity: 'error'});
+    if (firstRejected) {
+      setSaveError(
+        getErrorMessage(firstRejected.reason as Error, t, 'editor.jsonSaveError', 'Failed to save some translations.'),
+      );
     } else {
       setLocalChanges({});
-      setToast({open: true, message: t('editor.jsonSaveSuccess'), severity: 'success'});
+      showToast(t('editor.jsonSaveSuccess', 'All translations saved.'), 'success');
     }
   };
 
   const handleDiscard = () => {
+    setSaveError(null);
     setLocalChanges({});
   };
 
   const handleResetToDefault = async () => {
     if (!selectedLanguage || !selectedNamespace) return;
+    setSaveError(null);
+
+    if (defaultTranslationsError) {
+      setSaveError(
+        getErrorMessage(defaultTranslationsError, t, 'editor.jsonSaveError', 'Failed to save some translations.'),
+      );
+      return;
+    }
+
     const defaultValues = defaultTranslationsData?.translations?.[selectedNamespace] ?? {};
     const entries = Object.entries(defaultValues);
     if (entries.length === 0) return;
@@ -198,14 +206,16 @@ export default function TranslationsEditPage(): JSX.Element {
       ),
     );
 
-    const failed = results.filter((r) => r.status === 'rejected').length;
+    const firstRejected = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     setIsSaving(false);
-    setLocalChanges({});
 
-    if (failed > 0) {
-      setToast({open: true, message: t('editor.jsonSaveError'), severity: 'error'});
+    if (firstRejected) {
+      setSaveError(
+        getErrorMessage(firstRejected.reason as Error, t, 'editor.jsonSaveError', 'Failed to save some translations.'),
+      );
     } else {
-      setToast({open: true, message: t('editor.jsonSaveSuccess'), severity: 'success'});
+      setLocalChanges({});
+      showToast(t('editor.jsonSaveSuccess', 'All translations saved.'), 'success');
     }
   };
 
@@ -216,7 +226,7 @@ export default function TranslationsEditPage(): JSX.Element {
 
   const handleBack = () => {
     (async (): Promise<void> => {
-      await navigate('/translations');
+      await navigate(routes.list());
     })().catch((_error: unknown) => {
       logger.error('Failed to navigate back to translations list', {error: _error});
     });
@@ -226,59 +236,78 @@ export default function TranslationsEditPage(): JSX.Element {
   const isCustomNamespace = selectedNamespace === NamespaceConstants.CUSTOM_NAMESPACE;
 
   return (
-    <PageContent fullWidth sx={{display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0}}>
+    <PageContent sx={{display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0}}>
       <TranslationEditorHeader
         selectedLanguage={selectedLanguage}
-        hasDirtyChanges={hasDirtyChanges}
-        dirtyCount={dirtyKeys.length}
         isSaving={isSaving}
         isFallbackLanguage={selectedLanguage === I18nDefaultConstants.FALLBACK_LANGUAGE}
         hasNamespace={!!selectedNamespace}
         onBack={handleBack}
-        onDiscard={handleDiscard}
         onResetToDefault={() => {
           handleResetToDefault().catch((_error: unknown) =>
             logger.error('Failed to reset to default', {error: _error}),
           );
         }}
-        onSave={() => {
-          handleSave().catch((_error: unknown) => logger.error('Failed to save translations', {error: _error}));
-        }}
       />
 
-      <NamespaceSelector
-        namespaces={namespaces}
-        value={selectedNamespace}
-        loading={isLoading}
-        onChange={setSelectedNamespace}
-      />
+      <Box sx={{mb: 2}}>
+        {saveError && (
+          <Alert severity="error" sx={{py: 0}}>
+            {saveError}
+          </Alert>
+        )}
+      </Box>
 
-      <TranslationEditorCard
-        selectedLanguage={selectedLanguage}
-        isLoading={isLoading}
-        editView={editView}
-        search={search}
-        currentValues={currentValues}
-        serverValues={serverValues}
-        isCustomNamespace={isCustomNamespace}
-        colorMode={colorMode}
-        onTabChange={handleTabChange}
-        onSearchChange={setSearch}
-        onFieldChange={handleFieldChange}
-        onResetField={handleResetField}
-        onJsonChange={handleJsonChange}
-      />
+      {translationsError ? (
+        <QueryErrorNotice
+          error={translationsError}
+          t={t}
+          variant="block"
+          title={t('page.loadErrorTitle', 'Failed to load translations')}
+          fallbackKey="page.loadError"
+          fallbackDefaultValue="Failed to load translations"
+          onRetry={() => void refetchTranslations()}
+        />
+      ) : (
+        <>
+          <NamespaceSelector
+            namespaces={namespaces}
+            value={selectedNamespace}
+            loading={isLoading}
+            onChange={setSelectedNamespace}
+          />
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={3000}
-        onClose={() => setToast((prev) => ({...prev, open: false}))}
-        anchorOrigin={{vertical: 'bottom', horizontal: 'center'}}
-      >
-        <Alert severity={toast.severity} onClose={() => setToast((prev) => ({...prev, open: false}))}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+          <TranslationEditorCard
+            selectedLanguage={selectedLanguage}
+            isLoading={isLoading}
+            editView={editView}
+            search={search}
+            currentValues={currentValues}
+            serverValues={serverValues}
+            isCustomNamespace={isCustomNamespace}
+            colorMode={colorMode}
+            onTabChange={handleTabChange}
+            onSearchChange={setSearch}
+            onFieldChange={handleFieldChange}
+            onResetField={handleResetField}
+            onJsonChange={handleJsonChange}
+          />
+
+          {hasDirtyChanges && (
+            <UnsavedChangesBar
+              message={t('editor.unsavedCount', {count: dirtyKeys.length, defaultValue: '{{count}} unsaved change'})}
+              resetLabel={t('actions.discardChanges', 'Discard Changes')}
+              saveLabel={t('actions.saveChanges', 'Save Changes')}
+              savingLabel={t('common:status.saving', {ns: 'common', defaultValue: 'Saving...'})}
+              isSaving={isSaving}
+              onReset={handleDiscard}
+              onSave={() => {
+                handleSave().catch((_error: unknown) => logger.error('Failed to save translations', {error: _error}));
+              }}
+            />
+          )}
+        </>
+      )}
     </PageContent>
   );
 }

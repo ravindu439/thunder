@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -76,7 +61,8 @@ func (suite *SessionExecutorTestSuite) saveAuthnMock() *managermock.AuthnProvide
 // are opaque; the resolved subject is supplied by the mocked provider in each test.
 func authenticatedAuthUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	if err := authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`)); err != nil {
+	if err := authUser.UnmarshalJSON(
+		[]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`)); err != nil {
 		panic("authenticatedAuthUser: malformed hardcoded JSON: " + err.Error())
 	}
 	return authUser
@@ -283,6 +269,7 @@ func (suite *SessionExecutorTestSuite) TestFreshSave_SanitizesSnapshot() {
 	ctx.RuntimeData[common.RuntimeKeyRequiredOptionalAttributes] = "phone"
 	ctx.RuntimeData[common.RuntimeKeyRequiredLocales] = "en-US"
 	ctx.RuntimeData[common.RuntimeKeyRequestedPermissions] = "openid profile"
+	ctx.RuntimeData[common.RuntimeKeyResourceServerIdentifier] = "rs-a"
 	ctx.RuntimeData["applicationId"] = "app-a"
 	ctx.RuntimeData[common.RuntimeKeyClientID] = "sso_app_a"
 	ctx.RuntimeData[common.RuntimeKeyAuthorizationRequestID] = "authz-req-1"
@@ -303,6 +290,7 @@ func (suite *SessionExecutorTestSuite) TestFreshSave_SanitizesSnapshot() {
 	suite.NotContains(rd, common.RuntimeKeyRequiredOptionalAttributes)
 	suite.NotContains(rd, common.RuntimeKeyRequiredLocales)
 	suite.NotContains(rd, common.RuntimeKeyRequestedPermissions)
+	suite.NotContains(rd, common.RuntimeKeyResourceServerIdentifier)
 	suite.NotContains(rd, "applicationId")
 	suite.NotContains(rd, common.RuntimeKeyClientID)
 	suite.NotContains(rd, common.RuntimeKeyAuthorizationRequestID)
@@ -325,10 +313,12 @@ func ssoLoadCtx() *providers.NodeContext {
 // TestSSOLoad verifies the load path rehydrates the subject from the service-returned context, replays
 // the snapshotted RuntimeData, and overrides auth_time from the lean session.
 func (suite *SessionExecutorTestSuite) TestSSOLoad() {
-	snapAuthUser := `{"entityReference":{"entityId":"user-2","ouId":"ou-9","type":"person"},` +
-		`"attributes":{"attributes":{"email":{"value":"bob@example.com"}}}}`
+	snapAuthUser := `{"default":{"entityReference":{"entityId":"user-2","ouId":"ou-9","type":"person"},` +
+		`"attributes":{"attributes":{"email":{"value":"bob@example.com"}}}}}`
 	sso := sessionmock.NewServiceMock(suite.T())
-	sso.EXPECT().LoadCheckpoint(mock.Anything, "handle-abc", "session", "app-456").Return(
+	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.MatchedBy(func(in session.LoadCheckpointInput) bool {
+		return in.Handle == "handle-abc" && in.Checkpoint == "session" && in.AppID == "app-456"
+	})).Return(
 		&session.Session{
 			SessionID: "sess-1", SubjectID: "user-2", HandleID: "handle-abc",
 			AuthenticatedAt: time.Unix(1700000000, 0).UTC(),
@@ -365,11 +355,56 @@ func (suite *SessionExecutorTestSuite) TestSSOLoad() {
 	suite.Equal("1700000000", resp.RuntimeData[common.RuntimeKeyAuthTime])
 }
 
+// TestSSOLoad_PassesForwardedReadsToService is the executor half of the reuse-path read reduction: the
+// rows the SSO-Check node put on ForwardedData must reach the service, which then skips both reads.
+func (suite *SessionExecutorTestSuite) TestSSOLoad_PassesForwardedReadsToService() {
+	forwardedSession := &session.Session{SessionID: "sess-1", HandleID: "handle-abc"}
+	forwardedContext := &session.SessionContext{
+		SessionID: "sess-1", CheckpointID: "session", AuthUser: json.RawMessage("{}"),
+	}
+
+	sso := sessionmock.NewServiceMock(suite.T())
+	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.MatchedBy(func(in session.LoadCheckpointInput) bool {
+		return in.Session == forwardedSession && in.Context == forwardedContext
+	})).Return(forwardedSession, forwardedContext, nil)
+	exec := suite.newExecutor(sso, managermock.NewAuthnProviderManagerMock(suite.T()))
+
+	ctx := ssoLoadCtx()
+	ctx.ForwardedData = map[string]interface{}{
+		common.ForwardedDataKeySSOSession:        forwardedSession,
+		common.ForwardedDataKeySSOSessionContext: forwardedContext,
+	}
+
+	_, err := exec.Execute(ctx)
+
+	suite.Require().NoError(err)
+}
+
+// TestSSOLoad_ForwardsNothingWhenAbsent covers a Session node reached without the paired SSO-Check
+// node's handover: the service is asked to read both rows itself rather than being handed junk.
+func (suite *SessionExecutorTestSuite) TestSSOLoad_ForwardsNothingWhenAbsent() {
+	sso := sessionmock.NewServiceMock(suite.T())
+	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.MatchedBy(func(in session.LoadCheckpointInput) bool {
+		return in.Session == nil && in.Context == nil
+	})).Return(
+		&session.Session{SessionID: "sess-1", HandleID: "handle-abc"},
+		&session.SessionContext{SessionID: "sess-1", CheckpointID: "session", AuthUser: json.RawMessage("{}")},
+		nil)
+	exec := suite.newExecutor(sso, managermock.NewAuthnProviderManagerMock(suite.T()))
+
+	ctx := ssoLoadCtx()
+	ctx.ForwardedData = map[string]interface{}{"unrelated": 42}
+
+	_, err := exec.Execute(ctx)
+
+	suite.Require().NoError(err)
+}
+
 // TestSSOLoad_ErrorFailsFlow covers a load failure surfacing as a server error so the task-execution
 // node fails the flow (the credential steps were already skipped).
 func (suite *SessionExecutorTestSuite) TestSSOLoad_ErrorFailsFlow() {
 	sso := sessionmock.NewServiceMock(suite.T())
-	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.Anything).
 		Return(nil, nil, errors.New("resolved session no longer exists"))
 	exec := suite.newExecutor(sso, managermock.NewAuthnProviderManagerMock(suite.T()))
 
@@ -383,7 +418,7 @@ func (suite *SessionExecutorTestSuite) TestSSOLoad_ErrorFailsFlow() {
 // reconstruct the subject, so the flow fails.
 func (suite *SessionExecutorTestSuite) TestSSOLoad_RehydrateErrorFailsFlow() {
 	sso := sessionmock.NewServiceMock(suite.T())
-	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+	sso.EXPECT().LoadCheckpoint(mock.Anything, mock.Anything).Return(
 		&session.Session{SessionID: "sess-1", HandleID: "handle-abc"},
 		&session.SessionContext{SessionID: "sess-1", AuthUser: json.RawMessage("not-json")}, nil)
 	exec := suite.newExecutor(sso, managermock.NewAuthnProviderManagerMock(suite.T()))

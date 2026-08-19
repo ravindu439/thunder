@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {screen, fireEvent, waitFor, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
@@ -63,9 +48,13 @@ vi.mock('@/api/useGetChildOrganizationUnits', () => ({
 // Mock ThunderID — stable reference to avoid useCallback churn
 const mockHttpRequest = vi.fn();
 const stableHttp = {request: mockHttpRequest};
-vi.mock('@thunderid/react', () => ({
-  useThunderID: () => ({http: stableHttp}),
-}));
+vi.mock('@thunderid/react', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useThunderID: () => ({http: stableHttp}),
+  };
+});
 
 // Mock config — stable reference to avoid useCallback churn
 const stableConfig = {getServerUrl: () => 'http://localhost:8080'};
@@ -146,6 +135,35 @@ describe('OrganizationUnitTreePicker', () => {
     renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} />);
 
     expect(screen.getByText(t('organizationUnits:treePicker.empty'))).toBeInTheDocument();
+  });
+
+  it('should render an inline read error state, never the raw error message, when the root list fails to load', () => {
+    mockUseGetOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+    });
+
+    renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} />);
+
+    expect(screen.getByText('Failed to load organization unit data')).toBeInTheDocument();
+    expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+  });
+
+  it('should refetch the root list when the retry action is clicked', () => {
+    const mockRefetchRootList = vi.fn();
+    mockUseGetOrganizationUnits.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error('Network error'),
+      refetch: mockRefetchRootList,
+    });
+
+    renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} />);
+
+    fireEvent.click(screen.getByText('Refresh'));
+
+    expect(mockRefetchRootList).toHaveBeenCalledTimes(1);
   });
 
   it('should display handles for tree items', async () => {
@@ -619,6 +637,42 @@ describe('OrganizationUnitTreePicker', () => {
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
 
+    it('should render an inline read error state, never the raw error message, when the root OU fails to load', async () => {
+      mockUseGetOrganizationUnit.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('Network error'),
+      });
+      mockUseGetChildOrganizationUnits.mockReturnValue({data: undefined, isLoading: false, error: null});
+
+      renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} rootOuId="root-ou-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load organization unit data')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Network error')).not.toBeInTheDocument();
+    });
+
+    it('should refetch the root OU when the retry action is clicked', async () => {
+      const mockRefetchRootOu = vi.fn();
+      mockUseGetOrganizationUnit.mockReturnValue({
+        data: undefined,
+        isLoading: false,
+        error: new Error('Network error'),
+        refetch: mockRefetchRootOu,
+      });
+      mockUseGetChildOrganizationUnits.mockReturnValue({data: undefined, isLoading: false, error: null});
+
+      renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} rootOuId="root-ou-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Refresh')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByText('Refresh'));
+
+      expect(mockRefetchRootOu).toHaveBeenCalledTimes(1);
+    });
+
     it('should render root OU as top-level node with children', async () => {
       mockUseGetOrganizationUnit.mockReturnValue({data: rootOu, isLoading: false, error: null});
       mockUseGetChildOrganizationUnits.mockReturnValue({data: childOUsResponse, isLoading: false, error: null});
@@ -764,6 +818,80 @@ describe('OrganizationUnitTreePicker', () => {
       await waitFor(() => {
         expect(screen.getByText('Root OU')).toBeInTheDocument();
         expect(screen.getByText('Child One')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('autoSelectFirst', () => {
+    it('should call onChange with the first root organization unit when nothing is selected', async () => {
+      const onChange = vi.fn();
+      renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} onChange={onChange} autoSelectFirst />);
+
+      await waitFor(() => {
+        expect(onChange).toHaveBeenCalledWith('ou-1');
+      });
+    });
+
+    it('should not override an already-selected value', async () => {
+      const onChange = vi.fn();
+      renderWithProviders(
+        <OrganizationUnitTreePicker {...defaultProps} value="ou-2" onChange={onChange} autoSelectFirst />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Root Organization')).toBeInTheDocument();
+      });
+
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('should not auto-select in rootOuId mode', async () => {
+      const rootOu: OrganizationUnit = {id: 'root-ou-1', handle: 'root-ou', name: 'Root OU', parent: null};
+      const rootOuChildren: OrganizationUnitListResponse = {
+        totalResults: 0,
+        startIndex: 1,
+        count: 0,
+        organizationUnits: [],
+      };
+
+      mockUseGetOrganizationUnit.mockReturnValue({data: rootOu, isLoading: false, error: null});
+      mockUseGetChildOrganizationUnits.mockReturnValue({data: rootOuChildren, isLoading: false, error: null});
+      const onChange = vi.fn();
+
+      renderWithProviders(
+        <OrganizationUnitTreePicker {...defaultProps} rootOuId="root-ou-1" onChange={onChange} autoSelectFirst />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Root OU')).toBeInTheDocument();
+      });
+
+      expect(onChange).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('spacious variant', () => {
+    it('should still show the "no children" placeholder text when expanded node has no children', async () => {
+      const emptyChildResponse: OrganizationUnitListResponse = {
+        totalResults: 0,
+        startIndex: 1,
+        count: 0,
+        organizationUnits: [],
+      };
+
+      mockHttpRequest.mockResolvedValue({data: emptyChildResponse});
+
+      renderWithProviders(<OrganizationUnitTreePicker {...defaultProps} spacious />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Root Organization')).toBeInTheDocument();
+      });
+
+      const expandIcons = document.querySelectorAll('.MuiTreeItem-iconContainer');
+      fireEvent.click(expandIcons[0]);
+
+      await waitFor(() => {
+        expect(screen.getByText(t('organizationUnits:listing.treeView.noChildren'))).toBeInTheDocument();
       });
     });
   });

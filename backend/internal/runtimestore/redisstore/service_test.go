@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package redisstore
 
@@ -111,6 +96,47 @@ func (s *RedisStoreTestSuite) TestPut_BackendError() {
 
 	err := s.store.Put(s.ctx, providers.NamespaceFlow, "k", []byte("v"), 60)
 	s.Error(err)
+	s.Contains(err.Error(), "failed to store in Redis")
+}
+
+func (s *RedisStoreTestSuite) TestPutIfNotExists_WithTTL_Success() {
+	key := s.store.getFormattedKey(providers.NamespaceFlow, "k")
+	s.client.On("SetArgs", mock.Anything, key, []byte("v"),
+		redis.SetArgs{Mode: "NX", TTL: 60 * time.Second}).
+		Return(redis.NewStatusResult("OK", nil))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, providers.NamespaceFlow, "k", []byte("v"), 60)
+	s.NoError(err)
+	s.True(ok)
+}
+
+func (s *RedisStoreTestSuite) TestPutIfNotExists_ZeroTTL_NoExpiry() {
+	key := s.store.getFormattedKey(providers.NamespaceFlow, "k")
+	s.client.On("SetArgs", mock.Anything, key, []byte("v"),
+		redis.SetArgs{Mode: "NX", TTL: time.Duration(0)}).
+		Return(redis.NewStatusResult("OK", nil))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, providers.NamespaceFlow, "k", []byte("v"), 0)
+	s.NoError(err)
+	s.True(ok)
+}
+
+func (s *RedisStoreTestSuite) TestPutIfNotExists_ExistingKey_ReturnsFalse() {
+	s.client.On("SetArgs", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(redis.NewStatusResult("", redis.Nil))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, providers.NamespaceFlow, "k", []byte("v"), 60)
+	s.NoError(err)
+	s.False(ok)
+}
+
+func (s *RedisStoreTestSuite) TestPutIfNotExists_BackendError() {
+	s.client.On("SetArgs", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(redis.NewStatusResult("", errors.New("connection refused")))
+
+	ok, err := s.store.PutIfNotExists(s.ctx, providers.NamespaceFlow, "k", []byte("v"), 60)
+	s.Error(err)
+	s.False(ok)
 	s.Contains(err.Error(), "failed to store in Redis")
 }
 
@@ -262,6 +288,48 @@ func (s *RedisStoreTestSuite) TestExtendTTL_BackendError() {
 	err := s.store.ExtendTTL(s.ctx, providers.NamespaceFlow, "k", 60)
 	s.Error(err)
 	s.Contains(err.Error(), "failed to extend TTL in Redis")
+}
+
+func (s *RedisStoreTestSuite) TestCompareFieldAndSwap_Swapped() {
+	key := s.store.getFormattedKey(providers.NamespaceFlow, "k")
+	newValue := []byte(`{"State":"AUTHENTICATED"}`)
+	s.client.On("EvalSha", mock.Anything, mock.Anything, []string{key}, "State", "PENDING", newValue).
+		Return(redis.NewCmdResult(int64(1), nil))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, providers.NamespaceFlow, "k", "State", "PENDING", newValue)
+	s.NoError(err)
+	s.True(swapped)
+}
+
+func (s *RedisStoreTestSuite) TestCompareFieldAndSwap_FieldDiffers_NoSwap() {
+	s.client.On("EvalSha", mock.Anything, mock.Anything, mock.Anything, "State", "PENDING", mock.Anything).
+		Return(redis.NewCmdResult(int64(0), nil))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, providers.NamespaceFlow, "k", "State", "PENDING",
+		[]byte(`{"State":"CONSUMED"}`))
+	s.NoError(err)
+	s.False(swapped)
+}
+
+func (s *RedisStoreTestSuite) TestCompareFieldAndSwap_MissingKey_NoSwap() {
+	s.client.On("EvalSha", mock.Anything, mock.Anything, mock.Anything, "State", "PENDING", mock.Anything).
+		Return(redis.NewCmdResult(nil, redis.Nil))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, providers.NamespaceFlow, "k", "State", "PENDING",
+		[]byte(`{"State":"AUTHENTICATED"}`))
+	s.NoError(err)
+	s.False(swapped)
+}
+
+func (s *RedisStoreTestSuite) TestCompareFieldAndSwap_BackendError() {
+	s.client.On("EvalSha", mock.Anything, mock.Anything, mock.Anything, "State", "PENDING", mock.Anything).
+		Return(redis.NewCmdResult(nil, errors.New("connection refused")))
+
+	swapped, err := s.store.CompareFieldAndSwap(s.ctx, providers.NamespaceFlow, "k", "State", "PENDING",
+		[]byte(`{"State":"AUTHENTICATED"}`))
+	s.Error(err)
+	s.False(swapped)
+	s.Contains(err.Error(), "failed to compare-and-swap in Redis")
 }
 
 func (s *RedisStoreTestSuite) TestExtendTTL_ValuePreserved() {

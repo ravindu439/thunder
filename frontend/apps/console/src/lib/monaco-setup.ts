@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {loader} from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
@@ -34,3 +19,42 @@ self.MonacoEnvironment = {
 };
 
 loader.config({monaco});
+
+// Monaco's native EditContext input layer ships its own stylesheet
+// (nativeEditContext.css), but it is not pulled into the bundle through the main
+// monaco entry here. Without it, `.native-edit-context` and `.ime-text-area` stay
+// `position: static`, so they take up flow space at the top of the editor and push
+// the text layer down. Monaco then bakes that offset into the coordinates it uses
+// for click-to-cursor mapping, so clicks land on the wrong line and values cannot be
+// edited by placing the cursor (issue #4569). Inject the rules at runtime so they are
+// guaranteed present before any editor initializes, independent of CSS bundling.
+const NATIVE_EDIT_CONTEXT_STYLE_ID = 'monaco-native-edit-context-fix';
+if (typeof document !== 'undefined' && !document.getElementById(NATIVE_EDIT_CONTEXT_STYLE_ID)) {
+  const style = document.createElement('style');
+  style.id = NATIVE_EDIT_CONTEXT_STYLE_ID;
+  style.textContent = `
+.monaco-editor .native-edit-context {
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  overflow-y: scroll;
+  scrollbar-width: none;
+  z-index: -10;
+  white-space: pre-wrap;
+}
+.monaco-editor .ime-text-area {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  outline: none !important;
+  resize: none;
+  border: none;
+  overflow: hidden;
+  color: transparent;
+  background-color: transparent;
+  z-index: -10;
+}`;
+  document.head.appendChild(style);
+}

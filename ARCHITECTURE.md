@@ -1,6 +1,6 @@
 # ThunderID Architecture Reference
 
-Go IAM server (`github.com/thunder-id/thunderid`). Single binary serving a REST API + two React SPAs (`/gate`, `/console`).
+Open-source IAM stack (`github.com/thunder-id/thunderid`). Single Go binary serving a REST API + two React SPAs (`/gate`, `/console`).
 
 ## Structure
 
@@ -23,7 +23,7 @@ frontend/apps/
   gate/         # login/registration SPA  (@thunderid/react — app-native mode)
   console/      # admin SPA               (@thunderid/react — redirect mode)
 frontend/packages/      # @thunderid/contexts · design · hooks · i18n · utils · types · logger
-samples/apps/           # react-sdk-sample · react-api-based-sample · react-vanilla-sample · wayfinder-sample
+samples/apps/           # react-sdk-sample · react-api-based-sample · vanilla-sample · wayfinder-sample
 ```
 
 ## Backend patterns

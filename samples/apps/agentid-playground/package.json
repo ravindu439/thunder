@@ -1,0 +1,12 @@
+{
+  "name": "@thunderid/agentid-playground",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Agent identity playground demonstrating the three ways an AI agent can hold identity in ThunderID.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env server.mjs",
+    "cli": "node --env-file-if-exists=.env cli.mjs"
+  }
+}

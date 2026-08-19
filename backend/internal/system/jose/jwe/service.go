@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package jwe
 
@@ -25,58 +10,73 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/thunder-id/thunderid/internal/system/cryptolib"
 	joseconfig "github.com/thunder-id/thunderid/internal/system/jose/config"
-	kmprovider "github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 )
 
 // JWEServiceInterface defines the interface for JWE operations.
 type JWEServiceInterface interface {
-	Encrypt(ctx context.Context, payload []byte, recipientPublicKey crypto.PublicKey,
-		alg KeyEncAlgorithm, enc ContentEncAlgorithm, cty string, kid string) (string, *tidcommon.ServiceError)
+	Encrypt(ctx context.Context, payload []byte, recipientPublicKey *providers.KeyRef,
+		alg string, enc ContentEncAlgorithm, cty string, kid string) (string, *tidcommon.ServiceError)
 	Decrypt(ctx context.Context, jweToken string) ([]byte, *tidcommon.ServiceError)
+
+	// SupportedKeyEncryptionAlgorithms returns the JWE "alg" (key management) algorithm values
+	// usable by Encrypt and Decrypt: the intersection of the algorithms this package recognizes as
+	// key-management roles with what the configured crypto provider actually supports.
+	SupportedKeyEncryptionAlgorithms() []string
+
+	// SupportedContentEncryptionAlgorithms returns the JWE "enc" (content encryption) algorithm
+	// values supported by Encrypt and Decrypt.
+	SupportedContentEncryptionAlgorithms() []string
 }
 
 // jweService implements the JWEServiceInterface.
 type jweService struct {
-	cryptoProvider kmprovider.RuntimeCryptoProvider
-	keyRef         kmprovider.KeyRef
+	cryptoProvider providers.RuntimeCryptoProvider
+	keyRef         providers.KeyRef
 	logger         *log.Logger
 }
 
 // newJWEService creates a new JWE service instance.
 func newJWEService(
-	cryptoProvider kmprovider.RuntimeCryptoProvider, cfg joseconfig.Config,
+	cryptoProvider providers.RuntimeCryptoProvider, cfg joseconfig.Config,
 ) (JWEServiceInterface, error) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "JWEService"))
 
 	return &jweService{
 		cryptoProvider: cryptoProvider,
-		keyRef:         kmprovider.KeyRef{KeyID: cfg.PreferredKeyID},
+		keyRef:         providers.KeyRef{KeyID: cfg.PreferredKeyID},
 		logger:         logger,
 	}, nil
 }
 
-// Encrypt encrypts the payload using the recipient's public key.
+// Encrypt encrypts the payload for the recipient's public key via the runtime crypto provider.
 // cty is the content type placed in the JWE protected header (e.g. "json" or "JWT").
 // kid identifies the recipient's key; it is stamped in the header only when non-empty.
-func (js *jweService) Encrypt(ctx context.Context, payload []byte, recipientPublicKey crypto.PublicKey,
-	alg KeyEncAlgorithm, enc ContentEncAlgorithm, cty string, kid string) (string, *tidcommon.ServiceError) {
+func (js *jweService) Encrypt(ctx context.Context, payload []byte, recipientPublicKey *providers.KeyRef,
+	keyEncAlgorithm string, enc ContentEncAlgorithm, cty string, kid string) (string, *tidcommon.ServiceError) {
 	if !isSupportedEnc(enc) {
 		return "", &ErrorUnsupportedEncryptionAlgorithm
 	}
 
-	params, paramsErr := buildEncryptParams(alg, enc)
-	if paramsErr != nil {
+	params := make(map[string]interface{})
+	params[providers.ParamContentEncryptionAlgorithm] = string(enc)
+	params[providers.ParamKeyEncryptionAlgorithm] = keyEncAlgorithm
+
+	if js.cryptoProvider == nil {
+		js.logger.Error(ctx, "Failed to encrypt cryptoProvider is nil")
 		return "", &ErrorUnsupportedJWEAlgorithm
 	}
 
-	// Establish the CEK via cryptolib key establishment.
-	encryptedKey, details, err := cryptolib.Encrypt(recipientPublicKey, &params, nil)
+	// Establish the CEK via the runtime crypto provider, using the recipient's public key.
+	encryptedKey, details, err := js.cryptoProvider.Encrypt(
+		ctx, recipientPublicKey, keyEncAlgorithm, params, nil)
 	if err != nil {
 		js.logger.Error(ctx, "Failed to encrypt CEK: "+err.Error())
 		return "", &ErrorUnsupportedJWEAlgorithm
@@ -87,7 +87,7 @@ func (js *jweService) Encrypt(ctx context.Context, payload []byte, recipientPubl
 	// Build the JWE protected header.
 	header := map[string]interface{}{
 		"typ": "JWE",
-		"alg": string(alg),
+		"alg": keyEncAlgorithm,
 		"enc": string(enc),
 	}
 	if kid != "" {
@@ -156,31 +156,72 @@ func (js *jweService) Decrypt(ctx context.Context, jweToken string) ([]byte, *ti
 		return nil, &ErrorUnsupportedEncryptionAlgorithm
 	}
 
-	alg := KeyEncAlgorithm(algStr)
-	enc := ContentEncAlgorithm(encStr)
-
-	// Build cryptolib params for CEK decryption using the server's key.
-	params, paramsErr := buildDecryptParams(alg, enc, header)
-	if paramsErr != nil {
-		js.logger.Debug(ctx, "Failed to build decrypt params: "+paramsErr.Error())
+	if js.cryptoProvider == nil {
+		js.logger.Error(ctx, "Failed to decrypt cryptoProvider is nil")
 		return nil, &ErrorUnsupportedJWEAlgorithm
 	}
 
+	params := map[string]interface{}{}
+	params[providers.ParamContentEncryptionAlgorithm] = encStr
+	params[providers.ParamKeyEncryptionAlgorithm] = algStr
+
+	if _, hasEPK := header["epk"]; hasEPK {
+		epkMap, ok := header["epk"].(map[string]interface{})
+		if !ok {
+			js.logger.Error(ctx, "Failed to extract epk from header")
+			return nil, &ErrorUnsupportedJWEAlgorithm
+		}
+		params[providers.ParamEPK] = epkMap
+	}
+	apu := decodeAPUAPV(header, "apu")
+	if apu != nil {
+		params[providers.ParamAPU] = apu
+	}
+	apv := decodeAPUAPV(header, "apv")
+	if apv != nil {
+		params[providers.ParamAPV] = apv
+	}
+
 	// Decrypt CEK via the runtime crypto provider (uses server's private key).
-	cek, err := js.cryptoProvider.Decrypt(ctx, &js.keyRef, params, encryptedKey)
+	cek, err := js.cryptoProvider.Decrypt(ctx, &js.keyRef, algStr, params, encryptedKey)
 	if err != nil {
-		js.logger.Error(ctx, "Failed to decrypt CEK: "+err.Error())
+		js.logger.Error(ctx, "Failed to decrypt CEK", log.Error(err))
 		return nil, &ErrorJWEDecryptionFailed
 	}
 
+	enc := ContentEncAlgorithm(encStr)
 	// Decrypt content.
 	payload, err := decryptContent(ciphertext, iv, tag, cek, enc, []byte(headerBase64))
 	if err != nil {
-		js.logger.Error(ctx, "Failed to decrypt content: "+err.Error())
+		js.logger.Error(ctx, "Failed to decrypt content", log.Error(err))
 		return nil, &ErrorJWEDecryptionFailed
 	}
 
 	return payload, nil
+}
+
+// SupportedKeyEncryptionAlgorithms returns the JWE "alg" (key management) algorithm values usable
+// by Encrypt and Decrypt: the intersection of the algorithms this package recognizes as
+// key-management roles with what the configured crypto provider actually supports.
+func (js *jweService) SupportedKeyEncryptionAlgorithms() []string {
+	providerSupported := js.cryptoProvider.GetSupportedEncryptionAlgorithms()
+	result := make([]string, 0, len(knownKeyEncAlgorithms))
+	for _, alg := range knownKeyEncAlgorithms {
+		if slices.Contains(providerSupported, string(alg)) {
+			result = append(result, string(alg))
+		}
+	}
+	return result
+}
+
+// SupportedContentEncryptionAlgorithms returns the JWE "enc" (content encryption) algorithm
+// values supported by Encrypt and Decrypt.
+func (js *jweService) SupportedContentEncryptionAlgorithms() []string {
+	result := make([]string, len(supportedContentEncAlgorithms))
+	for i, enc := range supportedContentEncAlgorithms {
+		result[i] = string(enc)
+	}
+	return result
 }
 
 // DecryptWithKey decrypts a JWE compact serialization using an explicitly
@@ -222,84 +263,20 @@ func DecryptWithKey(jweToken string, privateKey crypto.PrivateKey) ([]byte, erro
 	return payload, nil
 }
 
-// isSupportedEnc returns true when enc is a supported content encryption algorithm.
-func isSupportedEnc(enc ContentEncAlgorithm) bool {
-	switch enc {
-	case A128CBCHS256, A192CBCHS384, A256CBCHS512, A128GCM, A192GCM, A256GCM:
-		return true
-	default:
-		return false
-	}
+// supportedContentEncAlgorithms lists the JWE "enc" (content encryption) algorithms supported by
+// Encrypt and Decrypt.
+var supportedContentEncAlgorithms = []ContentEncAlgorithm{
+	A128CBCHS256, A192CBCHS384, A256CBCHS512, A128GCM, A192GCM, A256GCM,
 }
 
-// buildEncryptParams converts a JWE key management algorithm and content encryption algorithm
-// into a cryptolib.AlgorithmParams for key establishment during Encrypt.
-func buildEncryptParams(alg KeyEncAlgorithm, enc ContentEncAlgorithm) (cryptolib.AlgorithmParams, error) {
-	encAlg := cryptolib.Algorithm(enc)
-	switch alg {
-	case RSAOAEP:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmRSAOAEP,
-			RSAOAEP:   cryptolib.RSAOAEPParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case RSAOAEP256:
-		return cryptolib.AlgorithmParams{
-			Algorithm:  cryptolib.AlgorithmRSAOAEP256,
-			RSAOAEP256: cryptolib.RSAOAEP256Params{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case ECDHES:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmECDHES,
-			ECDHES:    cryptolib.ECDHESParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case ECDHESA128KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmECDHESA128KW,
-			ECDHES:    cryptolib.ECDHESParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case ECDHESA192KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmECDHESA192KW,
-			ECDHES:    cryptolib.ECDHESParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case ECDHESA256KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmECDHESA256KW,
-			ECDHES:    cryptolib.ECDHESParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A128KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA128KW,
-			AESKW:     cryptolib.AESKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A192KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA192KW,
-			AESKW:     cryptolib.AESKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A256KW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA256KW,
-			AESKW:     cryptolib.AESKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A128GCMKW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA128GCMKW,
-			AESGCMKW:  cryptolib.AESGCMKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A192GCMKW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA192GCMKW,
-			AESGCMKW:  cryptolib.AESGCMKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	case A256GCMKW:
-		return cryptolib.AlgorithmParams{
-			Algorithm: cryptolib.AlgorithmA256GCMKW,
-			AESGCMKW:  cryptolib.AESGCMKWParams{ContentEncryptionAlgorithm: encAlg},
-		}, nil
-	default:
-		return cryptolib.AlgorithmParams{}, fmt.Errorf("unsupported JWE algorithm: %s", alg)
+// isSupportedEnc returns true when enc is a supported content encryption algorithm.
+func isSupportedEnc(enc ContentEncAlgorithm) bool {
+	for _, supported := range supportedContentEncAlgorithms {
+		if supported == enc {
+			return true
+		}
 	}
+	return false
 }
 
 // buildDecryptParams builds cryptolib.AlgorithmParams for server-side CEK decryption.
@@ -312,7 +289,7 @@ func buildDecryptParams(alg KeyEncAlgorithm, enc ContentEncAlgorithm,
 	case RSAOAEP256:
 		return cryptolib.AlgorithmParams{Algorithm: cryptolib.AlgorithmRSAOAEP256}, nil
 	case ECDHES:
-		epk, err := extractEPKFromHeader(header)
+		epk, err := extractECDHPublicKeyFromHeader(header)
 		if err != nil {
 			return cryptolib.AlgorithmParams{}, err
 		}
@@ -328,7 +305,7 @@ func buildDecryptParams(alg KeyEncAlgorithm, enc ContentEncAlgorithm,
 			},
 		}, nil
 	case ECDHESA128KW:
-		epk, err := extractEPKFromHeader(header)
+		epk, err := extractECDHPublicKeyFromHeader(header)
 		if err != nil {
 			return cryptolib.AlgorithmParams{}, err
 		}
@@ -337,7 +314,7 @@ func buildDecryptParams(alg KeyEncAlgorithm, enc ContentEncAlgorithm,
 			ECDHES:    cryptolib.ECDHESParams{EPK: epk},
 		}, nil
 	case ECDHESA192KW:
-		epk, err := extractEPKFromHeader(header)
+		epk, err := extractECDHPublicKeyFromHeader(header)
 		if err != nil {
 			return cryptolib.AlgorithmParams{}, err
 		}
@@ -346,7 +323,7 @@ func buildDecryptParams(alg KeyEncAlgorithm, enc ContentEncAlgorithm,
 			ECDHES:    cryptolib.ECDHESParams{EPK: epk},
 		}, nil
 	case ECDHESA256KW:
-		epk, err := extractEPKFromHeader(header)
+		epk, err := extractECDHPublicKeyFromHeader(header)
 		if err != nil {
 			return cryptolib.AlgorithmParams{}, err
 		}

@@ -1,26 +1,10 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {zodResolver} from '@hookform/resolvers/zod';
 import {AuthenticatorTypes} from '@thunderid/configure-connections';
 import {useLogger} from '@thunderid/logger/react';
 import {
-  Box,
   Typography,
   Stack,
   TextField,
@@ -32,20 +16,28 @@ import {
   FormLabel,
   Autocomplete,
   Chip,
-  MenuItem,
-  Select,
+  Card,
+  Grid,
+  Box,
+  Tooltip,
+  useTheme,
 } from '@wso2/oxygen-ui';
-import {Globe} from '@wso2/oxygen-ui-icons-react';
 import type {JSX} from 'react';
 import {useEffect, useState} from 'react';
 import {useForm, Controller, useWatch} from 'react-hook-form';
 import {useTranslation} from 'react-i18next';
 import {z} from 'zod';
+import ConfigureRedirectUris from './ConfigureRedirectUris';
 import {CUSTOM_WALLET_VENDOR, WALLET_VENDORS} from '../../constants/wallet-vendors';
 import useApplicationCreate from '../../contexts/ApplicationCreate/useApplicationCreate';
-import {ApplicationCreateFlowConfiguration} from '../../models/application-create-flow';
+import {
+  ApplicationCreateFlowConfiguration,
+  ApplicationCreateFlowSignInApproach,
+} from '../../models/application-create-flow';
 import type {PlatformApplicationTemplate, TechnologyApplicationTemplate} from '../../models/application-templates';
 import getConfigurationTypeFromTemplate from '../../utils/getConfigurationTypeFromTemplate';
+import hasInvalidCorsRows from '../../utils/hasInvalidCorsRows';
+import isRedirectCapableTemplate from '../../utils/isRedirectCapableTemplate';
 
 /**
  * Zod schema for validating URL inputs (hosting URLs and callback URLs).
@@ -188,6 +180,11 @@ export interface ConfigureDetailsProps {
   existingClientIds?: string[];
 
   /**
+   * Currently selected sign-in approach.
+   */
+  selectedApproach: ApplicationCreateFlowSignInApproach;
+
+  /**
    * Callback function to notify parent component whether this step is ready to proceed
    */
   onReadyChange: (isReady: boolean) => void;
@@ -282,8 +279,10 @@ export default function ConfigureDetails({
   selectedUserTypes = [],
   onUserTypesChange = () => null,
   existingClientIds = [],
+  selectedApproach,
 }: ConfigureDetailsProps): JSX.Element {
   const {t} = useTranslation();
+  const theme = useTheme();
   const logger = useLogger('ConfigureDetails');
   const {
     selectedTemplateConfig,
@@ -294,6 +293,7 @@ export default function ConfigureDetails({
     relyingPartyName: contextRelyingPartyName,
     setRelyingPartyName,
     appName,
+    corsOrigins,
   } = useApplicationCreate();
   const {
     control,
@@ -315,8 +315,24 @@ export default function ConfigureDetails({
 
   const isPasskeyConfigEnabled: boolean = !selectedAuthFlow && (integrations[AuthenticatorTypes.PASSKEY] ?? false);
 
+  const isRedirectCapable = isRedirectCapableTemplate(selectedTemplateConfig);
+
   const configurationType: ApplicationCreateFlowConfiguration =
     getConfigurationTypeFromTemplate(selectedTemplateConfig);
+
+  // Embedded (native) sign-in doesn't redirect to hosted pages, so none of the
+  // redirect/callback-oriented configuration below is needed for it — only passkey relying party
+  // details still apply, since those are required regardless of how the user reaches sign-in.
+  const isEmbeddedApproach = selectedApproach === ApplicationCreateFlowSignInApproach.EMBEDDED;
+  const effectiveConfigurationType: ApplicationCreateFlowConfiguration = isEmbeddedApproach
+    ? ApplicationCreateFlowConfiguration.NONE
+    : configurationType;
+  const effectiveIsRedirectCapable = isEmbeddedApproach ? false : isRedirectCapable;
+
+  // Guarded on the same condition that renders the CORS editor, so rows left over from a previously
+  // selected template can't block a step that no longer shows them.
+  const showsCorsEditor: boolean = effectiveIsRedirectCapable && Boolean(selectedTemplateConfig?.capabilities?.cors);
+  const hasInvalidCorsOrigins: boolean = showsCorsEditor && hasInvalidCorsRows(corsOrigins);
 
   const isWallet: boolean = selectedTemplateConfig?.id === 'wallet';
   const [walletVendor, setWalletVendor] = useState<string>(CUSTOM_WALLET_VENDOR);
@@ -437,50 +453,43 @@ export default function ConfigureDetails({
    * Notify parent of deep link changes for mobile platforms.
    */
   useEffect((): void => {
-    if (configurationType === ApplicationCreateFlowConfiguration.DEEPLINK) {
+    if (effectiveConfigurationType === ApplicationCreateFlowConfiguration.DEEPLINK) {
       onCallbackUrlChange(deeplink);
     }
-  }, [deeplink, configurationType, onCallbackUrlChange]);
+  }, [deeplink, effectiveConfigurationType, onCallbackUrlChange]);
 
   /**
    * Determine if step is ready based on validity and configuration type.
    */
   useEffect((): void => {
-    // If Passkey is enabled, we MUST have valid relying party info
-    if (isPasskeyConfigEnabled) {
-      if (!relyingPartyId || !relyingPartyName) {
-        onReadyChange(false);
-        return;
-      }
-    }
+    let ready: boolean;
 
-    if (configurationType === ApplicationCreateFlowConfiguration.NONE) {
-      // Even if no base config needed, if Passkey is enabled we need those fields valid
-      // The Passkey check block above handles returning false if invalid.
-      // If we are here, it means either Passkey is disabled OR Passkey fields are valid.
-      onReadyChange(true);
-      return;
-    }
-
-    // For URL-based config, need valid hosting URL
-    if (configurationType === ApplicationCreateFlowConfiguration.URL) {
+    if (isPasskeyConfigEnabled && (!relyingPartyId || !relyingPartyName)) {
+      // If Passkey is enabled, we MUST have valid relying party info
+      ready = false;
+    } else if (effectiveConfigurationType === ApplicationCreateFlowConfiguration.NONE) {
+      // Even if no base config needed, if Passkey is enabled we need those fields valid, which the
+      // check above has already accounted for.
+      ready = true;
+    } else if (effectiveConfigurationType === ApplicationCreateFlowConfiguration.URL) {
+      // For URL-based config, need valid hosting URL
       const hasValidHostingUrl: boolean = !!hostingUrl && !errors.hostingUrl;
       const hasValidCallbackUrl: boolean = callbackMode === 'same' || (!!callbackUrl && !errors.callbackUrl);
-      onReadyChange(!!hasValidHostingUrl && !!hasValidCallbackUrl);
-      return;
+      ready = !!hasValidHostingUrl && !!hasValidCallbackUrl;
+    } else if (effectiveConfigurationType === ApplicationCreateFlowConfiguration.DEEPLINK) {
+      // For deeplink config, need valid deeplink. For wallets, also block if the resolved client
+      // id is already taken by another application (would otherwise fail only on submit).
+      ready = !!deeplink && !errors.deeplink && !isDuplicateWalletClientId;
+    } else {
+      ready = isValid;
     }
 
-    // For deeplink config, need valid deeplink. For wallets, also block if the resolved client
-    // id is already taken by another application (would otherwise fail only on submit).
-    if (configurationType === ApplicationCreateFlowConfiguration.DEEPLINK) {
-      onReadyChange(!!deeplink && !errors.deeplink && !isDuplicateWalletClientId);
-      return;
-    }
-
-    onReadyChange(isValid);
+    // A malformed CORS origin used to be dropped on submit without a word, so block here instead.
+    // This reads the same rows that get merged into the allow-list, so the two cannot disagree.
+    onReadyChange(ready && !hasInvalidCorsOrigins);
   }, [
     isValid,
-    configurationType,
+    effectiveConfigurationType,
     hostingUrl,
     callbackUrl,
     callbackMode,
@@ -492,47 +501,22 @@ export default function ConfigureDetails({
     onReadyChange,
     selectedTemplateConfig,
     isDuplicateWalletClientId,
+    hasInvalidCorsOrigins,
   ]);
 
-  // For platforms that don't require configuration AND no passkey configuration needed
-  if (configurationType === ApplicationCreateFlowConfiguration.NONE && !isPasskeyConfigEnabled) {
-    return (
-      <Stack spacing={3}>
-        <Box sx={{textAlign: 'center', py: 4}}>
-          <Globe size={48} style={{color: 'var(--oxygen-palette-text-secondary)', marginBottom: '16px'}} />
-          <Typography variant="h6" gutterBottom>
-            {t('applications:onboarding.configure.details.noConfigRequired.title')}
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {t('applications:onboarding.configure.details.noConfigRequired.description')}
-          </Typography>
-        </Box>
-      </Stack>
-    );
-  }
+  // For platforms that don't require configuration AND no passkey configuration needed AND the
+  // template doesn't need a redirect URI confirmed/edited, once the sign-in approach (if any
+  // choice is offered) is accounted for.
+  const showNoConfigMessage =
+    effectiveConfigurationType === ApplicationCreateFlowConfiguration.NONE &&
+    !isPasskeyConfigEnabled &&
+    !effectiveIsRedirectCapable;
 
   return (
     <Stack spacing={3} data-testid="application-configure-details">
-      <Stack direction="column" spacing={1}>
-        <Typography variant="h1" gutterBottom>
-          {isWallet
-            ? t('applications:onboarding.configure.details.wallet.title')
-            : t('applications:onboarding.configure.details.title')}
-        </Typography>
-        {configurationType !== ApplicationCreateFlowConfiguration.NONE && (
-          <Typography variant="subtitle1" gutterBottom>
-            {(() => {
-              if (isWallet) return t('applications:onboarding.configure.details.wallet.description');
-              if (configurationType === ApplicationCreateFlowConfiguration.DEEPLINK)
-                return t('applications:onboarding.configure.details.mobile.description');
-              return t('applications:onboarding.configure.details.description');
-            })()}
-          </Typography>
-        )}
-      </Stack>
-
       {/* User Type Selection - shown when template requires it and user types are available */}
-      {userTypes &&
+      {!showNoConfigMessage &&
+        userTypes &&
         userTypes.length > 0 &&
         selectedTemplateConfig?.defaults?.allowedUserTypes !== undefined &&
         Array.isArray(selectedTemplateConfig.defaults?.allowedUserTypes) &&
@@ -568,7 +552,7 @@ export default function ConfigureDetails({
         )}
 
       {/* Mobile / wallet platform - Deep link / Universal link configuration */}
-      {configurationType === ApplicationCreateFlowConfiguration.DEEPLINK && (
+      {effectiveConfigurationType === ApplicationCreateFlowConfiguration.DEEPLINK && (
         <>
           {/* Mobile (non-wallet): the admin enters the app's deep link directly. */}
           {!isWallet && (
@@ -598,47 +582,99 @@ export default function ConfigureDetails({
             </>
           )}
 
-          {/* Wallet: pick a vendor first. Known wallets prefill client id + redirect (read-only); Custom asks for both. */}
+          {/* Wallet: pick a vendor first. Known wallets prefill client id + redirect and have
+              nothing left to configure, so those fields only show for "Custom". */}
           {isWallet && (
             <>
-              <FormControl fullWidth>
-                <FormLabel htmlFor="wallet-vendor-select">
-                  {t('applications:onboarding.configure.details.wallet.vendor.label')}
-                </FormLabel>
-                <Select
-                  id="wallet-vendor-select"
-                  value={walletVendor}
-                  onChange={(e): void => applyVendor(e.target.value)}
-                >
-                  {WALLET_VENDORS.map((vendor) => (
-                    <MenuItem key={vendor.id} value={vendor.id}>
-                      {vendor.id === CUSTOM_WALLET_VENDOR
-                        ? t('applications:onboarding.configure.details.wallet.vendor.custom')
-                        : vendor.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Typography variant="h1" gutterBottom>
+                {t('applications:onboarding.configure.details.wallet.title', 'Wallet')}
+              </Typography>
 
-              <FormControl fullWidth>
-                <FormLabel htmlFor="wallet-client-id-input">
-                  {t('applications:onboarding.configure.details.wallet.clientId.label')}
-                </FormLabel>
-                <TextField
-                  fullWidth
-                  id="wallet-client-id-input"
-                  value={isWalletCustom ? customClientId : (selectedVendor?.clientId ?? '')}
-                  disabled={!isWalletCustom}
-                  error={isDuplicateWalletClientId}
-                  placeholder={t('applications:onboarding.configure.details.wallet.clientId.placeholder')}
-                  helperText={
-                    isWalletCustom
-                      ? t('applications:onboarding.configure.details.wallet.clientId.helperText')
-                      : t('applications:onboarding.configure.details.wallet.prefilled.helperText')
-                  }
-                  onChange={(e): void => applyCustomClientId(e.target.value)}
-                />
-              </FormControl>
+              <Grid container spacing={2}>
+                {WALLET_VENDORS.map((vendor) => {
+                  const isSelected = vendor.id === walletVendor;
+                  const Logo = vendor.logo;
+                  // Each known wallet can only be connected once — a card for a vendor that's
+                  // already taken is shown disabled, with the reason on hover, instead of letting
+                  // the admin pick it and only then finding out via the alert below.
+                  const isTaken = vendor.id !== CUSTOM_WALLET_VENDOR && existingClientIds.includes(vendor.clientId);
+
+                  return (
+                    <Grid key={vendor.id} size={{xs: 6, sm: 4, md: 3}}>
+                      <Tooltip
+                        title={
+                          isTaken
+                            ? t('applications:onboarding.configure.details.wallet.duplicate.known', {
+                                vendor: vendor.label,
+                              })
+                            : ''
+                        }
+                      >
+                        <Card
+                          data-testid={`wallet-vendor-card-${vendor.id}`}
+                          onClick={(): void => {
+                            if (!isTaken) applyVendor(vendor.id);
+                          }}
+                          sx={{
+                            cursor: isTaken ? 'not-allowed' : 'pointer',
+                            opacity: isTaken ? 0.5 : 1,
+                            border: isSelected ? `2px solid ${theme.vars?.palette.primary.main}` : undefined,
+                            '&:hover': isTaken
+                              ? undefined
+                              : {
+                                  borderColor: 'primary.main',
+                                  boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
+                                },
+                          }}
+                        >
+                          <Box
+                            sx={{
+                              aspectRatio: '4/3',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              bgcolor: vendor.cardBackground ?? 'action.hover',
+                              color: vendor.logoColor,
+                            }}
+                          >
+                            {Logo ? (
+                              <Logo height={28} />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                {t('applications:onboarding.configure.details.wallet.vendor.custom')}
+                              </Typography>
+                            )}
+                          </Box>
+                          <Box sx={{px: 1.25, py: 0.75, borderTop: '1px solid', borderColor: 'divider'}}>
+                            <Typography variant="body2" sx={{fontWeight: isSelected ? 600 : 500, textAlign: 'center'}}>
+                              {vendor.id === CUSTOM_WALLET_VENDOR
+                                ? t('applications:onboarding.configure.details.wallet.vendor.custom')
+                                : vendor.label}
+                            </Typography>
+                          </Box>
+                        </Card>
+                      </Tooltip>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+
+              {isWalletCustom && (
+                <FormControl fullWidth>
+                  <FormLabel htmlFor="wallet-client-id-input">
+                    {t('applications:onboarding.configure.details.wallet.clientId.label')}
+                  </FormLabel>
+                  <TextField
+                    fullWidth
+                    id="wallet-client-id-input"
+                    value={customClientId}
+                    error={isDuplicateWalletClientId}
+                    placeholder={t('applications:onboarding.configure.details.wallet.clientId.placeholder')}
+                    helperText={t('applications:onboarding.configure.details.wallet.clientId.helperText')}
+                    onChange={(e): void => applyCustomClientId(e.target.value)}
+                  />
+                </FormControl>
+              )}
 
               {isDuplicateWalletClientId && (
                 <Alert severity="warning" data-testid="wallet-duplicate-client-id-alert">
@@ -650,11 +686,11 @@ export default function ConfigureDetails({
                 </Alert>
               )}
 
-              <FormControl fullWidth required>
-                <FormLabel htmlFor="wallet-deeplink-input">
-                  {t('applications:onboarding.configure.details.deeplink.label')}
-                </FormLabel>
-                {isWalletCustom ? (
+              {isWalletCustom && (
+                <FormControl fullWidth required>
+                  <FormLabel htmlFor="wallet-deeplink-input">
+                    {t('applications:onboarding.configure.details.deeplink.label')}
+                  </FormLabel>
                   <Controller
                     name="deeplink"
                     control={control}
@@ -671,119 +707,123 @@ export default function ConfigureDetails({
                       />
                     )}
                   />
-                ) : (
-                  <TextField
-                    fullWidth
-                    id="wallet-deeplink-input"
-                    value={selectedVendor?.redirectUri ?? ''}
-                    disabled
-                    helperText={t('applications:onboarding.configure.details.wallet.prefilled.helperText')}
-                  />
-                )}
-              </FormControl>
+                </FormControl>
+              )}
             </>
           )}
         </>
       )}
 
-      {/* Browser/Server platform - URL configuration */}
-      {configurationType === ApplicationCreateFlowConfiguration.URL && (
-        <>
-          {/* Hosting URL */}
-          <FormControl fullWidth required>
-            <FormLabel htmlFor="hosting-url-input">
-              {t('applications:onboarding.configure.details.hostingUrl.label')}
-            </FormLabel>
-            <Controller
-              name="hostingUrl"
-              control={control}
-              render={({field}) => (
-                <TextField
-                  {...field}
-                  fullWidth
-                  id="hosting-url-input"
-                  placeholder={t('applications:onboarding.configure.details.hostingUrl.placeholder')}
-                  error={!!errors.hostingUrl}
-                  helperText={
-                    errors.hostingUrl?.message ?? t('applications:onboarding.configure.details.hostingUrl.helperText')
-                  }
-                />
-              )}
-            />
-          </FormControl>
+      {/* URLs - hosting/callback URL fields and/or the redirect URI editor below, whichever
+          apply, sharing a single title since both are URL configuration for the same app. */}
+      {(effectiveConfigurationType === ApplicationCreateFlowConfiguration.URL || effectiveIsRedirectCapable) && (
+        <Stack spacing={3}>
+          <Typography variant="h1" gutterBottom>
+            {t('applications:onboarding.configure.details.urls.title', 'URLs')}
+          </Typography>
 
-          {/* After Sign-in URL (Callback URL) */}
-          <Stack spacing={2}>
-            <FormControl component="fieldset">
-              <FormLabel id="callback-url-label">
-                {t('applications:onboarding.configure.details.callbackUrl.label')}
-              </FormLabel>
-              <Controller
-                name="callbackMode"
-                control={control}
-                render={({field}) => (
-                  <RadioGroup {...field} aria-labelledby="callback-url-label">
-                    <FormControlLabel
-                      value="same"
-                      control={<Radio />}
-                      label={
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Typography variant="body1">
-                            {t('applications:onboarding.configure.details.callbackMode.same')}
-                          </Typography>
-                          {defaultHostDisplay && (
-                            <Typography variant="body2" color="text.secondary">
-                              ({defaultHostDisplay})
-                            </Typography>
-                          )}
-                        </Stack>
-                      }
-                    />
-                    <FormControlLabel
-                      value="custom"
-                      control={<Radio />}
-                      label={t('applications:onboarding.configure.details.callbackMode.custom')}
-                    />
-                  </RadioGroup>
-                )}
-              />
-            </FormControl>
-
-            {callbackMode === 'custom' && (
-              <FormControl fullWidth>
-                <FormLabel htmlFor="callback-url-input" id="custom-callback-url-label">
-                  {t('applications:onboarding.configure.details.callbackUrl.label')}
+          {effectiveConfigurationType === ApplicationCreateFlowConfiguration.URL && (
+            <Stack spacing={3}>
+              {/* Hosting URL */}
+              <FormControl fullWidth required>
+                <FormLabel htmlFor="hosting-url-input">
+                  {t('applications:onboarding.configure.details.hostingUrl.label')}
                 </FormLabel>
                 <Controller
-                  name="callbackUrl"
+                  name="hostingUrl"
                   control={control}
                   render={({field}) => (
                     <TextField
                       {...field}
                       fullWidth
-                      id="callback-url-input"
-                      placeholder={t('applications:onboarding.configure.details.callbackUrl.placeholder')}
-                      error={!!errors.callbackUrl}
+                      id="hosting-url-input"
+                      placeholder={t('applications:onboarding.configure.details.hostingUrl.placeholder')}
+                      error={!!errors.hostingUrl}
                       helperText={
-                        errors.callbackUrl?.message ??
-                        t('applications:onboarding.configure.details.callbackUrl.helperText')
+                        errors.hostingUrl?.message ??
+                        t('applications:onboarding.configure.details.hostingUrl.helperText')
                       }
                     />
                   )}
                 />
               </FormControl>
-            )}
 
-            <Alert severity="info">{t('applications:onboarding.configure.details.callbackUrl.info')}</Alert>
-          </Stack>
-        </>
+              {/* After Sign-in URL (Callback URL) */}
+              <Stack spacing={2}>
+                <FormControl component="fieldset">
+                  <FormLabel id="callback-url-label">
+                    {t('applications:onboarding.configure.details.callbackUrl.label')}
+                  </FormLabel>
+                  <Controller
+                    name="callbackMode"
+                    control={control}
+                    render={({field}) => (
+                      <RadioGroup {...field} aria-labelledby="callback-url-label">
+                        <FormControlLabel
+                          value="same"
+                          control={<Radio />}
+                          label={
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              <Typography variant="body1">
+                                {t('applications:onboarding.configure.details.callbackMode.same')}
+                              </Typography>
+                              {defaultHostDisplay && (
+                                <Typography variant="body2" color="text.secondary">
+                                  ({defaultHostDisplay})
+                                </Typography>
+                              )}
+                            </Stack>
+                          }
+                        />
+                        <FormControlLabel
+                          value="custom"
+                          control={<Radio />}
+                          label={t('applications:onboarding.configure.details.callbackMode.custom')}
+                        />
+                      </RadioGroup>
+                    )}
+                  />
+                </FormControl>
+
+                {callbackMode === 'custom' && (
+                  <FormControl fullWidth>
+                    <FormLabel htmlFor="callback-url-input" id="custom-callback-url-label">
+                      {t('applications:onboarding.configure.details.callbackUrl.label')}
+                    </FormLabel>
+                    <Controller
+                      name="callbackUrl"
+                      control={control}
+                      render={({field}) => (
+                        <TextField
+                          {...field}
+                          fullWidth
+                          id="callback-url-input"
+                          placeholder={t('applications:onboarding.configure.details.callbackUrl.placeholder')}
+                          error={!!errors.callbackUrl}
+                          helperText={
+                            errors.callbackUrl?.message ??
+                            t('applications:onboarding.configure.details.callbackUrl.helperText')
+                          }
+                        />
+                      )}
+                    />
+                  </FormControl>
+                )}
+
+                <Alert severity="info">{t('applications:onboarding.configure.details.callbackUrl.info')}</Alert>
+              </Stack>
+            </Stack>
+          )}
+
+          {effectiveIsRedirectCapable && <ConfigureRedirectUris />}
+        </Stack>
       )}
 
       {/* Passkey Relying Party Configuration */}
       {isPasskeyConfigEnabled && (
         <Stack spacing={2}>
-          <Typography variant="subtitle1" gutterBottom>
-            {t('applications:onboarding.configure.details.passkey.title') || 'Passkey Settings'}
+          <Typography variant="h1" gutterBottom>
+            {t('applications:onboarding.configure.details.passkey.title') || 'Passkeys'}
           </Typography>
           <FormControl fullWidth required>
             <FormLabel htmlFor="relying-party-id-input">

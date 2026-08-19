@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {BuilderStaticPanel} from '@thunderid/components';
 import {Box, IconButton} from '@wso2/oxygen-ui';
@@ -22,8 +7,9 @@ import {X, TrashIcon} from '@wso2/oxygen-ui-icons-react';
 import {useReactFlow} from '@xyflow/react';
 import {memo, useCallback, type ReactElement} from 'react';
 import {useTranslation} from 'react-i18next';
+import CommonResourceProperties from './CommonResourceProperties';
 import PanelActionButton from './PanelActionButton';
-import ResourceProperties from './ResourceProperties';
+import useFlowPlugins from '../../hooks/useFlowPlugins';
 import useInteractionState from '../../hooks/useInteractionState';
 import useUIPanelState from '../../hooks/useUIPanelState';
 import {type Element} from '../../models/elements';
@@ -49,6 +35,7 @@ function ResourcePropertyPanel({open = false, onComponentDelete}: ResourceProper
 
   const {resourcePropertiesPanelHeading, setIsOpenResourcePropertiesPanel} = useUIPanelState();
   const {lastInteractedStepId, lastInteractedResource} = useInteractionState();
+  const {emitNodeElementDelete} = useFlowPlugins();
 
   const handleClose = useCallback(() => {
     setIsOpenResourcePropertiesPanel(false);
@@ -62,11 +49,15 @@ function ResourcePropertyPanel({open = false, onComponentDelete}: ResourceProper
         // Deletion may fail silently if the node doesn't exist or is protected
       });
     } else {
+      // Same order as the widget toolbar delete: plugins react to the element first,
+      // then the element is removed from the step.
+      emitNodeElementDelete(lastInteractedStepId ?? '', lastInteractedResource as Element);
       onComponentDelete(lastInteractedStepId, lastInteractedResource as Element);
     }
     setIsOpenResourcePropertiesPanel(false);
   }, [
     deleteElements,
+    emitNodeElementDelete,
     lastInteractedResource,
     lastInteractedStepId,
     onComponentDelete,
@@ -108,10 +99,12 @@ function ResourcePropertyPanel({open = false, onComponentDelete}: ResourceProper
           },
         }}
       >
-        <ResourceProperties />
+        <CommonResourceProperties />
       </Box>
       {lastInteractedResource && lastInteractedResource.deletable !== false && (
-        <Box flexShrink={0}>
+        // Footer: a destructive action should read as separate from the fields above
+        // it, not as the next item in the list.
+        <Box flexShrink={0} sx={{borderTop: '1px solid', borderColor: 'divider', pt: 2, mt: 1}}>
           <PanelActionButton accent="error" onClick={handleDelete} startIcon={<TrashIcon size={16} />}>
             {t('flows:core.propertiesPanel.delete', 'Delete')}
           </PanelActionButton>

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Console Combined Fixture
@@ -26,12 +11,13 @@
 import { mergeTests } from "@playwright/test";
 import { test as routesTest, routes, ConsoleRoutes } from "./console-routes.fixture";
 import { test as pomTest } from "./console-pom.fixture";
+import { test as supportTest } from "./console-support.fixture";
 
 /**
  * Combined test fixture.
  * Note: pomTest already extends auth fixture, so authentication fixtures are included here.
  */
-export const test = mergeTests(routesTest, pomTest);
+export const test = mergeTests(routesTest, pomTest, supportTest);
 export const setup = test;
 
 export { expect } from "@playwright/test";
@@ -40,5 +26,15 @@ export { routes, ConsoleRoutes };
 // Re-export page objects
 export { ConsoleSigninPage } from "../../pages/authentication";
 export { UsersPage, type UserFormData } from "../../pages/user-management";
+export { UserTypesPage } from "../../pages/user-types";
 export { ApplicationsPage, type ApplicationFormData } from "../../pages/applications";
 export { SettingsPage } from "../../pages/settings";
+export { ConnectionsPage, type BrandedConnectionFormData } from "../../pages/connections";
+
+// Re-export API helpers so hooks can construct them without reaching into utils/
+export { UsersApi, type ApiUser } from "../../utils/users-api";
+export { UserTypesApi, type ApiUserType } from "../../utils/user-types-api";
+export { ApplicationsApi, type ApiApplication } from "../../utils/applications-api";
+export { FlowsApi, type ApiFlow } from "../../utils/flows-api";
+export { ConnectionsApi, type ApiConnection } from "../../utils/connections-api";
+export { WelcomePage } from "../../pages/welcome";

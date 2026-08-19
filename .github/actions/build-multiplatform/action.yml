@@ -1,6 +1,6 @@
 name: 'Build Multi-Platform'
 description: 'Builds product frontend and backend for all supported platforms'
-author: 'WSO2'
+author: 'The ThunderID Authors'
 
 runs:
   using: composite

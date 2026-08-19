@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import type {ApplicationType, InboundAuthConfig, OAuth2Config} from '@thunderid/configure-applications';
 import type {JSX} from 'react';
+import type {ApplicationCreateFlowSignInApproach} from './application-create-flow';
 import type {CreationFlow} from './creation-flow';
-import type {InboundAuthConfig} from './inbound-auth';
-import type {OAuth2Config} from './oauth';
 
 /**
  * Technology-based application template identifiers.
@@ -35,6 +20,9 @@ export const TechnologyApplicationTemplate = {
   VUE: 'VUE',
   NUXT: 'NUXT',
   NODEJS: 'NODEJS',
+  IOS: 'IOS',
+  ANDROID: 'ANDROID',
+  FLUTTER: 'FLUTTER',
   OTHER: 'OTHER',
   MCP_CLIENT: 'MCP_CLIENT',
 } as const;
@@ -62,90 +50,19 @@ export const PlatformApplicationTemplate = {
  */
 export interface IntegrationGuide {
   /**
-   * Unique identifier for the guide
+   * Hosted prompt document for this guide. Either a literal URL, or a
+   * `{{documentation.links key}}` reference (e.g.
+   * '{{applications.templates.react.llmPrompt.redirectBased}}') resolved against the configured
+   * docs site, same convention as {@link QuickstartLink.docsUrl}. The referenced document is
+   * fetched at render time and may contain `{{productName}}`, `{{clientId}}`, and
+   * `{{applicationId}}` placeholders.
    */
-  id: string;
-  /**
-   * Display title of the guide
-   */
-  title: string;
-  /**
-   * Brief description of what the guide offers
-   */
-  description: string;
-  /**
-   * Type of guide (llm for AI-assisted, manual for step-by-step)
-   */
-  type: 'llm' | 'manual';
-  /**
-   * Icon identifier for the guide
-   */
-  icon: string;
-  /**
-   * Markdown content for LLM prompts
-   */
-  content?: string;
-}
-
-/**
- * Integration step code block.
- *
- * @public
- */
-export interface IntegrationStepCode {
-  /**
-   * Programming language for syntax highlighting
-   */
-  language: string;
-  /**
-   * Optional filename to display
-   */
-  filename?: string;
-  /**
-   * Code content
-   */
-  content: string;
-  /**
-   * Optional tabs for different package managers
-   */
-  tabs?: string[];
-}
-
-/**
- * Integration step for manual integration guide.
- *
- * @public
- */
-export interface IntegrationStep {
-  /**
-   * Step number
-   */
-  step: number;
-  /**
-   * Step title
-   */
-  title: string;
-  /**
-   * Main description
-   */
-  description: string;
-  /**
-   * Optional sub-description
-   */
-  subDescription?: string;
-  /**
-   * Optional bullet points
-   */
-  bullets?: string[];
-  /**
-   * Optional code block
-   */
-  code?: IntegrationStepCode;
+  docsUrl?: string;
 }
 
 /**
  * Integration guides structure containing LLM prompt and manual steps.
- * Keys represent different integration approaches (e.g., 'inbuilt', 'embedded').
+ * Keys represent different integration approaches (e.g., 'redirect_based', 'embedded').
  *
  * @public
  */
@@ -156,10 +73,6 @@ export type IntegrationGuides = Record<
      * LLM prompt guide option
      */
     llm_prompt: IntegrationGuide;
-    /**
-     * Manual step-by-step integration guide
-     */
-    manual_steps: IntegrationStep[];
   }
 >;
 
@@ -180,6 +93,12 @@ export interface ApplicationTemplate {
    */
   creationFlow?: CreationFlow;
   /**
+   * Canonical backend application type this template maps to. Sent as the application `type` on
+   * creation. Templates that can resolve to more than one type (e.g. MCP client) may override this
+   * at creation time based on user selections.
+   */
+  type?: ApplicationType;
+  /**
    * Description of the template
    */
   description?: string;
@@ -190,6 +109,11 @@ export interface ApplicationTemplate {
     name?: string;
     inboundAuthConfig?: InboundAuthConfig[];
     allowedUserTypes?: string[];
+    /**
+     * Sign-in approach preselected for this template in the creation wizard's Configure step.
+     * Falls back to the wizard's own default (hosted pages) when omitted.
+     */
+    signInApproach?: ApplicationCreateFlowSignInApproach;
   };
   /**
    * Template-driven field constraints for the edit UI
@@ -211,11 +135,90 @@ export interface ApplicationTemplate {
      * the attestation configuration section is shown in the application's advanced settings.
      */
     attestation?: boolean;
+    /**
+     * Whether this template's Configuration step should offer a CORS Allowed Origins editor.
+     * Applies to public-client templates that call the token/userinfo endpoints directly from a
+     * browser origin; server-side templates exchange tokens off-browser and don't need it.
+     */
+    cors?: boolean;
+  };
+  /**
+   * Which device frame the application-creation wizard's live sign-in preview should render at.
+   * Defaults to `'desktop'` when omitted. Set to `'mobile'` for templates whose sign-in UI is
+   * actually rendered on a phone screen (e.g. the native Android/iOS/Flutter templates and the
+   * generic Mobile platform template) — everything else, including other public-client templates
+   * like digital wallets, previews at desktop size.
+   */
+  previewDevice?: 'desktop' | 'mobile';
+  /**
+   * Optional metadata describing the template's local development server, used to offer a
+   * "quick add" shortcut on the Configuration step for its conventional default URL.
+   */
+  devServer?: {
+    /** Identifier used to pick a logo for the quick-add banner (e.g. 'vite', 'nextjs', 'nuxt'). */
+    id: string;
+    /** Display name of the dev server/tool (e.g. 'Vite', 'Next.js', 'Nuxt'). */
+    label: string;
+    /** The dev server's conventional default URL (e.g. 'http://localhost:5173'). */
+    url: string;
   };
   /**
    * Optional integration guides for this template
    */
   integrationGuides?: IntegrationGuides;
+  /**
+   * Optional quickstart guides for this template, shown on the application's Overview tab as
+   * "read the docs" cards. Most templates have exactly one; templates that cover more than one
+   * platform SDK (e.g. the generic Mobile template covering iOS, Android, and Flutter) list one
+   * entry per platform.
+   */
+  quickstarts?: QuickstartLink[];
+  /**
+   * Optional runnable playgrounds for this template, shown as a banner on the application's
+   * Overview tab when there's exactly one. Distinct from {@link quickstarts}: a quickstart is a
+   * hosted docs link, a playground is a live, runnable environment (e.g. StackBlitz). Not every
+   * template has a runnable playground (e.g. native mobile platforms don't).
+   */
+  playgrounds?: PlaygroundLink[];
+}
+
+/**
+ * A single quickstart guide entry for a template.
+ *
+ * @public
+ */
+export interface QuickstartLink {
+  /** Short label identifying the guide, e.g. 'React', 'iOS', 'Android', 'Flutter'. */
+  label: string;
+  /**
+   * Hosted documentation guide for connecting an application built with this template/platform.
+   * Either a literal URL, or a `{{documentation.links key}}` reference (e.g.
+   * '{{applications.templates.react.docs}}') resolved against the configured docs site, letting
+   * the docs site stay the source of truth.
+   */
+  docsUrl: string;
+}
+
+/**
+ * A single runnable playground entry for a template.
+ *
+ * @public
+ */
+export interface PlaygroundLink {
+  /** Short label identifying the guide, e.g. 'React', 'Next.js', 'Nuxt'. */
+  label: string;
+  /**
+   * The runnable environment this playground is hosted on, e.g. `'stackblitz'`. Only
+   * `'stackblitz'` is currently rendered; other values are reserved for future environments the
+   * console doesn't support yet, and are silently not rendered.
+   */
+  environment: string;
+  /**
+   * URL of the runnable sample. Either a literal URL, or a `{{documentation.links key}}`
+   * reference (e.g. '{{applications.templates.react.playground}}'), same resolution rules as
+   * {@link QuickstartLink.docsUrl}.
+   */
+  url: string;
 }
 
 /**

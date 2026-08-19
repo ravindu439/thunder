@@ -3,7 +3,7 @@
   "name": "@thunderid/root",
   "version": "0.0.0",
   "description": "Root workspace for ⚡️ ThunderID",
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/thunder-id/thunderid/tree/main",
@@ -16,8 +16,7 @@
   },
   "keywords": [
     "thunderid",
-    "workspace",
-    "wso2"
+    "workspace"
   ],
   "scripts": {
     "build": "turbo run build",
@@ -48,7 +47,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "11.13.1"
+      "version": "11.21.0"
     }
   }
 }

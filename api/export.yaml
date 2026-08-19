@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Export API
   version: "1.0"
-  description: This API exports Resources as combined YAML in JSON responses or as ZIP archives.
+  description: This API exports Resources as combined YAML in JSON responses.
   license:
     name: Apache 2.0
     url: https://www.apache.org/licenses/LICENSE-2.0.html
@@ -17,7 +17,7 @@ servers:
 
 tags:
   - name: Export
-    description: Export all declared resources as a combined YAML document or a downloadable ZIP archive.
+    description: Export all declared resources as a combined YAML document.
 
 security:
   - OAuth2: [system]
@@ -61,100 +61,6 @@ paths:
                   value:
                     resources: "# File: google-idp.yaml\nresource_type: connection\ntype: google\n..."
                     environment_variables: "GOOGLE_CLIENT_ID=\nGOOGLE_CLIENT_SECRET=\n"
-        "400":
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              examples:
-                invalid-request:
-                  summary: Malformed request body
-                  value:
-                    code: "EXP-1001"
-                    message:
-                      key: "error.exportservice.invalid_request"
-                      defaultValue: "Invalid export request"
-                    description:
-                      key: "error.exportservice.invalid_request_description"
-                      defaultValue: "The provided export request is invalid or malformed"
-                no-resources:
-                  summary: No matching resources found
-                  value:
-                    code: "EXP-1002"
-                    message:
-                      key: "error.exportservice.no_resources_found"
-                      defaultValue: "No resources found"
-                    description:
-                      key: "error.exportservice.no_resources_found_description"
-                      defaultValue: "No valid resources found for the provided identifiers"
-        "401":
-          $ref: '#/components/responses/Unauthorized'
-        "500":
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                code: "SSE-5000"
-                message:
-                  key: "error.internal_server_error"
-                  defaultValue: "Internal server error"
-                description:
-                  key: "error.internal_server_error_description"
-                  defaultValue: "An unexpected error occurred while processing the export request"
-
-  /export/zip:
-    post:
-      tags:
-        - Export
-      summary: Export resources as ZIP archive
-      description: >
-        Exports the requested resources and returns them as a downloadable
-        ZIP archive. Each exported resource is placed in a separate file
-        (optionally inside a sub-folder determined by `folderPath`).
-        When template variables are detected across the exported resources,
-        a `.env` file is automatically generated and included in the ZIP
-        root; the `.env` file is omitted when no template variables are found.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExportRequest'
-            example:
-              applications:
-                - "*"
-              resourceServers:
-                - "*"
-              roles:
-                - "*"
-              flows:
-                - "*"
-              options:
-                format: "yaml"
-      responses:
-        "200":
-          description: ZIP archive containing all exported resource files
-          headers:
-            Content-Disposition:
-              schema:
-                type: string
-              example: attachment; filename=exported_resources.zip
-            Content-Length:
-              schema:
-                type: integer
-          content:
-            application/zip:
-              schema:
-                type: string
-                format: binary
-              example: |
-                ZIP contents:
-                  applications/my-app.yaml
-                  flows/login-flow.yaml
-                  .env
         "400":
           description: Bad request
           content:
@@ -248,6 +154,11 @@ components:
           items:
             type: string
           description: IDs of user types to export, or ["*"] for all.
+        agentTypes:
+          type: array
+          items:
+            type: string
+          description: IDs of agent types to export, or ["*"] for all.
         organizationUnits:
           type: array
           items:
@@ -293,6 +204,16 @@ components:
           items:
             type: string
           description: IDs of themes to export, or ["*"] for all.
+        credentialConfigurations:
+          type: array
+          items:
+            type: string
+          description: IDs of OpenID4VCI credential configurations to export, or ["*"] for all.
+        presentationDefinitions:
+          type: array
+          items:
+            type: string
+          description: IDs of OpenID4VP presentation definitions to export, or ["*"] for all.
         options:
           $ref: '#/components/schemas/ExportOptions'
 
@@ -457,10 +378,8 @@ components:
         A generated `.env` file whose variable names are derived from the
         uppercase template variable names (e.g. `{{.CLIENT_SECRET}}`,
         `{{- range .REDIRECT_URIS}}`) found in the exported resource files.
-        The file is included in ZIP archives when template variables are
-        detected. For JSON export endpoints, the same content is returned in
-        `JSONExportResponse.environment_variables`.
-        It is omitted from ZIP exports when no template variables are present.
+        The content is returned in `JSONExportResponse.environment_variables`
+        when template variables are detected, and is empty otherwise.
       required:
         - fileName
         - content

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package user
 
@@ -24,10 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
-	"github.com/thunder-id/thunderid/tests/integration/testutils"
 	"github.com/stretchr/testify/suite"
+	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
 // UserAuthzTestSuite validates that user CRUD operations respect OU-scoped authz.
@@ -64,6 +50,7 @@ type UserAuthzTestSuite struct {
 	// Test role and users
 	userMgrRoleID      string
 	userMgrUserID      string
+	scopedRSID         string
 	targetUserOU1ID    string
 	deletableUserOU1ID string
 	targetUserOU2ID    string
@@ -116,7 +103,7 @@ func (ts *UserAuthzTestSuite) SetupSuite() {
 
 	// ---- 2. Create user types (one per OU) ----
 	schemaOU1ID, err := testutils.CreateUserType(testutils.UserType{
-		Name:               entityTypeOU1Name,
+		Name: entityTypeOU1Name,
 		OUID: ts.userOU1ID,
 		Schema: map[string]interface{}{
 			"username":     map[string]interface{}{"type": "string"},
@@ -128,7 +115,7 @@ func (ts *UserAuthzTestSuite) SetupSuite() {
 	ts.entityTypeOU1ID = schemaOU1ID
 
 	schemaOU2ID, err := testutils.CreateUserType(testutils.UserType{
-		Name:               entityTypeOU2Name,
+		Name: entityTypeOU2Name,
 		OUID: ts.userOU2ID,
 		Schema: map[string]interface{}{
 			"display_name": map[string]interface{}{"type": "string"},
@@ -139,7 +126,7 @@ func (ts *UserAuthzTestSuite) SetupSuite() {
 
 	// ---- 3. Create the user-manager in OU1 (needs username+password for token grant) ----
 	userMgrID, err := testutils.CreateUser(testutils.User{
-		Type:             entityTypeOU1Name,
+		Type: entityTypeOU1Name,
 		OUID: ts.userOU1ID,
 		Attributes: json.RawMessage(fmt.Sprintf(
 			`{"username": %q, "password": %q, "display_name": "User Manager"}`,
@@ -151,36 +138,41 @@ func (ts *UserAuthzTestSuite) SetupSuite() {
 
 	// ---- 4. Create target users ----
 	targetOU1ID, err := testutils.CreateUser(testutils.User{
-		Type:             entityTypeOU1Name,
-		OUID: ts.userOU1ID,
-		Attributes:       json.RawMessage(`{"username": "authz-target-ou1", "display_name": "Target User OU1"}`),
+		Type:       entityTypeOU1Name,
+		OUID:       ts.userOU1ID,
+		Attributes: json.RawMessage(`{"username": "authz-target-ou1", "display_name": "Target User OU1"}`),
 	})
 	ts.Require().NoError(err, "create target user in OU1")
 	ts.targetUserOU1ID = targetOU1ID
 
 	deletableID, err := testutils.CreateUser(testutils.User{
-		Type:             entityTypeOU1Name,
-		OUID: ts.userOU1ID,
-		Attributes:       json.RawMessage(`{"username": "authz-deletable-ou1", "display_name": "Deletable User OU1"}`),
+		Type:       entityTypeOU1Name,
+		OUID:       ts.userOU1ID,
+		Attributes: json.RawMessage(`{"username": "authz-deletable-ou1", "display_name": "Deletable User OU1"}`),
 	})
 	ts.Require().NoError(err, "create deletable user in OU1")
 	ts.deletableUserOU1ID = deletableID
 
 	targetOU2ID, err := testutils.CreateUser(testutils.User{
-		Type:             entityTypeOU2Name,
-		OUID: ts.userOU2ID,
-		Attributes:       json.RawMessage(`{"display_name": "Target User OU2"}`),
+		Type:       entityTypeOU2Name,
+		OUID:       ts.userOU2ID,
+		Attributes: json.RawMessage(`{"display_name": "Target User OU2"}`),
 	})
 	ts.Require().NoError(err, "create target user in OU2")
 	ts.targetUserOU2ID = targetOU2ID
 
-	// ---- 5. Look up the system resource server seeded by bootstrap ----
-	systemRSID, err := testutils.GetResourceServerByName("System")
-	ts.Require().NoError(err, "look up system resource server")
+	// ---- 5. Create a custom resource server declaring the fine-grained system scopes ----
+	// The product ships only the root "system" scope; this reproduces "system:user" and
+	// "system:usertype:view" so the suite can verify resource-level enforcement when configured.
+	const scopedRSIdentifier = "https://authz-test.example.com/user"
+	systemRSID, err := testutils.CreateSystemScopedResourceServer(
+		ts.userOU1ID, "Authz Test RS (user)", scopedRSIdentifier, "user", "usertype")
+	ts.Require().NoError(err, "create scoped resource server")
+	ts.scopedRSID = systemRSID
 
 	// ---- 6. Create a role with system:user permission and assign to the user-manager ----
 	roleID, err := testutils.CreateRole(testutils.Role{
-		Name:               userMgrRoleName,
+		Name: userMgrRoleName,
 		OUID: ts.userOU1ID,
 		Permissions: []testutils.ResourcePermissions{
 			{
@@ -203,6 +195,8 @@ func (ts *UserAuthzTestSuite) SetupSuite() {
 		userMgrUsername,
 		userMgrPassword,
 		true,
+		"",
+		scopedRSIdentifier,
 	)
 	ts.Require().NoError(err, "obtain user-manager token")
 	ts.Require().NotEmpty(tokenResp.AccessToken, "user-manager token must be non-empty")
@@ -218,6 +212,14 @@ func (ts *UserAuthzTestSuite) TearDownSuite() {
 	if ts.userMgrRoleID != "" {
 		if err := testutils.DeleteRole(ts.userMgrRoleID); err != nil {
 			ts.T().Logf("teardown: delete user-manager role: %v", err)
+		}
+	}
+	if ts.scopedRSID != "" {
+		// The scoped resource server owns a nested resource tree, and a plain delete is refused with
+		// RES-1006 while those resources exist. Logging that failure left the tree behind in the
+		// shared database on every run.
+		if err := testutils.DeleteResourceServerWithChildren(ts.scopedRSID); err != nil {
+			ts.T().Errorf("teardown: delete scoped resource server: %v", err)
 		}
 	}
 	for _, id := range []string{ts.targetUserOU1ID, ts.deletableUserOU1ID, ts.userMgrUserID} {
@@ -328,7 +330,7 @@ func (ts *UserAuthzTestSuite) TestGetUserInOtherOU() {
 func (ts *UserAuthzTestSuite) TestCreateUserInOwnOU() {
 	payload, err := json.Marshal(map[string]interface{}{
 		"ouId": ts.userOU1ID,
-		"type":             entityTypeOU1Name,
+		"type": entityTypeOU1Name,
 		"attributes": map[string]interface{}{
 			"username":     "authz-created-user",
 			"display_name": "Created User",
@@ -355,7 +357,7 @@ func (ts *UserAuthzTestSuite) TestCreateUserInOwnOU() {
 func (ts *UserAuthzTestSuite) TestCreateUserInOtherOU() {
 	payload, err := json.Marshal(map[string]interface{}{
 		"ouId": ts.userOU2ID,
-		"type":             entityTypeOU2Name,
+		"type": entityTypeOU2Name,
 		"attributes": map[string]interface{}{
 			"display_name": "Denied User",
 		},
@@ -372,7 +374,7 @@ func (ts *UserAuthzTestSuite) TestCreateUserInOtherOU() {
 // TestUpdateUserInOwnOU verifies the user-manager can update a user in their own OU.
 func (ts *UserAuthzTestSuite) TestUpdateUserInOwnOU() {
 	payload, err := json.Marshal(map[string]interface{}{
-		"type":             entityTypeOU1Name,
+		"type": entityTypeOU1Name,
 		"ouId": ts.userOU1ID,
 		"attributes": map[string]interface{}{
 			"username":     "authz-target-ou1",
@@ -391,7 +393,7 @@ func (ts *UserAuthzTestSuite) TestUpdateUserInOwnOU() {
 // TestUpdateUserInOtherOU verifies the user-manager is denied updating a user in OU2.
 func (ts *UserAuthzTestSuite) TestUpdateUserInOtherOU() {
 	payload, err := json.Marshal(map[string]interface{}{
-		"type":             entityTypeOU2Name,
+		"type": entityTypeOU2Name,
 		"ouId": ts.userOU2ID,
 		"attributes": map[string]interface{}{
 			"display_name": "Should Not Update",
@@ -425,4 +427,72 @@ func (ts *UserAuthzTestSuite) TestDeleteUserInOtherOU() {
 
 	ts.Equal(http.StatusForbidden, resp.StatusCode,
 		"user-manager must not delete a user in a different OU")
+}
+
+// TestCreateUserByPathRequiresRootPermission pins the authorization boundary of the by-path create
+// route, which differs from the direct create above.
+//
+// `POST /users` is gated by `system:user`, so the user-manager can create in their own OU
+// (TestCreateUserInOwnOU). `POST /users/tree/{path...}` has **no entry** in the API permission table
+// (`system/security/permissions.go:244-249` lists GET, PUT and DELETE under `/users/**` but no
+// POST), and unmatched routes fall back to the **root** system permission
+// (`security/service.go:159-166`). The user-manager is therefore refused on this route for their own
+// OU as well as for OU2 — the refusal is the root-permission gate, not OU scoping.
+//
+// Both OUs are asserted deliberately. Testing only OU2 would look like a subtree-scoping test and
+// pass for the wrong reason, since the same caller is refused inside their own subtree.
+func (ts *UserAuthzTestSuite) TestCreateUserByPathRequiresRootPermission() {
+	for _, tc := range []struct {
+		name     string
+		ouHandle string
+		typeName string
+		username string
+	}{
+		{name: "own OU", ouHandle: userAuthzOU1Handle, typeName: entityTypeOU1Name,
+			username: "authz-bypath-own-ou"},
+		{name: "other OU", ouHandle: userAuthzOU2Handle, typeName: entityTypeOU2Name,
+			username: "authz-bypath-other-ou"},
+	} {
+		ts.Run(tc.name, func() {
+			payload, err := json.Marshal(map[string]interface{}{
+				"type":       tc.typeName,
+				"attributes": map[string]interface{}{"username": tc.username},
+			})
+			ts.Require().NoError(err)
+
+			resp := ts.doUser(http.MethodPost, "/users/tree/"+tc.ouHandle, payload)
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			ts.Require().NoError(err)
+			ts.Require().Equal(http.StatusForbidden, resp.StatusCode, "error body: %s", string(body))
+
+			var errResp testutils.ErrorResponse
+			ts.Require().NoError(json.Unmarshal(body, &errResp), "error body: %s", string(body))
+			ts.Equal("AUTH-4030", errResp.Code,
+				"refusal must come from the route permission gate, not from OU scoping")
+
+			ts.Equal(0, ts.countUsersByUsername(tc.username),
+				"a refused by-path create must not persist a user")
+		})
+	}
+}
+
+// countUsersByUsername counts users with the given username using the unrestricted admin client, so
+// the check is not itself subject to the scoped caller's visibility.
+func (ts *UserAuthzTestSuite) countUsersByUsername(username string) int {
+	ts.T().Helper()
+
+	req, err := http.NewRequest(http.MethodGet,
+		userAuthzServerURL+"/users?filter="+url.QueryEscape(`username eq "`+username+`"`), nil)
+	ts.Require().NoError(err)
+
+	resp, err := testutils.GetHTTPClient().Do(req)
+	ts.Require().NoError(err)
+	defer resp.Body.Close()
+	ts.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var listResp testutils.UserListResponse
+	ts.Require().NoError(json.NewDecoder(resp.Body).Decode(&listResp))
+	return listResp.TotalResults
 }

@@ -1,40 +1,41 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard} from '@thunderid/components';
+import {OAuth2Logo, SettingsCard} from '@thunderid/components';
+import {OAuth2GrantTypes, TokenEndpointAuthMethods} from '@thunderid/configure-applications';
+import type {OAuth2Config} from '@thunderid/configure-applications';
+import {useThunderID} from '@thunderid/react';
 import {
-  Alert,
   Box,
   Checkbox,
   Chip,
+  Divider,
   FormControl,
+  FormControlLabel,
   FormLabel,
   ListItemText,
   MenuItem,
   Select,
   Stack,
+  Switch,
+  TextField,
+  Typography,
 } from '@wso2/oxygen-ui';
-import {useTranslation} from 'react-i18next';
+import type {ReactNode} from 'react';
+import {Trans, useTranslation} from 'react-i18next';
 import RedirectURIsSection from './RedirectURIsSection';
-import {OAuth2GrantTypes, type OAuth2Config} from '../../../../applications/models/oauth';
 import {getGrantTypeLabel} from '../../../../applications/utils/getGrantTypeLabel';
-import {applyGrantTypesChange} from '../../../../applications/utils/oauth2Rules';
+import {
+  applyGrantTypesChange,
+  applyTokenEndpointAuthMethodChange,
+  deriveOAuth2Flags,
+} from '../../../../applications/utils/oauth2Rules';
 import {DELEGATED_ONLY_GRANTS} from '../../../constants/delegationGrants';
+import {codeComponents} from '../shared/transCodeComponents';
+
+interface OidcDiscovery {
+  token_endpoint_auth_methods_supported?: string[];
+}
 
 interface OperationModesSectionProps {
   oauth2Config?: OAuth2Config;
@@ -48,12 +49,14 @@ export default function OperationModesSection({
   disabled = false,
 }: OperationModesSectionProps) {
   const {t} = useTranslation();
+  const {discovery} = useThunderID();
 
   if (!oauth2Config) return null;
 
   const isEditable = Boolean(onOAuth2ConfigChange) && !disabled;
   const grantTypes = oauth2Config.grantTypes ?? [];
   const hasDelegatedMode = grantTypes.includes(OAuth2GrantTypes.AUTHORIZATION_CODE);
+  const flags = deriveOAuth2Flags(oauth2Config);
 
   const updateGrants = (next: string[]): void => {
     if (!isEditable) return;
@@ -81,13 +84,55 @@ export default function OperationModesSection({
 
   const selectedGrantTypes = grantTypes.filter((grant) => availableGrantTypes.includes(grant));
 
+  const wellKnown = (discovery as {wellKnown?: OidcDiscovery} | undefined)?.wellKnown;
+  const availableTokenEndpointAuthMethods: string[] = wellKnown?.token_endpoint_auth_methods_supported ?? [];
+  const isTokenMethodLocked = oauth2Config.publicClient === true;
+  const effectiveTokenMethod = oauth2Config.publicClient ? 'none' : (oauth2Config.tokenEndpointAuthMethod ?? '');
+
+  const isPkceForced = flags.isPkceForcedByPublicClient;
+  // PKCE is fully derived from the authorization_code grant for agents — it is never a
+  // manually editable setting, it just reflects whether that grant is selected.
+  const isPkceRequired = isPkceForced || flags.hasAuthorizationCodeGrant;
+
+  const getPkceCaption = (): ReactNode => {
+    if (isPkceForced) {
+      return t(
+        'agents:edit.advanced.security.pkce.forced',
+        'This agent is set up as a public client, so PKCE is required and cannot be turned off.',
+      );
+    }
+    if (flags.isPkceDisabledByGrants) {
+      return (
+        <Trans
+          i18nKey="agents:edit.advanced.security.pkce.notApplicable"
+          defaults="PKCE only applies to the <code>authorization_code</code> grant. Turn that on to enable this setting."
+          components={codeComponents}
+        />
+      );
+    }
+    return t(
+      'agents:edit.advanced.security.pkce.on',
+      'authorization_code is on for this agent, so PKCE is required automatically.',
+    );
+  };
+
+  const handleAudienceChange = (audience: string): void => {
+    onOAuth2ConfigChange?.({
+      token: {
+        ...oauth2Config.token,
+        accessToken: {...oauth2Config.token?.accessToken, defaultAudience: audience},
+      } as OAuth2Config['token'],
+    });
+  };
+
   return (
     <SettingsCard
-      title={t('agents:edit.advanced.oauthAccess.title', 'OAuth Configuration')}
+      title={t('agents:edit.advanced.oauthAccess.title', 'OAuth 2 Configuration')}
       description={t(
         'agents:edit.advanced.oauthAccess.description',
         'The grants and redirect URIs this agent is authorized to use.',
       )}
+      titleIcon={<OAuth2Logo />}
     >
       <Stack spacing={3}>
         <Box>
@@ -95,12 +140,12 @@ export default function OperationModesSection({
             <FormLabel htmlFor="agent-grant-types">
               {t('agents:edit.advanced.oauthAccess.grantTypes.label', 'Grant Types')}
             </FormLabel>
-            <Alert severity="info" sx={{mb: 1.5}}>
+            <Typography variant="caption" color="text.secondary" sx={{display: 'block', mb: 1}}>
               {t(
                 'agents:edit.advanced.oauthAccess.grantTypes.hint',
-                'The greyed-out grants unlock once you turn on Delegated mode in the Flows tab.',
+                'The greyed-out grants unlock once you turn on Delegated mode at the top of this tab.',
               )}
-            </Alert>
+            </Typography>
             <Select
               id="agent-grant-types"
               multiple
@@ -131,6 +176,130 @@ export default function OperationModesSection({
           onOAuth2ConfigChange={onOAuth2ConfigChange}
           disabled={disabled}
         />
+
+        <Divider />
+
+        <FormControl fullWidth size="small">
+          <FormLabel htmlFor="agent_token_endpoint_auth_method">
+            {t('agents:edit.credentials.tokenEndpointAuthMethod.title', 'Client Authentication Method')}
+          </FormLabel>
+          <Select
+            id="agent_token_endpoint_auth_method"
+            displayEmpty
+            disabled={!isEditable || isTokenMethodLocked}
+            value={effectiveTokenMethod}
+            onChange={(e) => onOAuth2ConfigChange?.(applyTokenEndpointAuthMethodChange(oauth2Config, e.target.value))}
+            renderValue={(selected) =>
+              !selected ? (
+                <Typography color="text.secondary" variant="body2">
+                  {t('agents:edit.credentials.tokenEndpointAuthMethod.placeholder', 'Select an auth method')}
+                </Typography>
+              ) : (
+                selected
+              )
+            }
+          >
+            {availableTokenEndpointAuthMethods.map((method) => (
+              <MenuItem
+                key={method}
+                value={method}
+                disabled={method === TokenEndpointAuthMethods.NONE && flags.isPublicClientDisabledByGrants}
+              >
+                {method}
+              </MenuItem>
+            ))}
+          </Select>
+          <Typography variant="caption" color="text.secondary" sx={{mt: 0.5}}>
+            {isTokenMethodLocked
+              ? t(
+                  'agents:edit.credentials.tokenEndpointAuthMethod.lockedHint',
+                  'Set to "none" because this agent is a public client.',
+                )
+              : t(
+                  'agents:edit.credentials.tokenEndpointAuthMethod.hint',
+                  'How this agent proves its identity at protected endpoints.',
+                )}
+          </Typography>
+        </FormControl>
+
+        <Divider />
+
+        <Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={isPkceRequired}
+                disabled
+                inputProps={{'aria-label': t('agents:edit.advanced.security.pkce.label', 'Require PKCE')}}
+              />
+            }
+            label={
+              <Typography variant="subtitle2">
+                {t('agents:edit.advanced.security.pkce.label', 'Require PKCE')}
+              </Typography>
+            }
+          />
+          <Typography variant="caption" color="text.secondary" sx={{display: 'block', ml: '52px'}}>
+            {getPkceCaption()}
+          </Typography>
+        </Box>
+
+        <Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={
+                  flags.isParDisabledByGrants ? false : (oauth2Config.requirePushedAuthorizationRequests ?? false)
+                }
+                disabled={!isEditable || flags.isParDisabledByGrants}
+                onChange={(e) => onOAuth2ConfigChange?.({requirePushedAuthorizationRequests: e.target.checked})}
+                inputProps={{
+                  'aria-label': t('agents:edit.advanced.security.par.label', 'Require Pushed Authorization Requests'),
+                }}
+              />
+            }
+            label={
+              <Typography variant="subtitle2">
+                {t('agents:edit.advanced.security.par.label', 'Require Pushed Authorization Requests')}
+              </Typography>
+            }
+          />
+          <Typography variant="caption" color="text.secondary" sx={{display: 'block', ml: '52px'}}>
+            {flags.isParDisabledByGrants ? (
+              <Trans
+                i18nKey="agents:edit.advanced.security.par.notApplicable"
+                defaults="Pushed Authorization Requests only apply to the <code>authorization_code</code> grant. Turn that on to enable this setting."
+                components={codeComponents}
+              />
+            ) : (
+              t(
+                'agents:edit.advanced.security.par.hint',
+                'Require this agent to push its authorization request to the PAR endpoint before redirecting a user to sign in.',
+              )
+            )}
+          </Typography>
+        </Box>
+
+        <Divider />
+
+        <FormControl fullWidth size="small">
+          <FormLabel htmlFor="agent_default_audience">
+            {t('applications:edit.advanced.audience.label', 'Default audience (aud)')}
+          </FormLabel>
+          <TextField
+            id="agent_default_audience"
+            size="small"
+            fullWidth
+            value={oauth2Config.token?.accessToken?.defaultAudience ?? ''}
+            disabled={!isEditable}
+            onChange={(e) => handleAudienceChange(e.target.value.trim())}
+            inputProps={{maxLength: 2048}}
+            placeholder={t('applications:edit.advanced.audience.placeholder', 'e.g. https://api.example.com')}
+            helperText={t('applications:edit.advanced.audience.hint', 'Leave empty to use the {{entity}} client ID.', {
+              entity: 'agent',
+            })}
+          />
+        </FormControl>
       </Stack>
     </SettingsCard>
   );

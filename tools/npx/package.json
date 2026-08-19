@@ -1,7 +1,7 @@
 {
   "private": false,
   "name": "thunderid",
-  "version": "0.2.0",
+  "version": "1.0.2",
   "description": "ThunderID: Auth for Modern Apps and Agents — instantly via npx",
   "keywords": [
     "thunderid",
@@ -12,10 +12,13 @@
   "bugs": {
     "url": "https://github.com/thunder-id/thunderid/issues"
   },
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "bin": {
     "thunderid": "./bin/thunderid.js"
+  },
+  "engines": {
+    "node": ">=22.23.1"
   },
   "files": [
     "bin",

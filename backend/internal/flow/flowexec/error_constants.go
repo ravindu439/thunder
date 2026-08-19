@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -240,16 +225,61 @@ var ErrorAttestationInvalid = tidcommon.ServiceError{
 	},
 }
 
-// ErrorSignOutFlowDisabled defines the error response for sign-out flow disabled errors.
-var ErrorSignOutFlowDisabled = tidcommon.ServiceError{
+// ErrorAttestationNotConfigured defines the error when a mobile application initiates a flow but has
+// no platform attestation configured. Mobile apps must configure attestation to access the flow APIs.
+var ErrorAttestationNotConfigured = tidcommon.ServiceError{
 	Code: "FES-1016",
 	Type: tidcommon.ClientErrorType,
 	Error: tidcommon.I18nMessage{
-		Key:          "error.flowexecservice.signout_not_allowed",
-		DefaultValue: "Sign out not allowed",
+		Key:          "error.flowexecservice.attestation_not_configured",
+		DefaultValue: "Attestation not configured",
 	},
 	ErrorDescription: tidcommon.I18nMessage{
-		Key:          "error.flowexecservice.signout_not_allowed_description",
-		DefaultValue: "Sign out flow is disabled for the application",
+		Key:          "error.flowexecservice.attestation_not_configured_description",
+		DefaultValue: "Mobile applications must configure platform attestation to initiate a flow",
+	},
+}
+
+// ErrorAdministrationAuthenticationRequired defines the error returned when an administrative
+// flow is invoked without an authenticated caller.
+var ErrorAdministrationAuthenticationRequired = tidcommon.ServiceError{
+	Code: "FES-1017",
+	Type: tidcommon.ClientErrorType,
+	Error: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.administration_authentication_required",
+		DefaultValue: "Authentication required",
+	},
+	ErrorDescription: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.administration_authentication_required_description",
+		DefaultValue: "Administrative flows require an authenticated caller",
+	},
+}
+
+// ErrorFlowIDExecutionNotPermitted is returned when direct execution by ID targets a non-administrative flow.
+var ErrorFlowIDExecutionNotPermitted = tidcommon.ServiceError{
+	Code: "FES-1018",
+	Type: tidcommon.ClientErrorType,
+	Error: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.flow_id_execution_not_permitted",
+		DefaultValue: "Flow execution not permitted",
+	},
+	ErrorDescription: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.flow_id_execution_not_permitted_description",
+		DefaultValue: "The selected flow cannot be executed directly by its ID",
+	},
+}
+
+// ErrorAdministrationPermissionRequired defines the error returned when an authenticated caller
+// invokes an administrative flow without the root system permission.
+var ErrorAdministrationPermissionRequired = tidcommon.ServiceError{
+	Code: "FES-1019",
+	Type: tidcommon.ClientErrorType,
+	Error: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.administration_permission_required",
+		DefaultValue: "Insufficient permissions",
+	},
+	ErrorDescription: tidcommon.I18nMessage{
+		Key:          "error.flowexecservice.administration_permission_required_description",
+		DefaultValue: "Administrative flows require the system permission",
 	},
 }

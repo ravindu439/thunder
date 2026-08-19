@@ -9,10 +9,12 @@
 .cache-loader
 
 # Build-time generated artifacts (produced by docs/scripts/prebuild.mjs)
-static/api/*/combined.yaml
-static/api/*/postman/
+static/api/next/combined.yaml
+static/api/next/postman/
 static/data/releases.json
 static/data/sdk-releases.json
+static/data/contributors.json
+static/docs/
 
 # Misc
 .DS_Store

@@ -1,33 +1,25 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {SettingsCard} from '@thunderid/components';
+import {QueryErrorNotice, SettingsCard} from '@thunderid/components';
 import {useGetAgentType, useGetAgentTypes} from '@thunderid/configure-agent-types';
 import {useResolveDisplayName} from '@thunderid/hooks';
 import {Box, Chip, CircularProgress, Stack, Typography} from '@wso2/oxygen-ui';
 import {Tag} from '@wso2/oxygen-ui-icons-react';
-import type {JSX} from 'react';
+import {useCallback, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import type {Agent} from '../../../models/agent';
 import EmptyState from '../shared/EmptyState';
 
 interface AttributesSummarySectionProps {
   agent: Agent;
+  /**
+   * 'settings' (default) wraps the content in a SettingsCard, matching the Attributes tab's
+   * own fallback for read-only agents. 'bare' renders just the attribute values with no card
+   * chrome or title, as a compact chip list — for embedding inside another card (e.g. the
+   * Overview tab), so it reads as a quick preview rather than a second settings section.
+   */
+  variant?: 'settings' | 'bare';
 }
 
 const formatValue = (value: unknown): string => {
@@ -39,16 +31,27 @@ const formatValue = (value: unknown): string => {
 };
 
 /**
- * Read-only preview of this agent's attribute values, with no edit affordance — used on the
- * General tab. The Attributes tab is where values are actually edited.
+ * Read-only preview of this agent's attribute values, with no edit affordance. The Attributes
+ * tab is where values are actually edited.
  */
-export default function AttributesSummarySection({agent}: AttributesSummarySectionProps): JSX.Element {
+export default function AttributesSummarySection({
+  agent,
+  variant = 'settings',
+}: AttributesSummarySectionProps): JSX.Element {
   const {t} = useTranslation();
   const {resolveDisplayName} = useResolveDisplayName({handlers: {t}});
 
   const {data: agentTypesData} = useGetAgentTypes();
   const matchedSchema = agentTypesData?.types?.find((s) => s.name === agent.type);
-  const {data: schemaDetails, isLoading} = useGetAgentType(matchedSchema?.id);
+  const {data: schemaDetails, isLoading, error, refetch} = useGetAgentType(matchedSchema?.id);
+
+  // Resolves an error through the `agents` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agents:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `agents:${key}`, options),
+    [t],
+  );
 
   const attributes = agent.attributes ?? {};
 
@@ -60,6 +63,63 @@ export default function AttributesSummarySection({agent}: AttributesSummarySecti
     return key;
   };
 
+  const formatChipValue = (value: unknown): string =>
+    typeof value === 'boolean'
+      ? value
+        ? t('common:actions.yes', 'Yes')
+        : t('common:actions.no', 'No')
+      : formatValue(value);
+
+  const content = isLoading ? (
+    <Box sx={{display: 'flex', justifyContent: 'center', py: variant === 'bare' ? 2 : 4}}>
+      <CircularProgress size={32} />
+    </Box>
+  ) : error ? (
+    <QueryErrorNotice error={error} t={tForErrors} variant="inline" onRetry={() => void refetch()} />
+  ) : Object.keys(attributes).length > 0 ? (
+    variant === 'bare' ? (
+      <Box sx={{display: 'flex', flexWrap: 'wrap', gap: 1}}>
+        {Object.entries(attributes).map(([key, value]) => (
+          <Chip
+            key={key}
+            label={`${labelFor(key)}: ${formatChipValue(value)}`}
+            size="small"
+            variant="outlined"
+            sx={{fontWeight: 500}}
+          />
+        ))}
+      </Box>
+    ) : (
+      <Stack spacing={2}>
+        {Object.entries(attributes).map(([key, value]) => (
+          <Box key={key}>
+            <Typography variant="caption" color="text.secondary">
+              {labelFor(key)}
+            </Typography>
+            {typeof value === 'boolean' ? (
+              <Box>
+                <Chip
+                  label={value ? t('common:actions.yes', 'Yes') : t('common:actions.no', 'No')}
+                  size="small"
+                  color={value ? 'success' : 'default'}
+                  variant="outlined"
+                />
+              </Box>
+            ) : (
+              <Typography variant="body1">{formatValue(value)}</Typography>
+            )}
+          </Box>
+        ))}
+      </Stack>
+    )
+  ) : (
+    <EmptyState icon={<Tag size={28} />} message={t('agents:edit.attributes.empty', 'No attributes available.')} />
+  );
+
+  if (variant === 'bare') {
+    return content;
+  }
+
   return (
     <SettingsCard
       title={t('agents:edit.general.sections.attributes.title', 'Attributes')}
@@ -68,35 +128,7 @@ export default function AttributesSummarySection({agent}: AttributesSummarySecti
         "A preview of this agent's attribute values. Manage them from the Attributes tab.",
       )}
     >
-      {isLoading ? (
-        <Box sx={{display: 'flex', justifyContent: 'center', py: 4}}>
-          <CircularProgress size={32} />
-        </Box>
-      ) : Object.keys(attributes).length > 0 ? (
-        <Stack spacing={2}>
-          {Object.entries(attributes).map(([key, value]) => (
-            <Box key={key}>
-              <Typography variant="caption" color="text.secondary">
-                {labelFor(key)}
-              </Typography>
-              {typeof value === 'boolean' ? (
-                <Box>
-                  <Chip
-                    label={value ? t('common:actions.yes', 'Yes') : t('common:actions.no', 'No')}
-                    size="small"
-                    color={value ? 'success' : 'default'}
-                    variant="outlined"
-                  />
-                </Box>
-              ) : (
-                <Typography variant="body1">{formatValue(value)}</Typography>
-              )}
-            </Box>
-          ))}
-        </Stack>
-      ) : (
-        <EmptyState icon={<Tag size={28} />} message={t('agents:edit.attributes.empty', 'No attributes available.')} />
-      )}
+      {content}
     </SettingsCard>
   );
 }

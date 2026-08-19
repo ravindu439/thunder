@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package connection
 
@@ -25,8 +10,8 @@ import (
 )
 
 // oauthConnectionRequest is the create/update payload for a generic OAuth 2.0 connection.
-// Unlike OIDC, there is no id_token: the user profile is always fetched from
-// userInfoEndpoint, so that field is required here.
+// Unlike OIDC, there is no id_token: user attributes come from the provider's own profile API
+// (userInfoEndpoint), which is optional since some providers carry the subject in a JWT access token.
 type oauthConnectionRequest struct {
 	Name                  string   `json:"name"`
 	Description           string   `json:"description,omitempty"`
@@ -35,8 +20,7 @@ type oauthConnectionRequest struct {
 	RedirectURI           string   `json:"redirectUri"`
 	AuthorizationEndpoint string   `json:"authorizationEndpoint"`
 	TokenEndpoint         string   `json:"tokenEndpoint"`
-	UserInfoEndpoint      string   `json:"userInfoEndpoint"`
-	LogoutEndpoint        string   `json:"logoutEndpoint,omitempty"`
+	UserInfoEndpoint      string   `json:"userInfoEndpoint,omitempty"`
 	Scopes                []string `json:"scopes,omitempty"`
 	Prompt                string   `json:"prompt,omitempty"`
 
@@ -55,7 +39,6 @@ type oauthConnectionResponse struct {
 	AuthorizationEndpoint string   `json:"authorizationEndpoint,omitempty"`
 	TokenEndpoint         string   `json:"tokenEndpoint,omitempty"`
 	UserInfoEndpoint      string   `json:"userInfoEndpoint,omitempty"`
-	LogoutEndpoint        string   `json:"logoutEndpoint,omitempty"`
 	Scopes                []string `json:"scopes,omitempty"`
 	Prompt                string   `json:"prompt,omitempty"`
 
@@ -76,7 +59,6 @@ func oauthToIDPDTO(req oauthConnectionRequest) (*providers.IDPDTO, error) {
 		{idp.PropAuthorizationEndpoint, req.AuthorizationEndpoint, false},
 		{idp.PropTokenEndpoint, req.TokenEndpoint, false},
 		{idp.PropUserInfoEndpoint, req.UserInfoEndpoint, false},
-		{idp.PropLogoutEndpoint, req.LogoutEndpoint, false},
 		{idp.PropScopes, joinScopes(req.Scopes), false},
 		{idp.PropPrompt, req.Prompt, false},
 	}
@@ -110,7 +92,6 @@ func oauthFromIDPDTO(dto providers.IDPDTO) (oauthConnectionResponse, error) {
 		AuthorizationEndpoint: values[idp.PropAuthorizationEndpoint],
 		TokenEndpoint:         values[idp.PropTokenEndpoint],
 		UserInfoEndpoint:      values[idp.PropUserInfoEndpoint],
-		LogoutEndpoint:        values[idp.PropLogoutEndpoint],
 		Scopes:                splitScopes(values[idp.PropScopes]),
 		Prompt:                values[idp.PropPrompt],
 	}

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package utils
 
@@ -125,25 +110,75 @@ func (suite *ValueUtilTestSuite) TestToFloat64_Failure() {
 	}
 }
 
-func (suite *ValueUtilTestSuite) TestSecondsToMinutes() {
+func (suite *ValueUtilTestSuite) TestToBool_Success() {
+	testCases := []struct {
+		name     string
+		input    interface{}
+		expected bool
+	}{
+		{"bool true", true, true},
+		{"bool false", false, false},
+		{"string true", "true", true},
+		{"string false", "false", false},
+		{"string 1", "1", true},
+		{"string 0", "0", false},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			result, ok := ToBool(tc.input)
+			assert.True(suite.T(), ok)
+			assert.Equal(suite.T(), tc.expected, result)
+		})
+	}
+}
+
+func (suite *ValueUtilTestSuite) TestToBool_Failure() {
+	testCases := []struct {
+		name  string
+		input interface{}
+	}{
+		{"invalid string", "not-a-bool"},
+		{"int", 123},
+		{"float64", float64(1.0)},
+		{"nil", nil},
+		{"slice", []int{1, 2, 3}},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			result, ok := ToBool(tc.input)
+			assert.False(suite.T(), ok)
+			assert.False(suite.T(), result)
+		})
+	}
+}
+
+func (suite *ValueUtilTestSuite) TestFormatExpiryDuration() {
 	testCases := []struct {
 		name     string
 		seconds  int64
 		expected string
 	}{
-		{"Zero seconds", 0, "0"},
-		{"30 seconds rounds down to 0", 30, "0"},
-		{"60 seconds", 60, "1"},
-		{"90 seconds rounds down to 1", 90, "1"},
-		{"120 seconds", 120, "2"},
-		{"300 seconds", 300, "5"},
-		{"3600 seconds", 3600, "60"},
-		{"86400 seconds", 86400, "1440"},
+		{"Zero seconds", 0, "0 seconds"},
+		{"Negative seconds", -30, "0 seconds"},
+		{"One second is singular", 1, "1 second"},
+		{"Sub minute stays in seconds", 30, "30 seconds"},
+		{"59 seconds stays in seconds", 59, "59 seconds"},
+		{"60 seconds is singular minute", 60, "1 minute"},
+		{"90 seconds is not a whole minute", 90, "90 seconds"},
+		{"120 seconds", 120, "2 minutes"},
+		{"300 seconds", 300, "5 minutes"},
+		{"600 seconds", 600, "10 minutes"},
+		{"3600 seconds is singular hour", 3600, "1 hour"},
+		{"5400 seconds is not a whole hour", 5400, "90 minutes"},
+		{"7200 seconds", 7200, "2 hours"},
+		{"86400 seconds", 86400, "24 hours"},
 	}
 
 	for _, tc := range testCases {
 		suite.Run(tc.name, func() {
-			result := SecondsToMinutes(tc.seconds)
+			result := FormatExpiryDuration(tc.seconds)
 			assert.Equal(suite.T(), tc.expected, result)
 		})
 	}

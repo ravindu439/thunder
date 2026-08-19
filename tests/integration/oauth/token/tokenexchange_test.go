@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package token
 
@@ -223,6 +208,7 @@ func (ts *TokenExchangeTestSuite) createTestApplication() string {
 		"name":                      tokenExchangeAppName,
 		"description":               "Application for token exchange integration tests",
 		"ouId":                      ts.oUID,
+		"type":                      "fullstack",
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"token-test-person"},
 		"inboundAuthConfig": []map[string]interface{}{
@@ -703,6 +689,7 @@ func (ts *TokenExchangeTestSuite) TestTokenExchange_ApplicationNotRegisteredForG
 	app := map[string]interface{}{
 		"name":                      tokenExchangeAppName + "_no_te",
 		"description":               "Application without token exchange",
+		"type":                      "fullstack",
 		"isRegistrationFlowEnabled": false,
 		"allowedUserTypes":          []string{"token-test-person"},
 		"inboundAuthConfig": []map[string]interface{}{
@@ -881,5 +868,5 @@ func (ts *TokenExchangeTestSuite) TestTokenExchange_SubjectTokenUnsupportedIssue
 	ts.Require().NoError(err)
 	ts.Equal(http.StatusBadRequest, statusCode)
 	ts.Equal("invalid_request", resp.Error)
-	ts.Contains(resp.ErrorDescription, "Invalid subject_token")
+	ts.Contains(resp.ErrorDescription, "issuer is not registered as a trusted token exchange issuer")
 }

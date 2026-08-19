@@ -1,0 +1,33 @@
+name: Merge LCOV Reports
+description: Merges the LCOV tracefiles produced by a sharded test run into a single report.
+
+inputs:
+  reports-dir:
+    description: Directory searched recursively for the LCOV tracefiles to merge.
+    required: true
+  output-file:
+    description: Path of the merged LCOV tracefile to write.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: 🧩 Merge LCOV tracefiles
+      shell: bash
+      env:
+        REPORTS_DIR: ${{ inputs.reports-dir }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: |
+        set -euo pipefail
+        mapfile -t reports < <(find "$REPORTS_DIR" -type f -name '*.info' | sort)
+        # Fail rather than write an empty report: a silently empty merge would
+        # read downstream as "no code covered" and sink patch coverage.
+        if [ "${#reports[@]}" -eq 0 ]; then
+          echo "❌ No LCOV tracefiles found under $REPORTS_DIR"
+          exit 1
+        fi
+        echo "Merging ${#reports[@]} tracefile(s):"
+        printf '  %s\n' "${reports[@]}"
+        mkdir -p "$(dirname "$OUTPUT_FILE")"
+        awk -f "$GITHUB_ACTION_PATH/merge-lcov.awk" "${reports[@]}" > "$OUTPUT_FILE"
+        echo "✅ Wrote $OUTPUT_FILE ($(grep -c '^SF:' "$OUTPUT_FILE") source files)"

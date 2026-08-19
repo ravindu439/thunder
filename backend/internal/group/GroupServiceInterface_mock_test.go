@@ -935,6 +935,76 @@ func (_c *GroupServiceInterfaceMock_GetResourceDependencies_Call) RunAndReturn(r
 	return _c
 }
 
+// GetTransitiveAncestorGroups provides a mock function for the type GroupServiceInterfaceMock
+func (_mock *GroupServiceInterfaceMock) GetTransitiveAncestorGroups(ctx context.Context, groupID string) ([]string, *common.ServiceError) {
+	ret := _mock.Called(ctx, groupID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTransitiveAncestorGroups")
+	}
+
+	var r0 []string
+	var r1 *common.ServiceError
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) ([]string, *common.ServiceError)); ok {
+		return returnFunc(ctx, groupID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) []string); ok {
+		r0 = returnFunc(ctx, groupID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) *common.ServiceError); ok {
+		r1 = returnFunc(ctx, groupID)
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(*common.ServiceError)
+		}
+	}
+	return r0, r1
+}
+
+// GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTransitiveAncestorGroups'
+type GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call struct {
+	*mock.Call
+}
+
+// GetTransitiveAncestorGroups is a helper method to define mock.On call
+//   - ctx context.Context
+//   - groupID string
+func (_e *GroupServiceInterfaceMock_Expecter) GetTransitiveAncestorGroups(ctx interface{}, groupID interface{}) *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call {
+	return &GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call{Call: _e.mock.On("GetTransitiveAncestorGroups", ctx, groupID)}
+}
+
+func (_c *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call) Run(run func(ctx context.Context, groupID string)) *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call) Return(strings []string, serviceError *common.ServiceError) *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call {
+	_c.Call.Return(strings, serviceError)
+	return _c
+}
+
+func (_c *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call) RunAndReturn(run func(ctx context.Context, groupID string) ([]string, *common.ServiceError)) *GroupServiceInterfaceMock_GetTransitiveAncestorGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveGroupMembers provides a mock function for the type GroupServiceInterfaceMock
 func (_mock *GroupServiceInterfaceMock) RemoveGroupMembers(ctx context.Context, groupID string, members []Member) (*Group, *common.ServiceError) {
 	ret := _mock.Called(ctx, groupID, members)

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package sysauthz provides system-level authorization services for protecting
 // system operations management.
@@ -51,12 +36,35 @@ type SystemAuthorizationServiceInterface interface {
 	// been initialized, completing the two-phase initialization that avoids an import cycle
 	// between sysauthz (which ou already imports) and the ou package itself.
 	SetOUHierarchyResolver(resolver OUHierarchyResolver)
+
+	// CanGrantPermissions refuses an operation that would confer permissions the caller does not
+	// itself hold. Use it where the granted permissions are already known, such as when defining a
+	// role's permission list.
+	//
+	// A nil return permits the operation. Any non-nil ServiceError is a refusal, including
+	// InternalServerError: an incomplete check is not a pass.
+	CanGrantPermissions(ctx context.Context, granted security.PermissionSet) *tidcommon.ServiceError
+
+	// CanGrantMembership refuses adding or removing a member of a group or role whose permissions
+	// the caller does not itself hold. It resolves what the container confers, including through
+	// group nesting.
+	CanGrantMembership(ctx context.Context, principalType PrincipalType,
+		containerID string) *tidcommon.ServiceError
+
+	// SetPermissionResolver injects the effective-permission resolver used by the two checks above.
+	// It must be called once at startup after the role and group packages are initialized,
+	// completing the same two-phase initialization used by SetOUHierarchyResolver. Until it is
+	// called, both checks refuse.
+	SetPermissionResolver(resolver PermissionResolver)
 }
 
 // systemAuthorizationService is the default implementation of SystemAuthorizationServiceInterface.
 type systemAuthorizationService struct {
 	logger   *log.Logger
 	policies *policies
+	// permissionResolver enumerates effective permissions for the grant checks. nil until
+	// SetPermissionResolver is called at startup, in which case those checks refuse.
+	permissionResolver PermissionResolver
 }
 
 type policies struct {

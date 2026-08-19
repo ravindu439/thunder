@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -27,19 +12,17 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/resourceindicators"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // clientCredentialsGrantHandler handles the client credentials grant type.
 type clientCredentialsGrantHandler struct {
-	tokenBuilder        tokenservice.TokenBuilderInterface
-	ouService           providers.OrganizationUnitProvider
-	authzService        providers.AuthorizationProvider
-	actorProvider       providers.ActorProvider
-	resourceService     providers.ResourceServerProvider
-	serverConfigService serverconfig.ServerConfigService
+	tokenBuilder    tokenservice.TokenBuilderInterface
+	ouService       providers.OrganizationUnitProvider
+	authzService    providers.AuthorizationProvider
+	actorProvider   providers.ActorProvider
+	resourceService providers.ResourceServerProvider
 }
 
 // newClientCredentialsGrantHandler creates a new instance of ClientCredentialsGrantHandler.
@@ -49,15 +32,13 @@ func newClientCredentialsGrantHandler(
 	authzService providers.AuthorizationProvider,
 	actorProvider providers.ActorProvider,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
 ) GrantHandlerInterface {
 	return &clientCredentialsGrantHandler{
-		tokenBuilder:        tokenBuilder,
-		ouService:           ouService,
-		authzService:        authzService,
-		actorProvider:       actorProvider,
-		resourceService:     resourceService,
-		serverConfigService: serverConfigService,
+		tokenBuilder:    tokenBuilder,
+		ouService:       ouService,
+		authzService:    authzService,
+		actorProvider:   actorProvider,
+		resourceService: resourceService,
 	}
 }
 
@@ -89,14 +70,15 @@ func (h *clientCredentialsGrantHandler) HandleGrant(ctx context.Context, tokenRe
 	// A client_credentials token carries no OIDC scopes, so every requested scope is a permission
 	// scope. Bind the token to a single resource server (RFC 8707 resource or the configured
 	// default). A request with neither scopes nor a resource is not bound to a resource server: its
-	// audience is the client_id and it carries no scopes.
+	// audience is the app's configured default audiences (falling back to the client_id) and it
+	// carries no scopes.
 	targetRS, errResp := resourceindicators.ResolveAudienceBinding(
-		ctx, h.resourceService, h.serverConfigService, tokenRequest.Resources, scopes)
+		ctx, h.resourceService, tokenRequest.Resources, scopes)
 	if errResp != nil {
 		return nil, errResp
 	}
 
-	audiences := []string{tokenRequest.ClientID}
+	audiences := []string{oauthApp.ResolveDefaultAudience(tokenRequest.ClientID)}
 	if targetRS != nil {
 		audiences = []string{targetRS.Identifier}
 

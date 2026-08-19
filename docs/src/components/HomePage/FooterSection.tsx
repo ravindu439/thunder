@@ -1,27 +1,12 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import ProductName from '@site/src/components/ProductName';
 import {Box, ColorSchemeImage, Container, Link, Typography, useTheme} from '@wso2/oxygen-ui';
 import {WSO2} from '@wso2/oxygen-ui-icons-react';
 import {JSX} from 'react';
 import useIsDarkMode from '../../hooks/useIsDarkMode';
 import useScrollAnimation from '../../hooks/useScrollAnimation';
+import ProductName from '@site/src/components/ProductName';
 
 export default function FooterSection(): JSX.Element {
   const isDark = useIsDarkMode();
@@ -88,7 +73,7 @@ export default function FooterSection(): JSX.Element {
             >
               Open Wallet Foundation (OWF)
             </Link>{' '}
-            project
+            Growth project
           </Typography>
 
           <Box

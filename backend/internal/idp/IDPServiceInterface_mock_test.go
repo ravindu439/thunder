@@ -40,6 +40,52 @@ func (_m *IDPServiceInterfaceMock) EXPECT() *IDPServiceInterfaceMock_Expecter {
 	return &IDPServiceInterfaceMock_Expecter{mock: &_m.Mock}
 }
 
+// ApplySchemaAwareDefaults provides a mock function for the type IDPServiceInterfaceMock
+func (_mock *IDPServiceInterfaceMock) ApplySchemaAwareDefaults(ctx context.Context, idp *providers.IDPDTO) {
+	_mock.Called(ctx, idp)
+	return
+}
+
+// IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ApplySchemaAwareDefaults'
+type IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call struct {
+	*mock.Call
+}
+
+// ApplySchemaAwareDefaults is a helper method to define mock.On call
+//   - ctx context.Context
+//   - idp *providers.IDPDTO
+func (_e *IDPServiceInterfaceMock_Expecter) ApplySchemaAwareDefaults(ctx interface{}, idp interface{}) *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call {
+	return &IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call{Call: _e.mock.On("ApplySchemaAwareDefaults", ctx, idp)}
+}
+
+func (_c *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call) Run(run func(ctx context.Context, idp *providers.IDPDTO)) *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *providers.IDPDTO
+		if args[1] != nil {
+			arg1 = args[1].(*providers.IDPDTO)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call) Return() *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call) RunAndReturn(run func(ctx context.Context, idp *providers.IDPDTO)) *IDPServiceInterfaceMock_ApplySchemaAwareDefaults_Call {
+	_c.Run(run)
+	return _c
+}
+
 // CreateIdentityProvider provides a mock function for the type IDPServiceInterfaceMock
 func (_mock *IDPServiceInterfaceMock) CreateIdentityProvider(ctx context.Context, idp *providers.IDPDTO) (*providers.IDPDTO, *common.ServiceError) {
 	ret := _mock.Called(ctx, idp)

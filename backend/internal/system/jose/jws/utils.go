@@ -1,40 +1,16 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package jws provides functionalities for handling JSON Web Signatures (JWS).
 package jws
 
 import (
-	"crypto"
-	"crypto/ecdh"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/elliptic"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
-
-	"github.com/thunder-id/thunderid/internal/system/cryptolib"
 )
 
 // privateJWKMembers lists JWK parameter names that indicate private-key material.
@@ -58,157 +34,6 @@ func DecodeHeader(token string) (map[string]interface{}, error) {
 	}
 
 	return header, nil
-}
-
-// MapAlgorithmToSignAlg maps JWS alg header values to internal SignAlgorithm.
-func MapAlgorithmToSignAlg(jwsAlg Algorithm) (cryptolib.SignAlgorithm, error) {
-	signAlg, err := cryptolib.SignAlgorithmFor(cryptolib.Algorithm(jwsAlg))
-	if err != nil {
-		return "", fmt.Errorf("unsupported JWS alg: %s", jwsAlg)
-	}
-	return signAlg, nil
-}
-
-// JWKToPublicKey converts a JWK map to a crypto.PublicKey supporting RSA, EC, and Ed25519.
-func JWKToPublicKey(jwk map[string]interface{}) (crypto.PublicKey, error) {
-	kty, ok := jwk["kty"].(string)
-	if !ok {
-		return nil, errors.New("JWK missing kty")
-	}
-
-	switch kty {
-	case "RSA":
-		return jwkToRSAPublicKey(jwk)
-	case "EC":
-		return jwkToECDSAPublicKey(jwk)
-	case "OKP":
-		return jwkToOKPPublicKey(jwk)
-	case "AKP":
-		return jwkToAKPPublicKey(jwk)
-	default:
-		return nil, fmt.Errorf("unsupported JWK kty: %s", kty)
-	}
-}
-
-// jwkToAKPPublicKey converts an AKP (Algorithm Key Pair) JWK to an ML-DSA public
-// key, per RFC 9964. The alg member identifies the ML-DSA parameter set and pub
-// carries the base64url-encoded raw public key.
-func jwkToAKPPublicKey(jwk map[string]interface{}) (crypto.PublicKey, error) {
-	alg, algOK := jwk["alg"].(string)
-	pubStr, pubOK := jwk["pub"].(string)
-	if !algOK || !pubOK {
-		return nil, errors.New("JWK missing AKP alg or pub")
-	}
-	pubBytes, err := base64.RawURLEncoding.DecodeString(pubStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode AKP pub: %w", err)
-	}
-	pub, err := cryptolib.MLDSAPublicKeyFromBytes(cryptolib.Algorithm(alg), pubBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse AKP public key: %w", err)
-	}
-	return pub, nil
-}
-
-// jwkToRSAPublicKey converts a JWK to an RSA public key.
-func jwkToRSAPublicKey(jwk map[string]interface{}) (*rsa.PublicKey, error) {
-	nStr, nOK := jwk["n"].(string)
-	eStr, eOK := jwk["e"].(string)
-	if !nOK || !eOK {
-		return nil, errors.New("JWK missing RSA modulus or exponent")
-	}
-
-	nBytes, err := base64.RawURLEncoding.DecodeString(nStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode RSA modulus: %w", err)
-	}
-	eBytes, err := base64.RawURLEncoding.DecodeString(eStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode RSA exponent: %w", err)
-	}
-
-	n := new(big.Int).SetBytes(nBytes)
-	e := new(big.Int).SetBytes(eBytes).Int64()
-	if e <= 0 {
-		return nil, errors.New("invalid RSA exponent")
-	}
-
-	return &rsa.PublicKey{N: n, E: int(e)}, nil
-}
-
-// jwkToECDSAPublicKey converts a JWK to an ECDSA public key for JWS signature verification.
-func jwkToECDSAPublicKey(jwk map[string]interface{}) (*ecdsa.PublicKey, error) {
-	crv, crvOK := jwk["crv"].(string)
-	xStr, xOK := jwk["x"].(string)
-	yStr, yOK := jwk["y"].(string)
-	if !crvOK || !xOK || !yOK {
-		return nil, errors.New("JWK missing EC parameters")
-	}
-
-	var curve elliptic.Curve
-	var ecdhCurve ecdh.Curve
-	var expectedKeySize int
-	switch crv {
-	case P256:
-		curve, ecdhCurve, expectedKeySize = elliptic.P256(), ecdh.P256(), 32
-	case P384:
-		curve, ecdhCurve, expectedKeySize = elliptic.P384(), ecdh.P384(), 48
-	case P521:
-		curve, ecdhCurve, expectedKeySize = elliptic.P521(), ecdh.P521(), 66
-	default:
-		return nil, fmt.Errorf("unsupported EC curve: %s", crv)
-	}
-
-	xBytes, err := base64.RawURLEncoding.DecodeString(xStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode EC x: %w", err)
-	}
-	yBytes, err := base64.RawURLEncoding.DecodeString(yStr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode EC y: %w", err)
-	}
-
-	if len(xBytes) != expectedKeySize || len(yBytes) != expectedKeySize {
-		return nil, errors.New("invalid EC coordinate length")
-	}
-
-	// Use crypto/ecdh to validate the point is on the curve.
-	uncompressed := make([]byte, 1+2*expectedKeySize)
-	uncompressed[0] = 0x04
-	copy(uncompressed[1:], xBytes)
-	copy(uncompressed[1+expectedKeySize:], yBytes)
-	if _, err := ecdhCurve.NewPublicKey(uncompressed); err != nil {
-		return nil, errors.New("point not on curve")
-	}
-
-	return &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
-}
-
-// jwkToOKPPublicKey converts a JWK to an OKP public key.
-func jwkToOKPPublicKey(jwk map[string]interface{}) (ed25519.PublicKey, error) {
-	crv, crvOK := jwk["crv"].(string)
-	xStr, xOK := jwk["x"].(string)
-	if !crvOK || !xOK {
-		return nil, errors.New("JWK missing OKP parameters")
-	}
-
-	switch crv {
-	case "Ed25519":
-		xBytes, err := base64.RawURLEncoding.DecodeString(xStr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode Ed25519 x: %w", err)
-		}
-		if l := len(xBytes); l != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("invalid Ed25519 public key length: %d", l)
-		}
-		return ed25519.PublicKey(xBytes), nil
-	default:
-		return nil, fmt.Errorf("unsupported OKP curve: %s", crv)
-	}
 }
 
 // ContainsPrivateMember reports whether the JWK contains any private-key

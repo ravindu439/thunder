@@ -1,19 +1,5 @@
--- ----------------------------------------------------------------------------
--- Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
---
--- WSO2 LLC. licenses this file to you under the Apache License,
--- Version 2.0 (the "License"); you may not use this file except
--- in compliance with the License. You may obtain a copy of the License at
---
--- http://www.apache.org/licenses/LICENSE-2.0
---
--- Unless required by applicable law or agreed to in writing,
--- software distributed under the License is distributed on an
--- "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
--- KIND, either express or implied. See the License for the
--- specific language governing permissions and limitations
--- under the License.
--- ----------------------------------------------------------------------------
+-- Copyright 2026 The ThunderID Authors
+-- SPDX-License-Identifier: Apache-2.0
 
 -- Table to store revoked token JTIs (single-token revocation deny list).
 -- Part of the database.runtime_persistent classification: authoritative authorization
@@ -32,6 +18,28 @@ CREATE UNIQUE INDEX idx_revoked_token_jti_deployment ON "REVOKED_TOKEN" (DEPLOYM
 
 -- Index for expiry time on REVOKED_TOKEN (supports cleanup and expiry checks).
 CREATE INDEX idx_revoked_token_expiry_time ON "REVOKED_TOKEN" (EXPIRY_TIME);
+
+-- Table to store criteria-based (many-token) revocations: a generalized attribute deny list.
+-- CRITERION_TYPE names the dimension ('token_family' today; subject/client/consent are future types)
+-- and CRITERION_VALUE holds the revoked value (the tfid for 'token_family'). Part of the
+-- database.runtime_persistent classification: authoritative enforcement state that must survive a
+-- runtime database flush.
+CREATE TABLE "REVOCATION_CRITERIA" (
+    DEPLOYMENT_ID VARCHAR(255) NOT NULL,
+    ID VARCHAR(36) NOT NULL PRIMARY KEY,
+    CRITERION_TYPE VARCHAR(30) NOT NULL,
+    CRITERION_VALUE VARCHAR(255) NOT NULL,
+    REASON VARCHAR(30) NOT NULL,
+    REVOKED_AT DATETIME NOT NULL,
+    EXPIRY_TIME DATETIME NOT NULL
+);
+
+-- Unique index backs the hot lookup by (deployment, type, value) and enforces idempotent writes.
+CREATE UNIQUE INDEX idx_revocation_criteria_lookup
+    ON "REVOCATION_CRITERIA" (DEPLOYMENT_ID, CRITERION_TYPE, CRITERION_VALUE);
+
+-- Index for expiry time on REVOCATION_CRITERIA (supports cleanup and expiry checks).
+CREATE INDEX idx_revocation_criteria_expiry_time ON "REVOCATION_CRITERIA" (EXPIRY_TIME);
 
 -- Table to store SSO sessions, grouped by flow (FLOW_ID) and resolved by an opaque handle.
 -- Part of the database.runtime_persistent classification: persistent session state that must survive a
@@ -62,9 +70,6 @@ CREATE UNIQUE INDEX idx_sso_session_handle_id ON "SSO_SESSION" (HANDLE_ID, DEPLO
 -- concurrent joins in a single flow execution converge on one session instead of duplicating it.
 CREATE UNIQUE INDEX idx_sso_session_flow_execution ON "SSO_SESSION" (FLOW_EXECUTION_ID, DEPLOYMENT_ID);
 
--- Index for subject + flow lookup on SSO_SESSION
-CREATE INDEX idx_sso_session_subject_flow ON "SSO_SESSION" (SUBJECT_ID, FLOW_ID, DEPLOYMENT_ID);
-
 -- Index for absolute expiry on SSO_SESSION (supports cleanup)
 CREATE INDEX idx_sso_session_absolute_expires_at ON "SSO_SESSION" (ABSOLUTE_EXPIRES_AT);
 
@@ -84,6 +89,7 @@ CREATE TABLE "SSO_SESSION_PARTICIPANT" (
     SESSION_ID VARCHAR(36) NOT NULL,
     DEPLOYMENT_ID VARCHAR(255) NOT NULL,
     APP_ID VARCHAR(36) NOT NULL,
+    TFID VARCHAR(36),
     FIRST_JOINED_AT DATETIME NOT NULL,
     LAST_ACTIVE_AT DATETIME NOT NULL,
     PRIMARY KEY (SESSION_ID, DEPLOYMENT_ID, APP_ID)
@@ -122,20 +128,3 @@ CREATE INDEX idx_consent_authz_user ON "CONSENT_AUTHORIZATION" (DEPLOYMENT_ID, U
 
 -- Index for loading a consent's authorization records.
 CREATE INDEX idx_consent_authz_consent ON "CONSENT_AUTHORIZATION" (CONSENT_ID, DEPLOYMENT_ID);
-
--- Table to store consent audit records.
-CREATE TABLE "CONSENT_AUDIT" (
-    DEPLOYMENT_ID VARCHAR(255) NOT NULL,
-    ID VARCHAR(36) NOT NULL PRIMARY KEY,
-    ACTION VARCHAR(30) NOT NULL,
-    CONSENT_ID VARCHAR(36) NOT NULL,
-    GROUP_ID VARCHAR(36) NOT NULL,
-    SUBJECT_USER_IDS TEXT,
-    ACTOR_ID VARCHAR(36),
-    TRACE_ID VARCHAR(255),
-    DETAILS TEXT,
-    CREATED_AT TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Index for retrieving the audit trail of a consent.
-CREATE INDEX idx_consent_audit_consent ON "CONSENT_AUDIT" (DEPLOYMENT_ID, CONSENT_ID);

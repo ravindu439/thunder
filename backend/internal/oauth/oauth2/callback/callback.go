@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package callback owns the single POST /oauth2/auth/callback endpoint and dispatches
 // completed flow assertions to the appropriate grant-type handler based on the type
@@ -40,8 +25,10 @@ import (
 )
 
 // flowCallbackRequest is the request body sent by the Gate UI to the flow callback endpoint.
-// Type identifies which grant-type handler processes the completed assertion. When absent it
-// defaults to authorization_code, preserving existing behavior for the auth code flow.
+// Assertion carries the terminal flow outcome, either an authentication assertion or a signed error
+// assertion; the grant-type handler tells them apart from the assertion's own claims. Type identifies
+// which handler processes it. When absent it defaults to authorization_code, preserving existing
+// behavior for the auth code flow.
 type flowCallbackRequest struct {
 	AuthID    string `json:"authId"`
 	Assertion string `json:"assertion"`
@@ -98,8 +85,13 @@ func (d *callbackDispatcher) handleFlowCallback(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if req.AuthID == "" || req.Assertion == "" {
-		utils.WriteJSONError(ctx, w, oauth2const.ErrorInvalidRequest, "authId and assertion are required",
+	if req.AuthID == "" {
+		utils.WriteJSONError(ctx, w, oauth2const.ErrorInvalidRequest, "authId is required",
+			http.StatusBadRequest, nil)
+		return
+	}
+	if req.Assertion == "" {
+		utils.WriteJSONError(ctx, w, oauth2const.ErrorInvalidRequest, "assertion is required",
 			http.StatusBadRequest, nil)
 		return
 	}
@@ -123,6 +115,11 @@ func (d *callbackDispatcher) handleFlowCallback(w http.ResponseWriter, r *http.R
 		utils.WriteSuccessResponse(ctx, w, http.StatusOK, oauth2authz.AuthZPostResponse{RedirectURI: redirectURI})
 
 	case string(providers.GrantTypeCIBA):
+		if d.cibaService == nil {
+			utils.WriteJSONError(ctx, w, oauth2const.ErrorInvalidRequest,
+				"Unsupported callback type", http.StatusBadRequest, nil)
+			return
+		}
 		cibaErr := d.cibaService.HandleCallback(ctx, req.AuthID, req.Assertion)
 		if cibaErr != nil {
 			statusCode := http.StatusBadRequest

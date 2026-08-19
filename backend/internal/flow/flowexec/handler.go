@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -61,6 +46,7 @@ func (h *flowExecutionHandler) HandleFlowExecutionRequest(w http.ResponseWriter,
 
 	// Sanitize the input to prevent injection attacks
 	appID := sysutils.SanitizeString(flowR.ApplicationID)
+	flowID := sysutils.SanitizeString(flowR.FlowID)
 	executionID := sysutils.SanitizeString(flowR.ExecutionID)
 	flowTypeStr := sysutils.SanitizeString(flowR.FlowType)
 	verbose := flowR.Verbose
@@ -74,12 +60,23 @@ func (h *flowExecutionHandler) HandleFlowExecutionRequest(w http.ResponseWriter,
 	// them available to the flow service, which selects the handle once the flow is known.
 	ctx := session.WithInbound(r.Context(), h.ssoTransport.Read(r))
 
-	flowStep, flowErr := h.flowExecService.Execute(
-		ctx, appID, executionID, flowTypeStr, verbose, action, inputs, challengeToken,
-		flowSecret, attestationToken)
+	var flowStep *FlowStep
+	var flowErr *tidcommon.ServiceError
+	if flowID != "" {
+		flowStep, flowErr = h.flowExecService.ExecuteByID(
+			ctx, flowID, executionID, verbose, action, inputs, challengeToken)
+	} else {
+		flowStep, flowErr = h.flowExecService.Execute(
+			ctx, appID, executionID, flowTypeStr, verbose, action, inputs, challengeToken,
+			flowSecret, attestationToken)
+	}
 
 	if flowErr != nil {
-		handleFlowError(r.Context(), w, flowErr)
+		errorAssertion := ""
+		if flowStep != nil {
+			errorAssertion = flowStep.ErrorAssertion
+		}
+		handleFlowError(r.Context(), w, flowErr, errorAssertion)
 		return
 	}
 
@@ -111,6 +108,7 @@ func (h *flowExecutionHandler) HandleFlowExecutionRequest(w http.ResponseWriter,
 		Type:           string(flowStep.Type),
 		Data:           flowStep.Data,
 		Assertion:      flowStep.Assertion,
+		ErrorAssertion: flowStep.ErrorAssertion,
 		Error:          stepErrorResp,
 		ChallengeToken: flowStep.ChallengeToken,
 	}
@@ -121,8 +119,17 @@ func (h *flowExecutionHandler) HandleFlowExecutionRequest(w http.ResponseWriter,
 		log.String(log.LoggerKeyExecutionID, flowResp.ExecutionID))
 }
 
+// flowErrorResponse is the error body for a failed flow execution. It carries the standard API error
+// plus a signed error assertion (when the flow was OAuth-initiated) that the Gate/SDK relays to the
+// OAuth callback so the failure reaches the waiting authorization request.
+type flowErrorResponse struct {
+	apierror.ErrorResponse
+	ErrorAssertion string `json:"errorAssertion,omitempty"`
+}
+
 // handleFlowError handles errors that occur during flow execution as an API error response.
-func handleFlowError(ctx context.Context, w http.ResponseWriter, flowErr *tidcommon.ServiceError) {
+func handleFlowError(ctx context.Context, w http.ResponseWriter, flowErr *tidcommon.ServiceError,
+	errorAssertion string) {
 	errResp := apierror.ErrorResponse{
 		Code:        flowErr.Code,
 		Message:     flowErr.Error,
@@ -132,14 +139,22 @@ func handleFlowError(ctx context.Context, w http.ResponseWriter, flowErr *tidcom
 	statusCode := http.StatusInternalServerError
 	if flowErr.Type == tidcommon.ClientErrorType {
 		switch flowErr.Code {
-		case ErrorDirectFlowInitiationNotPermitted.Code:
+		case ErrorDirectFlowInitiationNotPermitted.Code, ErrorFlowIDExecutionNotPermitted.Code,
+			ErrorAdministrationPermissionRequired.Code:
 			statusCode = http.StatusForbidden
 		case ErrorFlowSecretRequired.Code, ErrorFlowSecretInvalid.Code,
-			ErrorAttestationRequired.Code, ErrorAttestationInvalid.Code:
+			ErrorAttestationRequired.Code, ErrorAttestationInvalid.Code,
+			ErrorAdministrationAuthenticationRequired.Code:
 			statusCode = http.StatusUnauthorized
 		default:
 			statusCode = http.StatusBadRequest
 		}
+	}
+
+	if errorAssertion != "" {
+		sysutils.WriteSuccessResponse(ctx, w, statusCode,
+			flowErrorResponse{ErrorResponse: errResp, ErrorAssertion: errorAssertion})
+		return
 	}
 
 	sysutils.WriteErrorResponse(ctx, w, statusCode, errResp)

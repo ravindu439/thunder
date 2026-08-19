@@ -8,6 +8,7 @@ import (
 	"context"
 
 	mock "github.com/stretchr/testify/mock"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/revocation"
 )
 
 // NewEnforcementServiceInterfaceMock creates a new instance of EnforcementServiceInterfaceMock. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -38,16 +39,16 @@ func (_m *EnforcementServiceInterfaceMock) EXPECT() *EnforcementServiceInterface
 }
 
 // EnsureNotRevoked provides a mock function for the type EnforcementServiceInterfaceMock
-func (_mock *EnforcementServiceInterfaceMock) EnsureNotRevoked(ctx context.Context, jti string) error {
-	ret := _mock.Called(ctx, jti)
+func (_mock *EnforcementServiceInterfaceMock) EnsureNotRevoked(ctx context.Context, identity revocation.RevocationIdentity) error {
+	ret := _mock.Called(ctx, identity)
 
 	if len(ret) == 0 {
 		panic("no return value specified for EnsureNotRevoked")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, jti)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, revocation.RevocationIdentity) error); ok {
+		r0 = returnFunc(ctx, identity)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -61,20 +62,20 @@ type EnforcementServiceInterfaceMock_EnsureNotRevoked_Call struct {
 
 // EnsureNotRevoked is a helper method to define mock.On call
 //   - ctx context.Context
-//   - jti string
-func (_e *EnforcementServiceInterfaceMock_Expecter) EnsureNotRevoked(ctx interface{}, jti interface{}) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
-	return &EnforcementServiceInterfaceMock_EnsureNotRevoked_Call{Call: _e.mock.On("EnsureNotRevoked", ctx, jti)}
+//   - identity revocation.RevocationIdentity
+func (_e *EnforcementServiceInterfaceMock_Expecter) EnsureNotRevoked(ctx interface{}, identity interface{}) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
+	return &EnforcementServiceInterfaceMock_EnsureNotRevoked_Call{Call: _e.mock.On("EnsureNotRevoked", ctx, identity)}
 }
 
-func (_c *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call) Run(run func(ctx context.Context, jti string)) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
+func (_c *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call) Run(run func(ctx context.Context, identity revocation.RevocationIdentity)) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 revocation.RevocationIdentity
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(revocation.RevocationIdentity)
 		}
 		run(
 			arg0,
@@ -89,7 +90,7 @@ func (_c *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call) Return(err erro
 	return _c
 }
 
-func (_c *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call) RunAndReturn(run func(ctx context.Context, jti string) error) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
+func (_c *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call) RunAndReturn(run func(ctx context.Context, identity revocation.RevocationIdentity) error) *EnforcementServiceInterfaceMock_EnsureNotRevoked_Call {
 	_c.Call.Return(run)
 	return _c
 }

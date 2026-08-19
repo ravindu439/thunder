@@ -1,21 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {QueryErrorNotice, ResourceAvatar} from '@thunderid/components';
 import {useDataGridLocaleText} from '@thunderid/hooks';
 import {useLogger} from '@thunderid/logger/react';
 import {Box, IconButton, Tooltip, Typography, ListingTable, DataGrid} from '@wso2/oxygen-ui';
@@ -24,7 +10,9 @@ import {useMemo, useCallback, useState, type JSX} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate} from 'react-router';
 import AgentDeleteDialog from './AgentDeleteDialog';
+import RouteConfig from '../../../configs/RouteConfig';
 import useGetAgents from '../api/useGetAgents';
+import AgentConstants from '../constants/agent-constants';
 import type {BasicAgent} from '../models/agent';
 
 export default function AgentsList(): JSX.Element {
@@ -32,7 +20,15 @@ export default function AgentsList(): JSX.Element {
   const {t} = useTranslation();
   const logger = useLogger('AgentsList');
   const dataGridLocaleText = useDataGridLocaleText();
-  const {data, isLoading, error} = useGetAgents();
+  const {data, isLoading, error, refetch} = useGetAgents();
+
+  // Resolves an error through the `agents` catalog. `t` defaults to the `common` namespace, so
+  // this forwards explicit `ns:` prefixes unchanged and prefixes bare keys with `agents:`, per
+  // getErrorMessage's namespace-resolution contract.
+  const tForErrors = useCallback(
+    (key: string, options?: Record<string, unknown>): string => t(key.includes(':') ? key : `agents:${key}`, options),
+    [t],
+  );
 
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -45,7 +41,7 @@ export default function AgentsList(): JSX.Element {
   const handleEditClick = useCallback(
     (agentId: string): void => {
       (async (): Promise<void> => {
-        await navigate(`/agents/${agentId}`);
+        await navigate(RouteConfig.agents.detail(agentId));
       })().catch((_error: unknown) => {
         logger.error('Failed to navigate to agent', {error: _error, agentId});
       });
@@ -66,29 +62,12 @@ export default function AgentsList(): JSX.Element {
         flex: 1,
         minWidth: 200,
         renderCell: (params: DataGrid.GridRenderCellParams<BasicAgent>): JSX.Element => (
-          <Box sx={{display: 'flex', alignItems: 'center', gap: 1, width: '100%', overflow: 'hidden'}}>
-            <ListingTable.CellIcon
-              sx={{flex: 1, minWidth: 0}}
-              icon={
-                <Box
-                  sx={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: '50%',
-                    bgcolor: 'primary.light',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1rem',
-                  }}
-                >
-                  🤖
-                </Box>
-              }
-              primary={params.row.name}
-              secondary={params.row.description}
-            />
-          </Box>
+          <ListingTable.CellIcon
+            sx={{width: '100%'}}
+            icon={<ResourceAvatar size={30} value={params.row.logoUrl} fallback={AgentConstants.DEFAULT_AVATAR} />}
+            primary={params.row.name}
+            secondary={params.row.description}
+          />
         ),
       },
       {
@@ -166,14 +145,13 @@ export default function AgentsList(): JSX.Element {
 
   if (error) {
     return (
-      <Box sx={{textAlign: 'center', py: 8}}>
-        <Typography variant="h6" color="error" gutterBottom>
-          {t('agents:listing.loadError', 'Failed to load agents')}
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {error.message ?? 'Unknown error'}
-        </Typography>
-      </Box>
+      <QueryErrorNotice
+        error={error}
+        t={tForErrors}
+        variant="block"
+        title={t('agents:listing.loadError', 'Failed to load agents')}
+        onRetry={() => void refetch()}
+      />
     );
   }
 
@@ -193,6 +171,8 @@ export default function AgentsList(): JSX.Element {
             }}
             pageSizeOptions={[5, 10, 25, 50]}
             disableRowSelectionOnClick
+            // Filtering is not wired end to end, so the column filter panel stays hidden.
+            disableColumnFilter
             localeText={dataGridLocaleText}
             sx={{
               height: 'auto',

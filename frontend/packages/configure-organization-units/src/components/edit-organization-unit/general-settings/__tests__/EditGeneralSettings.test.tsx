@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {screen, fireEvent, waitFor, renderWithProviders, act} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -48,17 +33,6 @@ vi.mock('@/components/edit-organization-unit/general-settings/ParentSettingsSect
   ),
 }));
 
-vi.mock('@/components/edit-organization-unit/general-settings/DangerZoneSection', () => ({
-  default: ({onDeleteClick}: {onDeleteClick: () => void}) => (
-    <div data-testid="danger-zone-section">
-      DangerZoneSection
-      <button type="button" onClick={onDeleteClick}>
-        Delete
-      </button>
-    </div>
-  ),
-}));
-
 describe('EditGeneralSettings', () => {
   const mockOrganizationUnit: OrganizationUnit = {
     id: 'ou-123',
@@ -68,47 +42,27 @@ describe('EditGeneralSettings', () => {
     parent: null,
   };
 
-  const mockOnDeleteClick = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should render all three sections', () => {
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+  it('should render both sections', () => {
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     expect(screen.getByTestId('quick-copy-section')).toBeInTheDocument();
     expect(screen.getByTestId('parent-settings-section')).toBeInTheDocument();
-    expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
   });
 
   it('should pass organizationUnit to QuickCopySection', () => {
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     expect(screen.getByText(/QuickCopySection - engineering/)).toBeInTheDocument();
   });
 
   it('should pass organizationUnit to ParentSettingsSection', () => {
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     expect(screen.getByText(/ParentSettingsSection - Engineering/)).toBeInTheDocument();
-  });
-
-  it('should pass onDeleteClick to DangerZoneSection', () => {
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
-
-    const deleteButton = screen.getByText('Delete');
-    fireEvent.click(deleteButton);
-
-    expect(mockOnDeleteClick).toHaveBeenCalledTimes(1);
   });
 
   it('should handle clipboard copy and show copied state', async () => {
@@ -119,9 +73,7 @@ describe('EditGeneralSettings', () => {
       configurable: true,
     });
 
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     const copyButton = screen.getByText('Copy Handle');
     fireEvent.click(copyButton);
@@ -141,9 +93,7 @@ describe('EditGeneralSettings', () => {
       configurable: true,
     });
 
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     const copyButton = screen.getByText('Copy Handle');
     fireEvent.click(copyButton);
@@ -179,9 +129,7 @@ describe('EditGeneralSettings', () => {
       configurable: true,
     });
 
-    renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     const copyButton = screen.getByText('Copy Handle');
 
@@ -212,9 +160,7 @@ describe('EditGeneralSettings', () => {
   });
 
   it('should cleanup timeout on unmount', () => {
-    const {unmount} = renderWithProviders(
-      <EditGeneralSettings organizationUnit={mockOrganizationUnit} onDeleteClick={mockOnDeleteClick} />,
-    );
+    const {unmount} = renderWithProviders(<EditGeneralSettings organizationUnit={mockOrganizationUnit} />);
 
     // Should not throw on unmount
     expect(() => unmount()).not.toThrow();

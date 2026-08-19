@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package notification contains the implementation of notification and otp sender services.
 package notification
@@ -23,14 +8,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
+	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
 	"github.com/thunder-id/thunderid/internal/notification/common"
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
 )
 
@@ -46,20 +32,22 @@ type NotificationSenderMgtSvcInterface interface {
 	UpdateSender(ctx context.Context, id string, sender common.NotificationSenderDTO) (*common.NotificationSenderDTO,
 		*tidcommon.ServiceError)
 	DeleteSender(ctx context.Context, id string) *tidcommon.ServiceError
+	GetSenderUsages(ctx context.Context, id string) (*resourcedependency.DependenciesResponse,
+		*tidcommon.ServiceError)
 	SetDependencyRegistry(r resourcedependency.Registry)
 }
 
 // notificationSenderMgtService implements the NotificationSenderMgtSvcInterface.
 type notificationSenderMgtService struct {
 	notificationStore  notificationStoreInterface
-	transactioner      transaction.Transactioner
+	transactioner      providers.Transactioner
 	dependencyRegistry resourcedependency.Registry
 	uuidGenerator      func() (string, error)
 }
 
 // newNotificationSenderMgtService returns a new instance of NotificationSenderMgtSvcInterface.
 func newNotificationSenderMgtService(
-	store notificationStoreInterface, tx transaction.Transactioner) NotificationSenderMgtSvcInterface {
+	store notificationStoreInterface, tx providers.Transactioner) NotificationSenderMgtSvcInterface {
 	return &notificationSenderMgtService{
 		notificationStore: store,
 		transactioner:     tx,
@@ -331,6 +319,47 @@ func (s *notificationSenderMgtService) DeleteSender(ctx context.Context, id stri
 // provider services are initialized to avoid a cyclic import.
 func (s *notificationSenderMgtService) SetDependencyRegistry(r resourcedependency.Registry) {
 	s.dependencyRegistry = r
+}
+
+// GetSenderUsages returns the resources that reference this notification sender, such as flows that
+// use it. It is informational — it drives the pre-delete confirmation dialog and does not gate
+// deletion on the server (deletion is gated separately by ensureNoBlockingDependencies).
+func (s *notificationSenderMgtService) GetSenderUsages(
+	ctx context.Context, id string,
+) (*resourcedependency.DependenciesResponse, *tidcommon.ServiceError) {
+	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "NotificationSenderMgtService"))
+
+	if strings.TrimSpace(id) == "" {
+		return nil, &ErrorInvalidSenderID
+	}
+
+	sender, err := s.notificationStore.getSenderByID(ctx, id)
+	if err != nil {
+		logger.Error(ctx, "Failed to retrieve notification sender", log.String("id", id), log.Error(err))
+		return nil, &tidcommon.InternalServerError
+	}
+	if sender == nil {
+		return nil, &ErrorSenderNotFound
+	}
+
+	if s.dependencyRegistry == nil {
+		logger.Warn(ctx, "Dependency registry not set; returning unknown dependencies", log.String("id", id))
+		return &resourcedependency.DependenciesResponse{
+			TotalResults: nil,
+			Count:        0,
+			Summary:      nil,
+			Usages:       []resourcedependency.ResourceDependency{},
+		}, nil
+	}
+
+	result, depErr := s.dependencyRegistry.GetDependencies(
+		ctx, resourcedependency.ResourceTypeNotificationSender, id)
+	if depErr != nil {
+		logger.Error(ctx, "Failed to get notification sender usages", log.Error(depErr), log.String("id", id))
+		return nil, &tidcommon.InternalServerError
+	}
+
+	return result, nil
 }
 
 // ensureNoBlockingDependencies refuses deletion when other resources depend on the notification

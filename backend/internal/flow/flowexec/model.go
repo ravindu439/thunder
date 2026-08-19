@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -54,7 +39,8 @@ type frame struct {
 // TODO: fields on EngineContext are currently exposed directly. Convert to unexported
 // fields accessed via getters and setters so that mutation can be encapsulated.
 type EngineContext struct {
-	Context context.Context
+	Context          context.Context
+	initiatorRequest *providers.InitiatorRequest
 
 	ExecutionID    string
 	FlowType       providers.FlowType
@@ -70,6 +56,11 @@ type EngineContext struct {
 	CurrentNodeResponse *common.NodeResponse
 	CurrentAction       string
 	CurrentSegmentID    string
+
+	// CurrentPromptInputs holds the inputs the prompt the flow is paused on resolved to, with the id
+	// of the node that produced them. Persisted with the context and replayed by replayPromptInputs.
+	CurrentPromptInputs []providers.Input
+	CurrentPromptNodeID string
 
 	Graph       core.GraphInterface
 	Application providers.Application
@@ -100,6 +91,16 @@ type EngineContext struct {
 	// that flow rather than the running sign-out flow. Empty for all other flows. Transient — re-derived
 	// from the application on each context load, never persisted.
 	SessionFlowID string
+}
+
+// GetInitiatorRequest returns the original HTTP request that triggered the flow.
+func (ec *EngineContext) GetInitiatorRequest() *providers.InitiatorRequest {
+	return ec.initiatorRequest
+}
+
+// SetInitiatorRequest sets the original HTTP request that triggered the flow.
+func (ec *EngineContext) SetInitiatorRequest(req *providers.InitiatorRequest) {
+	ec.initiatorRequest = req
 }
 
 // mergeRuntimeData merges the given data into RuntimeData.
@@ -147,7 +148,16 @@ func (e *EngineContext) popFrame() *frame {
 	e.RuntimeData = top.runtimeData
 	e.ForwardedData = top.forwardedData
 	e.AdditionalData = top.additionalData
+	e.clearPausedPromptInputs()
 	return top
+}
+
+// clearPausedPromptInputs drops the paused-prompt record. It is keyed by node ID, which is only
+// unique within a graph, so it must not outlive a caller/callee graph switch: a node in the graph
+// being entered that shares the ID would otherwise replay inputs from an unrelated prompt.
+func (e *EngineContext) clearPausedPromptInputs() {
+	e.CurrentPromptInputs = nil
+	e.CurrentPromptNodeID = ""
 }
 
 // frameDepth returns the number of saved frames (0 means root flow).
@@ -227,6 +237,7 @@ type FlowStep struct {
 	ChallengeToken string
 	Data           FlowData
 	Assertion      string
+	ErrorAssertion string
 	Error          *tidcommon.ServiceError
 
 	// SSOHandleOut / SSOFlowID carry an SSO session handle minted during this step back to the
@@ -259,11 +270,13 @@ type FlowResponse struct {
 	ChallengeToken string                  `json:"challengeToken,omitempty"`
 	Data           FlowData                `json:"data,omitempty"`
 	Assertion      string                  `json:"assertion,omitempty"`
+	ErrorAssertion string                  `json:"errorAssertion,omitempty"`
 	Error          *apierror.ErrorResponse `json:"error,omitempty"`
 }
 
 // FlowRequest represents the flow execution API request body
 type FlowRequest struct {
+	FlowID         string            `json:"flowId,omitempty"`
 	ApplicationID  string            `json:"applicationId"`
 	FlowType       string            `json:"flowType"`
 	Verbose        bool              `json:"verbose,omitempty"`
@@ -275,11 +288,12 @@ type FlowRequest struct {
 
 // FlowInitContext represents the context for initiating a new flow with runtime data
 type FlowInitContext struct {
-	ApplicationID string
-	FlowType      string
-	RuntimeData   map[string]string
-	InitialInputs map[string]string
-	ExpirySeconds int64
+	ApplicationID    string
+	FlowType         string
+	RuntimeData      map[string]string
+	InitialInputs    map[string]string
+	ExpirySeconds    int64
+	InitiatorRequest *providers.InitiatorRequest
 }
 
 // FlowContextDB represents the database row for a flow context.
@@ -323,6 +337,9 @@ type flowContextContent struct {
 	InterceptorSharedData *string `json:"interceptorSharedData,omitempty"`
 	FrameStack            *string `json:"frameStack,omitempty"`
 	SharedRuntimeData     *string `json:"sharedRuntimeData,omitempty"`
+	InitiatorRequest      *string `json:"initiatorRequest,omitempty"`
+	PromptInputs          *string `json:"promptInputs,omitempty"`
+	PromptNodeID          *string `json:"promptNodeId,omitempty"`
 }
 
 // graphResolverFunc resolves a flow graph by its flow ID. Used during context deserialization to
@@ -336,6 +353,47 @@ func (f *FlowContextDB) GetGraphID(_ context.Context) (string, error) {
 		return "", err
 	}
 	return content.GraphID, nil
+}
+
+// buildAuthenticatedUser assembles the authenticated user from the serialized context.
+func buildAuthenticatedUser(content flowContextContent, userAttributes map[string]interface{}, token string,
+	availableAttributes *providers.AttributesResponse) authncm.AuthenticatedUser {
+	authenticatedUser := authncm.AuthenticatedUser{
+		IsAuthenticated:     content.IsAuthenticated,
+		UserID:              "",
+		Attributes:          userAttributes,
+		Token:               token,
+		AvailableAttributes: availableAttributes,
+	}
+	if content.UserID != nil {
+		authenticatedUser.UserID = *content.UserID
+	}
+	if content.OUID != nil {
+		authenticatedUser.OUID = *content.OUID
+	}
+	if content.UserType != nil {
+		authenticatedUser.UserType = *content.UserType
+	}
+
+	return authenticatedUser
+}
+
+// parsePausedPrompt deserializes the inputs of the prompt the flow is paused on, together with the
+// id of the node that produced them. Both are empty when the flow is not paused on a prompt.
+func parsePausedPrompt(content flowContextContent) ([]providers.Input, string, error) {
+	var promptInputs []providers.Input
+	if content.PromptInputs != nil {
+		if err := json.Unmarshal([]byte(*content.PromptInputs), &promptInputs); err != nil {
+			return nil, "", err
+		}
+	}
+
+	var promptNodeID string
+	if content.PromptNodeID != nil {
+		promptNodeID = *content.PromptNodeID
+	}
+
+	return promptInputs, promptNodeID, nil
 }
 
 // ToEngineContext converts the database model to the flow engine context.
@@ -391,22 +449,7 @@ func (f *FlowContextDB) ToEngineContext(ctx context.Context,
 	}
 
 	// Build authenticated user
-	authenticatedUser := authncm.AuthenticatedUser{
-		IsAuthenticated:     content.IsAuthenticated,
-		UserID:              "",
-		Attributes:          userAttributes,
-		Token:               token,
-		AvailableAttributes: availableAttributes,
-	}
-	if content.UserID != nil {
-		authenticatedUser.UserID = *content.UserID
-	}
-	if content.OUID != nil {
-		authenticatedUser.OUID = *content.OUID
-	}
-	if content.UserType != nil {
-		authenticatedUser.UserType = *content.UserType
-	}
+	authenticatedUser := buildAuthenticatedUser(content, userAttributes, token, availableAttributes)
 
 	// Parse execution history
 	var executionHistory map[string]*providers.NodeExecutionRecord
@@ -470,7 +513,23 @@ func (f *FlowContextDB) ToEngineContext(ctx context.Context,
 		}
 	}
 
-	return EngineContext{
+	// Parse the inputs of the prompt the flow is paused on
+	promptInputs, promptNodeID, err := parsePausedPrompt(content)
+	if err != nil {
+		return EngineContext{}, err
+	}
+
+	// Parse initiator request if present
+	var initiatorRequest *providers.InitiatorRequest
+	if content.InitiatorRequest != nil {
+		var req providers.InitiatorRequest
+		if err := json.Unmarshal([]byte(*content.InitiatorRequest), &req); err != nil {
+			return EngineContext{}, err
+		}
+		initiatorRequest = &req
+	}
+
+	engineCtx := EngineContext{
 		Context:               ctx,
 		ExecutionID:           f.ExecutionID,
 		TraceID:               "", // TraceID is transient and set from request context
@@ -489,7 +548,12 @@ func (f *FlowContextDB) ToEngineContext(ctx context.Context,
 		InterceptorSharedData: interceptorSharedData,
 		frameStack:            frameStack,
 		sharedRuntimeData:     sharedRuntimeData,
-	}, nil
+		CurrentPromptInputs:   promptInputs,
+		CurrentPromptNodeID:   promptNodeID,
+	}
+	engineCtx.SetInitiatorRequest(initiatorRequest)
+
+	return engineCtx, nil
 }
 
 // FromEngineContext converts an EngineContext to the database model for persistence.
@@ -616,6 +680,30 @@ func (f *FlowContextDB) FromEngineContext(ctx EngineContext) error {
 		sharedRuntimeDataStr = &s
 	}
 
+	// Serialize the inputs of the prompt the flow is paused on
+	var promptInputsStr, promptNodeIDStr *string
+	if len(ctx.CurrentPromptInputs) > 0 && ctx.CurrentPromptNodeID != "" {
+		promptInputsJSON, err := json.Marshal(ctx.CurrentPromptInputs)
+		if err != nil {
+			return err
+		}
+		s := string(promptInputsJSON)
+		promptInputsStr = &s
+		nodeID := ctx.CurrentPromptNodeID
+		promptNodeIDStr = &nodeID
+	}
+
+	// Serialize initiator request if present
+	var initiatorRequestStr *string
+	if ctx.initiatorRequest != nil {
+		initiatorRequestJSON, err := json.Marshal(ctx.initiatorRequest)
+		if err != nil {
+			return err
+		}
+		s := string(initiatorRequestJSON)
+		initiatorRequestStr = &s
+	}
+
 	content := flowContextContent{
 		AppID:                 ctx.AppID,
 		Verbose:               ctx.Verbose,
@@ -637,6 +725,9 @@ func (f *FlowContextDB) FromEngineContext(ctx EngineContext) error {
 		InterceptorSharedData: &interceptorSharedData,
 		FrameStack:            frameStackStr,
 		SharedRuntimeData:     sharedRuntimeDataStr,
+		InitiatorRequest:      initiatorRequestStr,
+		PromptInputs:          promptInputsStr,
+		PromptNodeID:          promptNodeIDStr,
 	}
 
 	contextJSON, err := json.Marshal(content)

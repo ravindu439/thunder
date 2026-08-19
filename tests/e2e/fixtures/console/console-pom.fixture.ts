@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Console Page Object Model Fixture
@@ -28,16 +13,22 @@
 import { test as base } from "./console-auth.fixture";
 import { ConsoleSigninPage } from "../../pages/authentication";
 import { UsersPage } from "../../pages/user-management";
+import { UserTypesPage } from "../../pages/user-types";
 import { ApplicationsPage } from "../../pages/applications";
 import { SettingsPage } from "../../pages/settings";
+import { WelcomePage } from "../../pages/welcome";
+import { ConnectionsPage } from "../../pages/connections";
 
 const baseUrl = process.env.BASE_URL || "";
 
 type POMFixtures = {
   signinPage: ConsoleSigninPage;
   usersPage: UsersPage;
+  userTypesPage: UserTypesPage;
   applicationsPage: ApplicationsPage;
   settingsPage: SettingsPage;
+  welcomePage: WelcomePage;
+  connectionsPage: ConnectionsPage;
 };
 
 export const test = base.extend<POMFixtures>({
@@ -51,6 +42,11 @@ export const test = base.extend<POMFixtures>({
     await use(new UsersPage(authenticatedPage, baseUrl));
   },
 
+  // User types page requires auth, uses authenticatedPage fixture
+  userTypesPage: async ({ authenticatedPage }, use) => {
+    await use(new UserTypesPage(authenticatedPage, baseUrl));
+  },
+
   // Applications page requires auth, uses authenticatedPage fixture
   applicationsPage: async ({ authenticatedPage }, use) => {
     await use(new ApplicationsPage(authenticatedPage, baseUrl));
@@ -60,10 +56,22 @@ export const test = base.extend<POMFixtures>({
   settingsPage: async ({ authenticatedPage }, use) => {
     await use(new SettingsPage(authenticatedPage, baseUrl));
   },
+  // Welcome page requires auth, uses authenticatedPage fixture
+  welcomePage: async ({ authenticatedPage }, use) => {
+    await use(new WelcomePage(authenticatedPage, baseUrl));
+  },
+  
+  // Connections page requires auth, uses authenticatedPage fixture
+  connectionsPage: async ({ authenticatedPage }, use) => {
+    await use(new ConnectionsPage(authenticatedPage, baseUrl));
+  },
 });
 
 export { expect } from "@playwright/test";
 export { ConsoleSigninPage } from "../../pages/authentication";
 export { UsersPage, type UserFormData } from "../../pages/user-management";
+export { UserTypesPage } from "../../pages/user-types";
 export { ApplicationsPage, type ApplicationFormData } from "../../pages/applications";
 export { SettingsPage } from "../../pages/settings";
+export { WelcomePage } from "../../pages/welcome";
+export { ConnectionsPage, type BrandedConnectionFormData } from "../../pages/connections";

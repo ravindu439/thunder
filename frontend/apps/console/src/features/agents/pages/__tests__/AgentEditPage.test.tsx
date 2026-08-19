@@ -1,34 +1,44 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import userEvent from '@testing-library/user-event';
-import {render, screen, waitFor} from '@thunderid/test-utils';
+import {fireEvent, render, screen, waitFor} from '@thunderid/test-utils';
 import type {ReactNode} from 'react';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
+import AgentConstants from '../../constants/agent-constants';
 import AgentEditPage from '../AgentEditPage';
 
-const {mockNavigate, mockRefetch, mockUseGetAgent, mockUseUpdateAgent, mockMutateAsync} = vi.hoisted(() => ({
+const {
+  mockNavigate,
+  mockRefetch,
+  mockUseGetAgent,
+  mockUseUpdateAgent,
+  mockMutateAsync,
+  mockUseGetAgentTypes,
+  mockUseGetAgentType,
+  mockUseLocation,
+  stagingCallbackIdentities,
+} = vi.hoisted(() => ({
+  // Every distinct onFieldChange the Attributes tab is handed.
+  stagingCallbackIdentities: new Set<unknown>(),
   mockNavigate: vi.fn(),
   mockRefetch: vi.fn(),
   mockUseGetAgent: vi.fn(),
   mockUseUpdateAgent: vi.fn(),
   mockMutateAsync: vi.fn(),
+  mockUseGetAgentTypes: vi.fn(),
+  mockUseGetAgentType: vi.fn(),
+  mockUseLocation: vi.fn(
+    (): {
+      state: {justCreatedSecret: {agentName: string; clientId?: string; clientSecret: string}} | null;
+    } => ({state: null}),
+  ),
+}));
+
+vi.mock('@thunderid/configure-agent-types', () => ({
+  useGetAgentTypes: () => mockUseGetAgentTypes(),
+  useGetAgentType: () => mockUseGetAgentType(),
 }));
 
 vi.mock('react-router', async () => {
@@ -37,6 +47,7 @@ vi.mock('react-router', async () => {
     ...actual,
     useNavigate: () => mockNavigate,
     useParams: () => ({agentId: 'agent-1'}),
+    useLocation: () => mockUseLocation(),
     Link: ({to, children = undefined, ...props}: {to: string; children?: ReactNode; [key: string]: unknown}) => (
       <a
         {...(props as Record<string, unknown>)}
@@ -61,24 +72,21 @@ vi.mock('../../api/useUpdateAgent', () => ({
 }));
 
 // Mock heavy child components — focus on page wiring.
-vi.mock('../../components/edit-agent/general/EditGeneralSettings', () => ({
-  default: ({onDeleteSuccess}: {onDeleteSuccess?: () => void}) => (
-    <div data-testid="edit-general">
-      <button type="button" onClick={() => onDeleteSuccess?.()}>
-        Delete Successful
-      </button>
-    </div>
-  ),
+vi.mock('../../components/edit-agent/overview/AgentOverview', () => ({
+  default: () => <div data-testid="agent-overview" />,
 }));
 
 vi.mock('../../components/edit-agent/attributes/EditAgentAttributes', () => ({
-  default: ({onFieldChange}: {onFieldChange: (field: string, value: unknown) => void}) => (
-    <div data-testid="edit-attributes">
-      <button type="button" onClick={() => onFieldChange('attributes', {department: 'sales'})}>
-        Edit an attribute
-      </button>
-    </div>
-  ),
+  default: ({onFieldChange}: {onFieldChange: (field: string, value: unknown) => void}) => {
+    stagingCallbackIdentities.add(onFieldChange);
+    return (
+      <div data-testid="edit-attributes">
+        <button type="button" onClick={() => onFieldChange('attributes', {department: 'sales'})}>
+          Edit an attribute
+        </button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../../components/edit-agent/credentials/EditCredentialsSettings', () => ({
@@ -98,7 +106,13 @@ vi.mock('../../components/edit-agent/access/EditAccessSettings', () => ({
 }));
 
 vi.mock('../../components/edit-agent/advanced-settings/EditAdvancedSettings', () => ({
-  default: () => <div data-testid="edit-advanced" />,
+  default: ({onDeleteSuccess}: {onDeleteSuccess?: () => void}) => (
+    <div data-testid="edit-advanced">
+      <button type="button" onClick={() => onDeleteSuccess?.()}>
+        Delete Successful
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -139,6 +153,7 @@ describe('AgentEditPage', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    stagingCallbackIdentities.clear();
     mockUseGetAgent.mockReturnValue({
       data: baseAgent,
       isLoading: false,
@@ -146,12 +161,23 @@ describe('AgentEditPage', () => {
       isError: false,
       refetch: mockRefetch,
     });
-    mockUseUpdateAgent.mockReturnValue({
+    // A fresh object per call, like useMutation. A stable stand-in hides identity churn.
+    mockUseUpdateAgent.mockImplementation(() => ({
       mutateAsync: mockMutateAsync,
       isPending: false,
-    });
+    }));
     mockMutateAsync.mockResolvedValue(undefined);
     mockRefetch.mockResolvedValue({});
+    mockUseGetAgentTypes.mockReturnValue({
+      data: {types: [{id: 'default-type', name: 'default'}]},
+      isLoading: false,
+      error: null,
+    });
+    mockUseGetAgentType.mockReturnValue({
+      data: {id: 'default-type', name: 'default', schema: {}},
+      isLoading: false,
+      error: null,
+    });
   });
 
   describe('Loading and Error States', () => {
@@ -169,6 +195,14 @@ describe('AgentEditPage', () => {
       expect(screen.getByRole('progressbar')).toBeInTheDocument();
     });
 
+    it('renders a progressbar while the type schema is still resolving', () => {
+      mockUseGetAgentType.mockReturnValue({data: undefined, isLoading: true, error: null});
+
+      render(<AgentEditPage />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
     it('renders an error alert when fetching fails', () => {
       mockUseGetAgent.mockReturnValue({
         data: undefined,
@@ -180,7 +214,8 @@ describe('AgentEditPage', () => {
 
       render(<AgentEditPage />);
 
-      expect(screen.getByText('Boom')).toBeInTheDocument();
+      expect(screen.getByText('Failed to load agent')).toBeInTheDocument();
+      expect(screen.getByText('Something went wrong')).toBeInTheDocument();
       expect(screen.getByRole('button', {name: /Back to agents/i})).toBeInTheDocument();
     });
 
@@ -200,12 +235,13 @@ describe('AgentEditPage', () => {
   });
 
   describe('Tabs', () => {
-    it('renders General, Attributes, and Access tabs by default', () => {
+    it('renders Overview, Attributes, Access, and Advanced tabs by default', () => {
       render(<AgentEditPage />);
 
-      expect(screen.getByRole('tab', {name: 'General'})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: 'Overview'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Attributes'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: /Access/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /Advanced/i})).toBeInTheDocument();
     });
 
     it('does not render icons on any tab', () => {
@@ -222,14 +258,13 @@ describe('AgentEditPage', () => {
       expect(screen.getByRole('tab', {name: /Credentials/i})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Flows'})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: 'Tokens'})).toBeInTheDocument();
-      expect(screen.getByRole('tab', {name: /Advanced/i})).toBeInTheDocument();
     });
 
-    it('orders tabs as General, Attributes, Credentials, Access, Flows, Tokens, Advanced', () => {
+    it('orders tabs as Overview, Attributes, Credentials, Access, Flows, Tokens, Advanced', () => {
       render(<AgentEditPage />);
 
       const tabNames = screen.getAllByRole('tab').map((tab) => tab.textContent);
-      expect(tabNames).toEqual(['General', 'Attributes', 'Credentials', 'Access', 'Flows', 'Tokens', 'Advanced']);
+      expect(tabNames).toEqual(['Overview', 'Attributes', 'Credentials', 'Access', 'Flows', 'Tokens', 'Advanced']);
     });
 
     it('switches tabs when clicked', async () => {
@@ -255,9 +290,9 @@ describe('AgentEditPage', () => {
       expect(screen.queryByRole('tab', {name: /Credentials/i})).not.toBeInTheDocument();
       expect(screen.queryByRole('tab', {name: 'Flows'})).not.toBeInTheDocument();
       expect(screen.queryByRole('tab', {name: 'Tokens'})).not.toBeInTheDocument();
-      expect(screen.queryByRole('tab', {name: /Advanced/i})).not.toBeInTheDocument();
-      // Access still renders — groups/roles apply regardless of OAuth.
+      // Access and Advanced still render — groups/roles and owner/danger-zone apply regardless of OAuth.
       expect(screen.getByRole('tab', {name: /Access/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /Advanced/i})).toBeInTheDocument();
     });
   });
 
@@ -306,11 +341,79 @@ describe('AgentEditPage', () => {
     });
   });
 
-  describe('Delete success', () => {
-    it('navigates back to /agents when EditGeneralSettings reports onDeleteSuccess', async () => {
+  describe('Unsaved-changes bar', () => {
+    const editName = async (user: ReturnType<typeof userEvent.setup>, from: string, to: string): Promise<void> => {
+      const editIcons = screen.getAllByRole('button').filter((b) => b.querySelector('svg'));
+      const nameEditButton = editIcons.find((btn) => btn.parentElement?.textContent?.includes(from));
+      if (!nameEditButton) throw new Error(`name edit button for "${from}" not found`);
+      await user.click(nameEditButton);
+      const input = screen.getByRole('textbox');
+      await user.clear(input);
+      await user.type(input, `${to}{Enter}`);
+    };
+
+    it('hides the bar when a field is manually retyped back to its original value', async () => {
       const user = userEvent.setup();
       render(<AgentEditPage />);
 
+      await editName(user, 'Test Agent', 'Renamed Agent');
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+
+      await editName(user, 'Renamed Agent', 'Test Agent');
+      await waitFor(() => {
+        expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+      });
+    });
+
+    it('discards a rename that exceeds the maximum length', async () => {
+      const user = userEvent.setup();
+      render(<AgentEditPage />);
+
+      const editIcons = screen.getAllByRole('button').filter((button) => button.querySelector('svg'));
+      const nameEditButton = editIcons.find((button) => button.parentElement?.textContent?.includes('Test Agent'));
+      if (!nameEditButton) throw new Error('name edit button for "Test Agent" not found');
+      await user.click(nameEditButton);
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, {target: {value: 'a'.repeat(AgentConstants.NAME_MAX_LENGTH + 1)}});
+      fireEvent.keyDown(input, {key: 'Enter'});
+
+      expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
+      expect(screen.getByText('Test Agent')).toBeInTheDocument();
+    });
+
+    it('keeps the bar visible when only one of two edited fields is reverted', async () => {
+      const user = userEvent.setup();
+      render(<AgentEditPage />);
+
+      // Edit description
+      const editIcons = screen.getAllByRole('button').filter((b) => b.querySelector('svg'));
+      const descEditButton = editIcons.find((btn) => btn.parentElement?.textContent?.includes('Test description'));
+      if (!descEditButton) throw new Error('description edit button not found');
+      await user.click(descEditButton);
+      const descInput = screen
+        .getAllByRole('textbox')
+        .find((el) => (el as HTMLTextAreaElement).value === 'Test description');
+      if (!descInput) throw new Error('description textarea not found');
+      await user.clear(descInput);
+      await user.type(descInput, 'Changed description');
+      descInput.dispatchEvent(new FocusEvent('blur', {bubbles: true}));
+
+      // Edit name, then revert only the name
+      await editName(user, 'Test Agent', 'Renamed Agent');
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+      await editName(user, 'Renamed Agent', 'Test Agent');
+
+      // Description is still changed, so the bar must stay visible
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+    });
+  });
+
+  describe('Delete success', () => {
+    it('navigates back to /agents when EditAdvancedSettings reports onDeleteSuccess', async () => {
+      const user = userEvent.setup();
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: /Advanced/i}));
       await user.click(screen.getByText('Delete Successful'));
 
       await waitFor(() => {
@@ -345,6 +448,87 @@ describe('AgentEditPage', () => {
           }),
         );
       });
+    });
+
+    it('keeps the unsaved-changes bar and edited state when saving fails', async () => {
+      const user = userEvent.setup();
+      mockMutateAsync.mockRejectedValueOnce(new Error('Boom'));
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+      await user.click(screen.getByRole('button', {name: 'Save'}));
+
+      await waitFor(() => {
+        expect(mockMutateAsync).toHaveBeenCalled();
+      });
+      expect(mockRefetch).not.toHaveBeenCalled();
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+    });
+
+    it('hands the Attributes tab one stable onFieldChange across re-renders', async () => {
+      // A new callback per render refired the tab's staging effect after any real edit, until
+      // React stopped committing renders at all.
+      const user = userEvent.setup();
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+
+      expect(stagingCallbackIdentities.size).toBe(1);
+    });
+
+    it('surfaces the resolved save error inline on the unsaved-changes bar', async () => {
+      const user = userEvent.setup();
+      mockUseUpdateAgent.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: new Error('raw backend update failure detail'),
+        isError: true,
+        reset: vi.fn(),
+      });
+
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+
+      expect(screen.getByText('Failed to update agent. Please try again.')).toBeInTheDocument();
+      expect(screen.queryByText('raw backend update failure detail')).not.toBeInTheDocument();
+    });
+
+    it('resets a failed save mutation as soon as another field changes', async () => {
+      const user = userEvent.setup();
+      const mockReset = vi.fn();
+      mockUseUpdateAgent.mockReturnValue({
+        mutateAsync: mockMutateAsync,
+        isPending: false,
+        error: new Error('Boom'),
+        isError: true,
+        reset: mockReset,
+      });
+
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+
+      expect(mockReset).toHaveBeenCalled();
+    });
+  });
+
+  describe('Reset', () => {
+    it('clears edited fields and resets tab content when Reset is clicked', async () => {
+      const user = userEvent.setup();
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByRole('tab', {name: 'Attributes'}));
+      await user.click(screen.getByText('Edit an attribute'));
+      expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', {name: 'Reset'}));
+
+      expect(screen.queryByText('You have unsaved changes')).not.toBeInTheDocument();
     });
   });
 
@@ -539,6 +723,55 @@ describe('AgentEditPage', () => {
       await triggerAChange(user);
 
       expect(screen.getByRole('button', {name: 'Save'})).not.toBeDisabled();
+    });
+  });
+
+  describe('Client Secret Popup (just created)', () => {
+    afterEach(() => {
+      mockUseLocation.mockReturnValue({state: null});
+    });
+
+    it('does not render the secret dialog when there is no justCreatedSecret navigation state', () => {
+      render(<AgentEditPage />);
+
+      expect(screen.queryByTestId('agent-show-client-secret')).not.toBeInTheDocument();
+    });
+
+    it('renders the secret dialog when justCreatedSecret is present in location state', () => {
+      mockUseLocation.mockReturnValue({
+        state: {
+          justCreatedSecret: {
+            agentName: 'My New Agent',
+            clientId: 'new-agent-client-id',
+            clientSecret: 'brand-new-agent-secret',
+          },
+        },
+      });
+
+      render(<AgentEditPage />);
+
+      expect(screen.getByTestId('agent-show-client-secret')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('brand-new-agent-secret')).toBeInTheDocument();
+    });
+
+    it('closes the secret dialog when Continue is clicked', async () => {
+      const user = userEvent.setup();
+      mockUseLocation.mockReturnValue({
+        state: {
+          justCreatedSecret: {
+            agentName: 'My New Agent',
+            clientSecret: 'brand-new-agent-secret',
+          },
+        },
+      });
+
+      render(<AgentEditPage />);
+
+      await user.click(screen.getByTestId('agent-client-secret-continue'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('agent-show-client-secret')).not.toBeInTheDocument();
+      });
     });
   });
 });

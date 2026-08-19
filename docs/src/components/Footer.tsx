@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import Link from '@docusaurus/Link';
 import {useBaseUrlUtils} from '@docusaurus/useBaseUrl';
@@ -23,6 +8,7 @@ import ThemedImage from '@theme/ThemedImage';
 import {Box, Container, Typography} from '@wso2/oxygen-ui';
 import {JSX} from 'react';
 import type {DocusaurusProductConfig} from '@site/docusaurus.product.config';
+import {useDocsUrl} from '@site/src/hooks/useDocsUrl';
 
 interface FooterColumnProps {
   title: string;
@@ -30,6 +16,7 @@ interface FooterColumnProps {
 }
 
 function FooterColumn({title, links}: FooterColumnProps) {
+  const docsUrl = useDocsUrl();
   return (
     <Box>
       <Typography
@@ -47,7 +34,7 @@ function FooterColumn({title, links}: FooterColumnProps) {
         <Typography
           key={link.label}
           component={Link}
-          href={link.href}
+          href={docsUrl(link.href)}
           variant="body2"
           sx={{
             display: 'block',
@@ -111,7 +98,7 @@ export default function Footer(): JSX.Element {
           <FooterColumn
             title="Product"
             links={[
-              {label: 'Docs', href: '/docs/next/guides/getting-started/get-thunderid'},
+              {label: 'Docs', href: '/docs/next/getting-started/get-thunderid'},
               {label: 'APIs', href: '/docs/next/apis'},
               {label: 'SDKs', href: '/sdks'},
             ]}

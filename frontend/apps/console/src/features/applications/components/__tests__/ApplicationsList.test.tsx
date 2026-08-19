@@ -1,26 +1,11 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
+import type {ApplicationListResponse} from '@thunderid/configure-applications';
 import {render, screen, waitFor} from '@thunderid/test-utils';
 import type {NavigateFunction} from 'react-router';
 import {describe, it, expect, beforeEach, vi} from 'vitest';
-import type {ApplicationListResponse} from '../../models/responses';
 import ApplicationsList from '../ApplicationsList';
 
 const {mockLoggerError} = vi.hoisted(() => ({
@@ -28,7 +13,10 @@ const {mockLoggerError} = vi.hoisted(() => ({
 }));
 
 // Mock the dependencies
-vi.mock('../../api/useGetApplications');
+vi.mock('@thunderid/configure-applications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@thunderid/configure-applications')>()),
+  useGetApplications: vi.fn(),
+}));
 vi.mock('react-router', async () => {
   const actual = await vi.importActual('react-router');
   return {
@@ -137,7 +125,7 @@ vi.mock('@thunderid/logger/react', () => ({
   }),
 }));
 
-const {default: useGetApplications} = await import('../../api/useGetApplications');
+const {useGetApplications} = await import('@thunderid/configure-applications');
 const {useNavigate} = await import('react-router');
 const {useDataGridLocaleText} = await import('@thunderid/hooks');
 
@@ -194,19 +182,19 @@ describe('ApplicationsList', () => {
   });
 
   it('should render error state', () => {
-    const error = new Error('Failed to load applications');
+    const error = new Error('raw server text');
     vi.mocked(useGetApplications).mockReturnValue({
       data: undefined,
       isLoading: false,
       error,
-    } as ReturnType<typeof useGetApplications>);
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGetApplications>);
 
     renderComponent();
 
-    expect(screen.getByRole('heading', {name: 'Failed to load applications'})).toBeInTheDocument();
-    // The error message is displayed twice - once in heading and once in body
-    const errorTexts = screen.getAllByText('Failed to load applications');
-    expect(errorTexts).toHaveLength(2);
+    expect(screen.getByText('Failed to load applications')).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.queryByText('raw server text')).not.toBeInTheDocument();
   });
 
   it('should render applications list successfully', () => {

@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import userEvent from '@testing-library/user-event';
 import {render, screen} from '@thunderid/test-utils';
@@ -40,10 +25,6 @@ vi.mock('../OperationModesSection', () => ({
   ),
 }));
 
-vi.mock('../SecuritySection', () => ({
-  default: () => <div data-testid="security-section">Security</div>,
-}));
-
 vi.mock('../OwnerSection', () => ({
   default: () => <div data-testid="owner-section">Owner</div>,
 }));
@@ -52,8 +33,21 @@ vi.mock('../AllowedUserTypesSection', () => ({
   default: () => <div data-testid="allowed-user-types-section">Allowed User Types</div>,
 }));
 
-vi.mock('../TokenEndpointAuthMethodSection', () => ({
-  default: () => <div data-testid="token-endpoint-auth-method-section">Token Endpoint Auth Method</div>,
+vi.mock('../DangerZoneSection', () => ({
+  default: ({onDeleteClick}: {onDeleteClick: () => void}) => (
+    <button type="button" data-testid="danger-zone-section" onClick={onDeleteClick}>
+      Delete Agent
+    </button>
+  ),
+}));
+
+vi.mock('../../../AgentDeleteDialog', () => ({
+  default: ({open, onSuccess}: {open: boolean; onSuccess?: () => void}) =>
+    open ? (
+      <button type="button" data-testid="agent-delete-dialog" onClick={() => onSuccess?.()}>
+        Confirm Delete
+      </button>
+    ) : null,
 }));
 
 describe('EditAdvancedSettings', () => {
@@ -87,10 +81,9 @@ describe('EditAdvancedSettings', () => {
     );
 
     expect(screen.getByTestId('operation-modes-section')).toBeInTheDocument();
-    expect(screen.getByTestId('security-section')).toBeInTheDocument();
     expect(screen.getByTestId('owner-section')).toBeInTheDocument();
     expect(screen.getByTestId('allowed-user-types-section')).toBeInTheDocument();
-    expect(screen.getByTestId('token-endpoint-auth-method-section')).toBeInTheDocument();
+    expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
   });
 
   it('passes the oauth2Config down to OperationModesSection', () => {
@@ -173,5 +166,176 @@ describe('EditAdvancedSettings', () => {
 
     // No OAuth2 entry to merge into; should still call with an empty array
     expect(mockOnFieldChange).toHaveBeenCalledWith('inboundAuthConfig', []);
+  });
+
+  describe('Delegated mode toggle', () => {
+    it('shows the toggle checked, and the delegated description, when Delegated mode is on', () => {
+      render(
+        <EditAdvancedSettings
+          agent={mockAgent}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByRole('switch', {name: 'Delegated mode'})).toBeChecked();
+      expect(screen.getByText(/acts on behalf of a signed-in user/i)).toBeInTheDocument();
+    });
+
+    it('shows the toggle unchecked, and the own-behalf description, when Delegated mode is off', () => {
+      render(
+        <EditAdvancedSettings
+          agent={mockAgent}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['client_credentials'], responseTypes: []}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByRole('switch', {name: 'Delegated mode'})).not.toBeChecked();
+      expect(screen.getByText(/authenticates with its own credentials/i)).toBeInTheDocument();
+    });
+
+    it('turns on Delegated mode by adding authorization_code and requiring PKCE', async () => {
+      const user = userEvent.setup();
+      render(
+        <EditAdvancedSettings
+          agent={{
+            ...mockAgent,
+            inboundAuthConfig: [{type: 'oauth2', config: {grantTypes: ['client_credentials'], responseTypes: []}}],
+          }}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['client_credentials'], responseTypes: []}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      await user.click(screen.getByRole('switch', {name: 'Delegated mode'}));
+
+      expect(mockOnFieldChange).toHaveBeenCalledWith(
+        'inboundAuthConfig',
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'oauth2',
+            config: expect.objectContaining({
+              grantTypes: expect.arrayContaining(['client_credentials', 'authorization_code']) as string[],
+              pkceRequired: true,
+            }) as Record<string, unknown>,
+          }),
+        ]) as AgentInboundAuthConfig[],
+      );
+    });
+
+    it('turns off Delegated mode by dropping the delegated-only grants', async () => {
+      const user = userEvent.setup();
+      render(
+        <EditAdvancedSettings
+          agent={{
+            ...mockAgent,
+            inboundAuthConfig: [
+              {
+                type: 'oauth2',
+                config: {grantTypes: ['client_credentials', 'authorization_code'], responseTypes: ['code']},
+              },
+            ],
+          }}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['client_credentials', 'authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      await user.click(screen.getByRole('switch', {name: 'Delegated mode'}));
+
+      expect(mockOnFieldChange).toHaveBeenCalledWith(
+        'inboundAuthConfig',
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'oauth2',
+            config: expect.objectContaining({grantTypes: ['client_credentials']}) as Record<string, unknown>,
+          }),
+        ]) as AgentInboundAuthConfig[],
+      );
+    });
+
+    it('disables the toggle for read-only agents', () => {
+      render(
+        <EditAdvancedSettings
+          agent={{...mockAgent, isReadOnly: true}}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByRole('switch', {name: 'Delegated mode'})).toBeDisabled();
+    });
+  });
+
+  describe('Danger Zone', () => {
+    it('renders the Danger Zone for an editable agent', () => {
+      render(
+        <EditAdvancedSettings
+          agent={mockAgent}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
+    });
+
+    it('does not render the Danger Zone for a read-only agent', () => {
+      render(
+        <EditAdvancedSettings
+          agent={{...mockAgent, isReadOnly: true}}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.queryByTestId('danger-zone-section')).not.toBeInTheDocument();
+    });
+
+    it('opens the delete dialog when Delete Agent is clicked and reports success', async () => {
+      const user = userEvent.setup();
+      const mockOnDeleteSuccess = vi.fn();
+      render(
+        <EditAdvancedSettings
+          agent={mockAgent}
+          editedAgent={{}}
+          oauth2Config={{grantTypes: ['authorization_code'], responseTypes: ['code']}}
+          onFieldChange={mockOnFieldChange}
+          onDeleteSuccess={mockOnDeleteSuccess}
+        />,
+      );
+
+      expect(screen.queryByTestId('agent-delete-dialog')).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId('danger-zone-section'));
+      expect(screen.getByTestId('agent-delete-dialog')).toBeInTheDocument();
+
+      await user.click(screen.getByTestId('agent-delete-dialog'));
+      expect(mockOnDeleteSuccess).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Agents with no OAuth2 inbound config', () => {
+    it('still renders the Owner section and Danger Zone', () => {
+      render(
+        <EditAdvancedSettings
+          agent={{...mockAgent, inboundAuthConfig: []}}
+          editedAgent={{}}
+          oauth2Config={undefined}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByTestId('owner-section')).toBeInTheDocument();
+      expect(screen.getByTestId('danger-zone-section')).toBeInTheDocument();
+    });
   });
 });

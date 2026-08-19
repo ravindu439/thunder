@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package security
 
@@ -233,7 +218,9 @@ func (suite *SecurityServiceTestSuite) TestProcess_RevokedToken() {
 
 	mockRevocation := &RevocationEnforcerInterfaceMock{}
 	revokedErr := errors.New("token has been revoked")
-	mockRevocation.On("EnsureNotRevoked", mock.Anything, "jti-123").Return(revokedErr)
+	mockRevocation.On("EnsureNotRevoked", mock.Anything, mock.MatchedBy(func(identity RevocationIdentity) bool {
+		return identity.JTI == "jti-123"
+	})).Return(revokedErr)
 
 	service, err := newSecurityService(
 		[]AuthenticatorInterface{suite.mockAuth1}, mockRevocation, testPublicPaths, apiPermissionEntries)
@@ -243,6 +230,32 @@ func (suite *SecurityServiceTestSuite) TestProcess_RevokedToken() {
 
 	assert.Nil(suite.T(), ctx)
 	// A revoked token is surfaced as an invalid token so the response does not disclose the reason.
+	assert.Equal(suite.T(), errInvalidToken, err)
+	mockRevocation.AssertExpectations(suite.T())
+}
+
+// Test Process rejects a request whose token family has been revoked, even when its own jti is clean.
+func (suite *SecurityServiceTestSuite) TestProcess_RevokedTokenFamily() {
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+
+	suite.testCtx.revocationID = "jti-clean"
+	suite.testCtx.tokenFamilyID = "tfid-revoked"
+	suite.mockAuth1.On("CanHandle", req).Return(true)
+	suite.mockAuth1.On("Authenticate", req).Return(suite.testCtx, nil)
+
+	mockRevocation := &RevocationEnforcerInterfaceMock{}
+	mockRevocation.On("EnsureNotRevoked", mock.Anything, mock.MatchedBy(func(identity RevocationIdentity) bool {
+		return identity.JTI == "jti-clean" && identity.TokenFamilyID == "tfid-revoked"
+	})).
+		Return(errors.New("token family has been revoked"))
+
+	service, err := newSecurityService(
+		[]AuthenticatorInterface{suite.mockAuth1}, mockRevocation, testPublicPaths, apiPermissionEntries)
+	suite.Require().NoError(err)
+
+	ctx, err := service.Process(req)
+
+	assert.Nil(suite.T(), ctx)
 	assert.Equal(suite.T(), errInvalidToken, err)
 	mockRevocation.AssertExpectations(suite.T())
 }
@@ -257,7 +270,9 @@ func (suite *SecurityServiceTestSuite) TestProcess_NotRevokedToken() {
 	suite.mockAuth1.On("Authenticate", req).Return(suite.testCtx, nil)
 
 	mockRevocation := &RevocationEnforcerInterfaceMock{}
-	mockRevocation.On("EnsureNotRevoked", mock.Anything, "jti-456").Return(nil)
+	mockRevocation.On("EnsureNotRevoked", mock.Anything, mock.MatchedBy(func(identity RevocationIdentity) bool {
+		return identity.JTI == "jti-456"
+	})).Return(nil)
 
 	service, err := newSecurityService(
 		[]AuthenticatorInterface{suite.mockAuth1}, mockRevocation, testPublicPaths, apiPermissionEntries)

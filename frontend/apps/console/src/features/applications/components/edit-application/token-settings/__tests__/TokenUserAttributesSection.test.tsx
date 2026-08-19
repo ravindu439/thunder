@@ -1,22 +1,7 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen} from '@testing-library/react';
+import {render, screen, fireEvent, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {describe, it, expect, vi} from 'vitest';
 import TokenUserAttributesSection from '../TokenUserAttributesSection';
@@ -67,7 +52,6 @@ vi.mock('../../../../constants/token-constants', () => ({
     ID_TOKEN_ENCRYPTION_ALGS: ['RSA-OAEP', 'RSA-OAEP-256'],
     ID_TOKEN_ENCRYPTION_ENCS: ['A128CBC-HS256', 'A256GCM'],
     USER_INFO_RESPONSE_TYPES: ['JSON', 'JWS', 'JWE', 'NESTED_JWT'],
-    USER_INFO_SIGNING_ALGS: ['RS256', 'RS512'],
     USER_INFO_ENCRYPTION_ALGS: ['RSA-OAEP', 'RSA-OAEP-256'],
     USER_INFO_ENCRYPTION_ENCS: ['A128CBC-HS256', 'A256GCM'],
   },
@@ -87,9 +71,11 @@ describe('TokenUserAttributesSection', () => {
     it('renders the settings card with correct title for native mode', () => {
       render(<TokenUserAttributesSection {...baseProps} sharedAttributes={[]} />);
 
-      expect(screen.getByTestId('card-title')).toHaveTextContent('Token Attributes & Response');
+      // Native mode issues one token and has no response-format controls, so it drops the
+      // "& Response" title and the multi-token wording.
+      expect(screen.getByTestId('card-title')).toHaveTextContent('Token Attributes');
       expect(screen.getByTestId('card-description')).toHaveTextContent(
-        'Configure the response types and user attributes included in your tokens and user info responses',
+        'Choose the attributes included in the token issued to this application.',
       );
     });
 
@@ -122,7 +108,7 @@ describe('TokenUserAttributesSection', () => {
       );
 
       expect(screen.getByTestId('card-description')).toHaveTextContent(
-        'Configure the response types and user attributes included in the tokens issued to this agent.',
+        'Choose the attributes in each token issued to this agent, and how each is returned.',
       );
     });
   });
@@ -263,12 +249,27 @@ describe('TokenUserAttributesSection', () => {
       onTabChange: vi.fn(),
     };
 
-    it('renders three tabs', () => {
+    it('renders the access token tab alongside the combined user-token tab', () => {
       render(<TokenUserAttributesSection {...oauthProps} />);
 
+      // The ID token and UserInfo share one scope mapping, so they sit under a single top-level tab.
       expect(screen.getByRole('tab', {name: /access token/i})).toBeInTheDocument();
-      expect(screen.getByRole('tab', {name: /id token/i})).toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /id token & user info/i})).toBeInTheDocument();
+      expect(screen.queryByRole('tab', {name: /user info endpoint/i})).not.toBeInTheDocument();
+    });
+
+    it('renders the ID Token and User Info sub-tabs under the combined tab', () => {
+      render(<TokenUserAttributesSection {...oauthProps} activeTab="id" />);
+
+      expect(screen.getByRole('tab', {name: /^id token$/i})).toBeInTheDocument();
       expect(screen.getByRole('tab', {name: /user info endpoint/i})).toBeInTheDocument();
+    });
+
+    it('labels the combined tab as ID Token alone when the User Info tab is hidden', () => {
+      render(<TokenUserAttributesSection {...oauthProps} showUserInfoTab={false} activeTab="id" />);
+
+      expect(screen.queryByRole('tab', {name: /user info endpoint/i})).not.toBeInTheDocument();
+      expect(screen.getByRole('tab', {name: /^id token$/i})).toBeInTheDocument();
     });
 
     it('shows Access Token panel when activeTab is "access"', () => {
@@ -419,6 +420,21 @@ describe('TokenUserAttributesSection', () => {
       expect(payload).toContain('agent-id');
     });
 
+    it('does not include an iss field inside the act claim (matches the agent OBO token)', () => {
+      render(<TokenUserAttributesSection {...oauthProps} activeTab="access" showActorClaim />);
+
+      const payload = screen.getByTestId('jwt-preview-payload').textContent ?? '';
+      expect(payload).toContain('"act"');
+      expect(payload).not.toContain('issuer');
+    });
+
+    it('renders the provided actorSub as the act.sub value', () => {
+      render(<TokenUserAttributesSection {...oauthProps} activeTab="access" showActorClaim actorSub="my-agent-123" />);
+
+      const payload = screen.getByTestId('jwt-preview-payload').textContent ?? '';
+      expect(payload).toContain('my-agent-123');
+    });
+
     it('does not include the act claim in the ID token preview even when showActorClaim is true', () => {
       render(<TokenUserAttributesSection {...oauthProps} activeTab="id" showActorClaim />);
 
@@ -516,7 +532,7 @@ describe('TokenUserAttributesSection', () => {
       expect(screen.getByText('Response Format')).toBeInTheDocument();
     });
 
-    it('shows signing algorithm when UserInfo response type is JWS', () => {
+    it('does not show a signing algorithm selector when UserInfo response type is JWS', () => {
       render(
         <TokenUserAttributesSection
           {...baseProps}
@@ -532,7 +548,9 @@ describe('TokenUserAttributesSection', () => {
         />,
       );
 
-      expect(screen.getByText('Signing Algorithm')).toBeInTheDocument();
+      // Signing always uses the server key, so no algorithm is chosen or encryption shown for JWS.
+      expect(screen.queryByText('Signing Algorithm')).not.toBeInTheDocument();
+      expect(screen.queryByText('Encryption Algorithm')).not.toBeInTheDocument();
     });
 
     it('shows encryption fields when UserInfo response type is JWE', () => {
@@ -567,12 +585,246 @@ describe('TokenUserAttributesSection', () => {
           isUserInfoCustomAttributes
           onToggleUserInfo={vi.fn()}
           userInfoResponseType="JSON"
+          hasCertificate
           onUserInfoConfigChange={vi.fn()}
         />,
       );
 
       expect(screen.queryByText('Signing Algorithm')).not.toBeInTheDocument();
       expect(screen.queryByText('Encryption Algorithm')).not.toBeInTheDocument();
+      // With a certificate configured, the certificate-required hint is not shown.
+      expect(screen.queryByText(/Encrypted formats require an OAuth client certificate/)).not.toBeInTheDocument();
+    });
+
+    it('shows the certificate requirement hint for an encrypted UserInfo format', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="userinfo"
+          onTabChange={vi.fn()}
+          isUserInfoCustomAttributes
+          onToggleUserInfo={vi.fn()}
+          userInfoResponseType="JWE"
+          onUserInfoConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/Encrypted formats require an OAuth client certificate/)).toBeInTheDocument();
+    });
+
+    it('shows the certificate requirement hint for an encrypted ID token format', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWE"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('Encryption Algorithm')).toBeInTheDocument();
+      expect(screen.getByText(/Encrypted formats require an OAuth client certificate/)).toBeInTheDocument();
+    });
+
+    it('names the configured certificate location in the requirement hint', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          certificateLocation="Credentials"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/configured under the Credentials tab/)).toBeInTheDocument();
+    });
+
+    it('hides the certificate requirement hint when a certificate is configured', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          hasCertificate
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText(/Encrypted formats require an OAuth client certificate/)).not.toBeInTheDocument();
+    });
+
+    it('shows the read-only signing algorithm from discovery on the ID token tab', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          signingAlg="ES256"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText(/Signed with ES256/)).toBeInTheDocument();
+    });
+
+    it('hides the signing algorithm on the ID token tab when the format is encrypt-only (JWE)', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWE"
+          signingAlg="ES256"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText(/Signed with/)).not.toBeInTheDocument();
+    });
+
+    it('hides the signing algorithm when it cannot be resolved from discovery', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByText(/Signed with/)).not.toBeInTheDocument();
+    });
+
+    it('disables encrypted ID token format options when no certificate is configured', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      // Open the response type dropdown. In tests the i18n mock renders the raw format values.
+      fireEvent.mouseDown(screen.getByRole('combobox'));
+      const options = within(screen.getByRole('listbox')).getAllByRole('option');
+      const optionByValue = (value: string) => options.find((o) => o.getAttribute('data-value') === value);
+
+      expect(optionByValue('JWE')).toHaveAttribute('aria-disabled', 'true');
+      expect(optionByValue('NESTED_JWT')).toHaveAttribute('aria-disabled', 'true');
+      expect(optionByValue('JWT')).not.toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('enables encrypted ID token format options when a certificate is configured', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          accessTokenAttributes={[]}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="id"
+          onTabChange={vi.fn()}
+          idTokenResponseType="JWT"
+          hasCertificate
+          onIdTokenConfigChange={vi.fn()}
+        />,
+      );
+
+      fireEvent.mouseDown(screen.getByRole('combobox'));
+      const options = within(screen.getByRole('listbox')).getAllByRole('option');
+      const optionByValue = (value: string) => options.find((o) => o.getAttribute('data-value') === value);
+
+      expect(optionByValue('JWE')).not.toHaveAttribute('aria-disabled', 'true');
+      expect(optionByValue('NESTED_JWT')).not.toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  describe('Scope mapping slot and collapsible attribute picker', () => {
+    const slotProps = {
+      ...baseProps,
+      userAttributes: ['username'],
+      accessTokenAttributes: ['email'],
+      idTokenAttributes: ['username'],
+      userInfoAttributes: [],
+      onTabChange: vi.fn(),
+      scopeMapping: <div data-testid="scope-mapping">mapping</div>,
+    };
+
+    it('renders the scope mapping under the ID Token tab', () => {
+      render(<TokenUserAttributesSection {...slotProps} activeTab="id" />);
+
+      expect(screen.getByTestId('scope-mapping')).toBeInTheDocument();
+    });
+
+    it('renders the scope mapping under the User Info tab', () => {
+      render(<TokenUserAttributesSection {...slotProps} activeTab="userinfo" />);
+
+      expect(screen.getByTestId('scope-mapping')).toBeInTheDocument();
+    });
+
+    it('does not render the scope mapping under the Access Token tab', () => {
+      render(<TokenUserAttributesSection {...slotProps} activeTab="access" />);
+
+      // Access token attributes are not scope-driven, so the mapping would be misleading there.
+      expect(screen.queryByTestId('scope-mapping')).not.toBeInTheDocument();
+    });
+
+    it('collapses the attribute picker on the ID Token tab behind a disclosure', () => {
+      render(<TokenUserAttributesSection {...slotProps} activeTab="id" />);
+
+      const toggle = screen.getByRole('button', {name: /allowed attributes/i});
+      expect(toggle).toBeInTheDocument();
+      expect(screen.getByText('username').closest('.MuiChip-root')).not.toBeVisible();
+    });
+
+    it('expands the attribute picker when the disclosure is clicked', async () => {
+      const user = userEvent.setup();
+      render(<TokenUserAttributesSection {...slotProps} activeTab="id" />);
+
+      await user.click(screen.getByRole('button', {name: /allowed attributes/i}));
+
+      await waitFor(() => {
+        expect(screen.getByText('username').closest('.MuiChip-root')).toBeVisible();
+      });
+    });
+
+    it('leaves the attribute picker expanded on the Access Token tab', () => {
+      render(<TokenUserAttributesSection {...slotProps} activeTab="access" />);
+
+      // Nothing else drives the access token, so its picker is not collapsed.
+      expect(screen.queryByRole('button', {name: /allowed attributes/i})).not.toBeInTheDocument();
+      expect(screen.getByText('username').closest('.MuiChip-root')).toBeVisible();
     });
   });
 
@@ -583,6 +835,56 @@ describe('TokenUserAttributesSection', () => {
       // 'ouHandle' is in the mocked ADDITIONAL_USER_ATTRIBUTES and not a default attr
       // It should appear alongside userAttributes when userAttributes.length > 0
       expect(screen.getByText('ouHandle')).toBeInTheDocument();
+    });
+  });
+
+  describe('Selected attributes missing from the schema', () => {
+    it('renders a selected attribute that is no longer in userAttributes', () => {
+      render(
+        <TokenUserAttributesSection {...baseProps} userAttributes={['email']} sharedAttributes={['deletedAttr']} />,
+      );
+
+      const chip = screen.getByText('deletedAttr').closest('.MuiChip-root');
+      expect(chip).toHaveClass('MuiChip-filled');
+    });
+
+    it('allows deselecting an attribute that is no longer in userAttributes', async () => {
+      const onAttributeClick = vi.fn();
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          onAttributeClick={onAttributeClick}
+          userAttributes={['email']}
+          sharedAttributes={['deletedAttr']}
+        />,
+      );
+
+      await userEvent.click(screen.getByText('deletedAttr'));
+
+      expect(onAttributeClick).toHaveBeenCalledWith('deletedAttr', 'shared');
+    });
+
+    it('renders stale selections even when userAttributes is empty', () => {
+      render(<TokenUserAttributesSection {...baseProps} sharedAttributes={['deletedAttr']} />);
+
+      expect(screen.getByText('deletedAttr')).toBeInTheDocument();
+    });
+
+    it('renders a stale access token attribute in OAuth mode', () => {
+      render(
+        <TokenUserAttributesSection
+          {...baseProps}
+          userAttributes={['email']}
+          accessTokenAttributes={['deletedAttr']}
+          idTokenAttributes={[]}
+          userInfoAttributes={[]}
+          activeTab="access"
+          onTabChange={vi.fn()}
+        />,
+      );
+
+      const chip = screen.getByText('deletedAttr').closest('.MuiChip-root');
+      expect(chip).toHaveClass('MuiChip-filled');
     });
   });
 });

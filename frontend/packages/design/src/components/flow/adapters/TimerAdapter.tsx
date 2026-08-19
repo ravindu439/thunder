@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {FlowTimer, type FlowTimerRenderProps} from '@thunderid/react';
 import {cn} from '@thunderid/utils';
 import {Alert, Typography} from '@wso2/oxygen-ui';
-import type {JSX} from 'react';
+import {useState, type JSX} from 'react';
 
 /**
  * Props for the TimerAdapter component.
@@ -41,8 +26,17 @@ export default function TimerAdapter({
   expiresIn,
   textTemplate = 'Time remaining: {time}',
 }: TimerAdapterProps): JSX.Element {
+  // The caller derives expiresIn from the clock on every render, so it collapses to zero once the
+  // deadline passes and FlowTimer stops rendering. Hold the last active duration to keep the expired
+  // state on screen while the step it belongs to is still being submitted. A new duration replaces
+  // it, so a later step still gets its own countdown.
+  const [activeExpiresIn, setActiveExpiresIn] = useState<number>(expiresIn);
+  if (expiresIn > 0 && expiresIn !== activeExpiresIn) {
+    setActiveExpiresIn(expiresIn);
+  }
+
   return (
-    <FlowTimer expiresIn={expiresIn}>
+    <FlowTimer expiresIn={activeExpiresIn}>
       {({isExpired, formattedTime}: FlowTimerRenderProps) =>
         isExpired ? (
           <Alert className={cn('Flow--timer', 'Alert--root')} severity="warning" sx={{mt: 1}}>

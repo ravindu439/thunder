@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package logout
 
@@ -24,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -32,6 +18,7 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/flow/flowexec"
 	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
+	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
@@ -79,7 +66,7 @@ func (suite *LogoutHandlerTestSuite) TestHandleLogout_InitiatesFlowAndRedirectsT
 			suite.Equal("app-1", ic.ApplicationID)
 			suite.Equal("SIGNOUT", ic.FlowType)
 			capturedRuntime = ic.RuntimeData
-			return "exec-1", nil
+			return testExecutionID, nil
 		})
 
 	// A post_logout_redirect_uri is only honored with an id_token_hint, so drive the flow with one.
@@ -102,7 +89,7 @@ func (suite *LogoutHandlerTestSuite) TestHandleLogout_InitiatesFlowAndRedirectsT
 	location := rec.Header().Get("Location")
 	suite.Contains(location, "https://gate.example:9443/signout")
 	suite.Contains(location, "applicationId=app-1")
-	suite.Contains(location, "executionId=exec-1")
+	suite.Contains(location, "executionId="+testExecutionID)
 	suite.Contains(location, "logoutId=", "the gate needs the logout id to complete on callback")
 
 	// The post-logout target is kept in the OAuth layer, not threaded through the flow.
@@ -166,19 +153,33 @@ func (suite *LogoutHandlerTestSuite) TestHandleLogout_FlowInitiationError_MapsSt
 	}
 }
 
-// A POST to the end_session_endpoint initiates the flow and redirects to the gate, exactly like GET.
-func (suite *LogoutHandlerTestSuite) TestHandleLogout_POSTInitiatesAndRedirects() {
+// A POST to the end_session_endpoint carries its parameters in the form body rather than the query
+// string. The handler must read them from there and forward them to the sign-out flow, so that a POST
+// behaves exactly like a GET.
+func (suite *LogoutHandlerTestSuite) TestHandleLogout_POSTReadsFormBodyAndRedirects() {
 	actor := actorprovidermock.NewActorProviderMock(suite.T())
-	actor.EXPECT().GetOAuthClientByClientID(mock.Anything, "client-x").Return(clientWithPostLogout(), nil)
+	actor.EXPECT().GetOAuthClientByClientID(mock.Anything, "client-x").
+		Return(clientWithPostLogout("https://rp.example/after"), nil)
 	flowSvc := flowexecmock.NewFlowExecServiceInterfaceMock(suite.T())
-	flowSvc.EXPECT().InitiateFlow(mock.Anything, mock.Anything).Return("exec-2", nil)
+	var capturedParams map[string][]string
+	flowSvc.EXPECT().InitiateFlow(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, ic *flowexec.FlowInitContext) (string, *tidcommon.ServiceError) {
+			capturedParams = ic.InitiatorRequest.QueryParams
+			return "exec-2", nil
+		})
 	store := newLogoutRequestStoreInterfaceMock(suite.T())
 	store.EXPECT().AddRequest(mock.Anything, mock.Anything).Return("logout-1", nil)
 	svc := newLogoutService(jwtmock.NewJWTServiceInterfaceMock(suite.T()), actor, flowSvc,
 		store, testIssuer)
 	handler := newLogoutHandler(svc, gateConfig())
 
-	req := httptest.NewRequest(http.MethodPost, "/oauth2/logout?client_id=client-x", nil)
+	body := url.Values{
+		"client_id":                {"client-x"},
+		"post_logout_redirect_uri": {"https://rp.example/after"},
+		"state":                    {"xyz"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/oauth2/logout", strings.NewReader(body.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 
 	handler.HandleLogout(rec, req)
@@ -187,6 +188,8 @@ func (suite *LogoutHandlerTestSuite) TestHandleLogout_POSTInitiatesAndRedirects(
 	location := rec.Header().Get("Location")
 	suite.Contains(location, "https://gate.example:9443/signout")
 	suite.Contains(location, "executionId=exec-2")
+	suite.Equal([]string{"xyz"}, capturedParams[constants.RequestParamState],
+		"body parameters must reach the sign-out flow the same way query parameters do")
 }
 
 // The completion callback consumes the stored logout request and returns the post-logout redirect URI.

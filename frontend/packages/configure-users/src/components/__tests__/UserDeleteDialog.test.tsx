@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent, waitFor} from '@thunderid/test-utils';
 import {describe, it, expect, vi, beforeEach} from 'vitest';
@@ -26,12 +11,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, arg?: unknown): string => {
       const translations: Record<string, string> = {
-        'users:delete.title': 'Delete User',
-        'users:delete.message': 'Are you sure you want to delete this user?',
-        'users:delete.disclaimer': 'All associated data will be permanently removed.',
-        'users:delete.usages.loading': 'Checking affected resources…',
-        'users:delete.usages.none': 'No agents currently list this user as their owner.',
-        'users:delete.usages.title': 'The following agents list this user as their owner:',
+        'delete.title': 'Delete User',
+        'delete.message': 'Are you sure you want to delete this user?',
+        'delete.disclaimer': 'All associated data will be permanently removed.',
+        'delete.usages.loading': 'Checking affected resources…',
+        'delete.usages.none': 'No agents currently list this user as their owner.',
+        'delete.usages.title': 'The following agents list this user as their owner:',
         'common:actions.cancel': 'Cancel',
         'common:actions.delete': 'Delete',
         'common:status.deleting': 'Deleting...',
@@ -39,8 +24,12 @@ vi.mock('react-i18next', () => ({
       if (translations[key]) return translations[key];
       if (typeof arg === 'string') return arg;
       if (arg && typeof arg === 'object') {
-        const obj = arg as {defaultValue?: string; count?: number};
-        if (obj.defaultValue) return obj.defaultValue.replace('{{count}}', String(obj.count ?? ''));
+        const obj = arg as {defaultValue?: string; count?: number; dependencies?: string};
+        if (obj.defaultValue) {
+          return obj.defaultValue
+            .replace('{{count}}', String(obj.count ?? ''))
+            .replace('{{dependencies}}', obj.dependencies ?? '');
+        }
       }
       return key;
     },
@@ -49,8 +38,10 @@ vi.mock('react-i18next', () => ({
 
 // Mock useDeleteUser hook.
 const mockMutate = vi.fn();
+const mockReset = vi.fn();
 const mockDeleteUser = {
   mutate: mockMutate,
+  reset: mockReset,
   isPending: false,
 };
 vi.mock('../../api/useDeleteUser', () => ({
@@ -194,7 +185,7 @@ describe('UserDeleteDialog', () => {
       });
     });
 
-    it('should display an error alert on deletion failure', async () => {
+    it('should display the generic fallback message on deletion failure', async () => {
       mockMutate.mockImplementation((_userId: string, options: {onError: (err: Error) => void}) => {
         options.onError(new Error('Network error'));
       });
@@ -204,7 +195,27 @@ describe('UserDeleteDialog', () => {
       fireEvent.click(screen.getByRole('button', {name: 'Delete'}));
 
       await waitFor(() => {
-        expect(screen.getByText('Network error')).toBeInTheDocument();
+        expect(screen.getByText('Failed to delete user. Please try again.')).toBeInTheDocument();
+      });
+    });
+
+    it('should display the interpolated dependency summary for a mapped USR-1027 failure', async () => {
+      const error = new Error('Conflict') as Error & {response?: {data?: {code: string; description?: unknown}}};
+      error.response = {data: {code: 'USR-1027', description: {params: {dependencies: '2 agent(s)'}}}};
+      mockMutate.mockImplementation((_userId: string, options: {onError: (err: Error) => void}) => {
+        options.onError(error);
+      });
+
+      render(<UserDeleteDialog open userId="user-123" onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByRole('button', {name: 'Delete'}));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(
+            'This user cannot be deleted because 2 agent(s) depend on it. Remove or reassign them first.',
+          ),
+        ).toBeInTheDocument();
       });
     });
   });

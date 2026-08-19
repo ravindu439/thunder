@@ -1,27 +1,23 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {useCopyToClipboard} from '@thunderid/hooks';
-import {Box, Button, FormControl, FormLabel, IconButton, Stack, TextField, Tooltip, Typography} from '@wso2/oxygen-ui';
-import {Check, Copy, Info, Plus, Trash} from '@wso2/oxygen-ui-icons-react';
+import {
+  Alert,
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  IconButton,
+  Stack,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@wso2/oxygen-ui';
+import {Plus, Trash} from '@wso2/oxygen-ui-icons-react';
 import type {ChangeEvent, JSX} from 'react';
 import {useEffect, useState} from 'react';
 import {useTranslation} from 'react-i18next';
+import McpInspectorLogo from './McpInspectorLogo';
 import validateMcpRedirectUri from '../../../utils/validateMcpRedirectUri';
 
 const MCP_INSPECTOR_CALLBACK_URI = 'http://localhost:6274/oauth/callback';
@@ -61,9 +57,10 @@ export interface ConfigureMcpConnectionProps {
  * Presents a redirect URI editor (add/remove/edit) validated against the MCP redirect URI
  * rule: each URI must be loopback (`http://localhost`, `http://127.0.0.1`, or `http://[::1]`)
  * or use HTTPS — wildcards are rejected anywhere in the URI, since the backend's create-time
- * validation rejects them too. An inline guidance line above the first input surfaces the MCP
- * Inspector's default callback URI with a copy-to-clipboard affordance (no click-to-fill). The
- * step is ready only when at least one redirect URI is present and every non-empty URI is valid.
+ * validation rejects them too. A banner above the editor surfaces the MCP Inspector's default
+ * callback URI with a quick-add affordance, mirroring the dev-server banner shown on the
+ * standard Configuration step's URLs section. The step is ready only when at least one redirect
+ * URI is present and every non-empty URI is valid.
  *
  * @param props - The component props
  * @param props.redirectUris - The currently configured redirect URIs
@@ -99,13 +96,8 @@ export default function ConfigureMcpConnection({
   compact = false,
 }: ConfigureMcpConnectionProps): JSX.Element {
   const {t} = useTranslation();
-  const {copied, copy} = useCopyToClipboard({resetDelay: 2000});
 
   const removeUriLabel = t('applications:onboarding.mcp.connection.redirectUris.remove', 'Remove redirect URI');
-  const copyInspectorUriLabel = t(
-    'applications:onboarding.mcp.connection.inspectorHint.copyAriaLabel',
-    'Copy MCP Inspector callback URI',
-  );
 
   const [rows, setRows] = useState<string[]>(() => (redirectUris.length > 0 ? redirectUris : ['']));
   const [uriErrors, setUriErrors] = useState<Record<number, string>>({});
@@ -176,10 +168,19 @@ export default function ConfigureMcpConnection({
     });
   };
 
-  const handleCopyInspectorUri = (): void => {
-    copy(MCP_INSPECTOR_CALLBACK_URI).catch(() => {
-      // Error already handled in copy
-    });
+  // Fills the first empty row if one is present instead of appending, so quick-adding into an
+  // otherwise-blank editor doesn't leave a dangling empty field above the newly added URI.
+  const handleAddInspectorUri = (): void => {
+    if (rows.some((uri) => uri.trim() === MCP_INSPECTOR_CALLBACK_URI)) {
+      return;
+    }
+    const emptyIndex = rows.findIndex((uri) => uri.trim() === '');
+    const newRows =
+      emptyIndex !== -1
+        ? rows.map((uri, i) => (i === emptyIndex ? MCP_INSPECTOR_CALLBACK_URI : uri))
+        : [...rows, MCP_INSPECTOR_CALLBACK_URI];
+    setRows(newRows);
+    emitChange(newRows);
   };
 
   return (
@@ -193,6 +194,18 @@ export default function ConfigureMcpConnection({
         </Stack>
       )}
 
+      <Alert severity="info" icon={<McpInspectorLogo />} data-testid="application-mcp-inspector-hint">
+        {t('applications:onboarding.mcp.connection.inspectorHint.prefix', 'Testing with MCP Inspector? Use')}{' '}
+        <code>{MCP_INSPECTOR_CALLBACK_URI}</code>{' '}
+        <Box
+          component="span"
+          onClick={handleAddInspectorUri}
+          sx={{color: 'primary.main', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline'}}
+        >
+          {t('applications:onboarding.configure.details.devServer.addToRedirect', 'Add it to redirect URIs')}
+        </Box>
+      </Alert>
+
       <FormControl fullWidth required>
         <FormLabel htmlFor="mcp-redirect-uris-section">
           {t('applications:onboarding.mcp.connection.redirectUris.label')}
@@ -200,20 +213,6 @@ export default function ConfigureMcpConnection({
         <Typography variant="caption" color="text.secondary" sx={{display: 'block', mb: 2}}>
           {t('applications:onboarding.mcp.connection.redirectUris.hint')}
         </Typography>
-
-        <Stack direction="row" spacing={1} alignItems="center" sx={{mb: 2}}>
-          <Info size={16} />
-          <Typography variant="body2" color="text.secondary">
-            {t('applications:onboarding.mcp.connection.inspectorHint', 'Testing with MCP Inspector? Use {{uri}}', {
-              uri: MCP_INSPECTOR_CALLBACK_URI,
-            })}
-          </Typography>
-          <Tooltip title={copyInspectorUriLabel}>
-            <IconButton aria-label={copyInspectorUriLabel} onClick={handleCopyInspectorUri} size="small">
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </IconButton>
-          </Tooltip>
-        </Stack>
 
         <Stack spacing={2} id="mcp-redirect-uris-section">
           {rows.map((uri, index) => (
@@ -247,7 +246,7 @@ export default function ConfigureMcpConnection({
           ))}
 
           <Box>
-            <Button variant="outlined" size="small" startIcon={<Plus size={16} />} onClick={handleAddUri}>
+            <Button variant="text" color="primary" size="small" startIcon={<Plus size={16} />} onClick={handleAddUri}>
               {t('applications:onboarding.mcp.connection.redirectUris.addUri')}
             </Button>
           </Box>

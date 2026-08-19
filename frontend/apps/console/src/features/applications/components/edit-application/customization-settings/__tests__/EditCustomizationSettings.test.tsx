@@ -1,24 +1,9 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
-import {render, screen} from '@testing-library/react';
+import {render, screen, fireEvent} from '@testing-library/react';
+import type {Application} from '@thunderid/configure-applications';
 import {describe, it, expect, vi} from 'vitest';
-import type {Application} from '../../../../models/application';
 import EditCustomizationSettings from '../EditCustomizationSettings';
 
 vi.mock('react-i18next', () => ({
@@ -202,6 +187,62 @@ describe('EditCustomizationSettings', () => {
       // Should fall back to application values
       const themeCombobox = screen.getByPlaceholderText('applications:edit.customization.theme.placeholder');
       expect(themeCombobox).toHaveValue('Default Theme');
+    });
+  });
+
+  describe('URLs section reset', () => {
+    it('reverts UrlsSection to the application value when sectionResetKey changes', () => {
+      const {rerender} = render(
+        <EditCustomizationSettings
+          application={mockApplication}
+          editedApp={{}}
+          onFieldChange={mockOnFieldChange}
+          sectionResetKey={0}
+        />,
+      );
+
+      const tosField = screen.getByPlaceholderText('applications:edit.customization.tosUri.placeholder');
+      fireEvent.change(tosField, {target: {value: 'https://not-yet-saved.example.com/terms'}});
+      expect(tosField).toHaveValue('https://not-yet-saved.example.com/terms');
+
+      // Simulate the page-level Reset: editedApp is cleared and sectionResetKey is bumped.
+      rerender(
+        <EditCustomizationSettings
+          application={mockApplication}
+          editedApp={{}}
+          onFieldChange={mockOnFieldChange}
+          sectionResetKey={1}
+        />,
+      );
+
+      const tosFieldAfterReset = screen.getByPlaceholderText('applications:edit.customization.tosUri.placeholder');
+      expect(tosFieldAfterReset).toHaveValue('https://example.com/terms');
+    });
+
+    it('keeps the typed value when sectionResetKey stays the same', () => {
+      const {rerender} = render(
+        <EditCustomizationSettings
+          application={mockApplication}
+          editedApp={{}}
+          onFieldChange={mockOnFieldChange}
+          sectionResetKey={0}
+        />,
+      );
+
+      const tosField = screen.getByPlaceholderText('applications:edit.customization.tosUri.placeholder');
+      fireEvent.change(tosField, {target: {value: 'https://not-yet-saved.example.com/terms'}});
+
+      rerender(
+        <EditCustomizationSettings
+          application={mockApplication}
+          editedApp={{}}
+          onFieldChange={mockOnFieldChange}
+          sectionResetKey={0}
+        />,
+      );
+
+      const tosFieldAfterRerender = screen.getByPlaceholderText('applications:edit.customization.tosUri.placeholder');
+      expect(tosFieldAfterRerender).toHaveValue('https://not-yet-saved.example.com/terms');
     });
   });
 });

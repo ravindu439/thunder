@@ -1,9 +1,11 @@
 {
   "id": "custom",
+  "type": "custom",
   "displayName": "Custom",
   "description": "Fully customizable application with all configuration options available",
   "creationFlow": {
-    "steps": ["NAME", "ORGANIZATION_UNIT", "COMPLETE"]
+    "steps": ["ORGANIZATION_UNIT", "DETAILS", "COMPLETE"],
+    "previewSteps": []
   },
   "defaults": {
     "name": "My Application",

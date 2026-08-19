@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {screen, fireEvent, waitFor, renderWithProviders, renderHook} from '@thunderid/test-utils';
 import {useTranslation} from 'react-i18next';
@@ -22,10 +7,12 @@ import {describe, it, expect, vi, beforeEach, beforeAll} from 'vitest';
 import type {OrganizationUnit} from '../../../../models/organization-unit';
 import AppearanceSection from '../AppearanceSection';
 
-// Mock useGetThemes hook
+// Mock useGetThemes / useGetLayouts hooks
 const mockUseGetThemes = vi.fn();
+const mockUseGetLayouts = vi.fn();
 vi.mock('@thunderid/design', () => ({
   useGetThemes: (): unknown => mockUseGetThemes(),
+  useGetLayouts: (): unknown => mockUseGetLayouts(),
 }));
 
 describe('AppearanceSection', () => {
@@ -53,6 +40,10 @@ describe('AppearanceSection', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseGetLayouts.mockReturnValue({
+      data: {layouts: []},
+      isLoading: false,
+    });
   });
 
   it('should render the appearance section', () => {
@@ -155,7 +146,7 @@ describe('AppearanceSection', () => {
       <AppearanceSection organizationUnit={mockOrganizationUnit} editedOU={{}} onFieldChange={mockOnFieldChange} />,
     );
 
-    const autocomplete = screen.getByRole('combobox');
+    const autocomplete = screen.getAllByRole('combobox')[0];
     fireEvent.mouseDown(autocomplete); // MUI Autocomplete usually responds to mouseDown to open
 
     await waitFor(() => {
@@ -241,7 +232,7 @@ describe('AppearanceSection', () => {
       <AppearanceSection organizationUnit={mockOrganizationUnit} editedOU={{}} onFieldChange={mockOnFieldChange} />,
     );
 
-    const autocomplete = screen.getByRole('combobox');
+    const autocomplete = screen.getAllByRole('combobox')[0];
     expect(autocomplete).toBeInTheDocument();
     // Verify the component handles both string and object option types
     fireEvent.mouseDown(autocomplete);
@@ -273,5 +264,86 @@ describe('AppearanceSection', () => {
 
     const autocomplete = screen.getByPlaceholderText(t('organizationUnits:edit.customization.theme.placeholder'));
     expect(autocomplete).toBeInTheDocument();
+  });
+
+  describe('Layout selection', () => {
+    const mockLayouts = [
+      {id: 'default-layout', displayName: 'Default Layout'},
+      {id: 'split-layout', displayName: 'Split Layout'},
+    ];
+
+    beforeEach(() => {
+      mockUseGetThemes.mockReturnValue({
+        data: {themes: mockThemes},
+        isLoading: false,
+      });
+    });
+
+    it('should render layout label', () => {
+      mockUseGetLayouts.mockReturnValue({
+        data: {layouts: mockLayouts},
+        isLoading: false,
+      });
+
+      renderWithProviders(
+        <AppearanceSection organizationUnit={mockOrganizationUnit} editedOU={{}} onFieldChange={mockOnFieldChange} />,
+      );
+
+      expect(screen.getByText('Layout')).toBeInTheDocument();
+    });
+
+    it('should show loading spinner when layouts are loading', () => {
+      mockUseGetLayouts.mockReturnValue({
+        data: null,
+        isLoading: true,
+      });
+
+      renderWithProviders(
+        <AppearanceSection organizationUnit={mockOrganizationUnit} editedOU={{}} onFieldChange={mockOnFieldChange} />,
+      );
+
+      expect(screen.getAllByRole('progressbar').length).toBeGreaterThan(0);
+    });
+
+    it('should display current layout from organizationUnit', () => {
+      mockUseGetLayouts.mockReturnValue({
+        data: {layouts: mockLayouts},
+        isLoading: false,
+      });
+
+      renderWithProviders(
+        <AppearanceSection
+          organizationUnit={{...mockOrganizationUnit, layoutId: 'default-layout'}}
+          editedOU={{}}
+          onFieldChange={mockOnFieldChange}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('Default Layout')).toBeInTheDocument();
+    });
+
+    it('should call onFieldChange when layout is selected', async () => {
+      mockUseGetLayouts.mockReturnValue({
+        data: {layouts: mockLayouts},
+        isLoading: false,
+      });
+
+      renderWithProviders(
+        <AppearanceSection organizationUnit={mockOrganizationUnit} editedOU={{}} onFieldChange={mockOnFieldChange} />,
+      );
+
+      const layoutAutocomplete = screen.getByPlaceholderText('Select a layout');
+      fireEvent.mouseDown(layoutAutocomplete);
+
+      await waitFor(() => {
+        expect(screen.getByText('Split Layout')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText('Split Layout'));
+
+      await waitFor(() => {
+        expect(mockOnFieldChange).toHaveBeenCalledWith('layoutId', 'split-layout');
+      });
+    });
   });
 });

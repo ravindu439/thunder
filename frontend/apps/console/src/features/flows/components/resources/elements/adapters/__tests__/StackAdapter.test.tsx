@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import type {ReactNode} from 'react';
@@ -129,20 +114,20 @@ describe('StackAdapter', () => {
       expect(screen.getByTestId('reorderable-element-child-2')).toBeInTheDocument();
     });
 
-    it('should show placeholder when no children exist in flex mode', () => {
+    it('should not show a slot placeholder in flex mode, where the add button covers it', () => {
       const resource = createMockElement({components: []});
 
       render(<StackAdapter resource={resource} stepId="step-1" />);
 
-      expect(screen.getByText('Drop here')).toBeInTheDocument();
+      expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
     });
 
-    it('should show placeholder when components is undefined', () => {
+    it('should not show a slot placeholder when components is undefined', () => {
       const resource = createMockElement({components: undefined});
 
       render(<StackAdapter resource={resource} stepId="step-1" />);
 
-      expect(screen.getByText('Drop here')).toBeInTheDocument();
+      expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
     });
 
     it('should not show placeholder when children exist in flex mode', () => {
@@ -156,7 +141,101 @@ describe('StackAdapter', () => {
     });
   });
 
-  describe('Grid mode (items >= 2)', () => {
+  describe('Flex mode (fewer than two slots)', () => {
+    it('should keep the flex layout when items is 1', () => {
+      // Every builder-created stack is seeded with items 1, so this is the layout
+      // previously authored flows rely on.
+      const resource = createMockElement({
+        items: 1,
+        direction: 'row',
+        components: [createChildElement('child-1'), createChildElement('child-2')],
+      });
+
+      render(<StackAdapter resource={resource} stepId="step-1" />);
+
+      expect(screen.getByTestId('reorderable-element-child-1')).toBeInTheDocument();
+      expect(screen.getByTestId('reorderable-element-child-2')).toBeInTheDocument();
+      // Flex mode never pads with slot placeholders when children exist.
+      expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
+    });
+
+    it('should not show a slot placeholder when items is 1 and there are no children', () => {
+      // A flex stack has no slot structure to convey, and the "Add Component" button
+      // already fills the empty state.
+      const resource = createMockElement({items: 1, direction: 'row', components: []});
+
+      render(<StackAdapter resource={resource} stepId="step-1" />);
+
+      expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
+    });
+
+    it('should keep the flex layout when items is absent', () => {
+      const resource = createMockElement({
+        direction: 'row',
+        components: [],
+      });
+
+      render(<StackAdapter resource={resource} stepId="step-1" />);
+
+      expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Add component', () => {
+    const stackElements: FlowElement[] = [
+      {id: 'action', type: 'ACTION', display: {label: 'Button', showOnResourcePanel: true}} as unknown as FlowElement,
+      {id: 'text', type: 'TEXT', display: {label: 'Text', showOnResourcePanel: true}} as unknown as FlowElement,
+      {
+        id: 'input',
+        type: 'TEXT_INPUT',
+        display: {label: 'Text Input', showOnResourcePanel: true},
+      } as unknown as FlowElement,
+      {id: 'hidden', type: 'TEXT', display: {label: 'Hidden', showOnResourcePanel: false}} as unknown as FlowElement,
+    ];
+
+    it('should render the add component button', () => {
+      render(<StackAdapter resource={createMockElement()} stepId="step-1" availableElements={stackElements} />);
+
+      expect(screen.getByTestId('stack-add-component-button')).toBeInTheDocument();
+    });
+
+    it('should not render the add button when nothing can be added', () => {
+      render(<StackAdapter resource={createMockElement()} stepId="step-1" availableElements={[]} />);
+
+      expect(screen.queryByTestId('stack-add-component-button')).not.toBeInTheDocument();
+    });
+
+    it('should offer only stack-compatible elements shown on the resource panel', () => {
+      render(<StackAdapter resource={createMockElement()} stepId="step-1" availableElements={stackElements} />);
+
+      fireEvent.click(screen.getByTestId('stack-add-component-button'));
+
+      expect(screen.getByText('Button')).toBeInTheDocument();
+      expect(screen.getByText('Text')).toBeInTheDocument();
+      // TEXT_INPUT is a form field, and the hidden entry opts out of the panel.
+      expect(screen.queryByText('Text Input')).not.toBeInTheDocument();
+      expect(screen.queryByText('Hidden')).not.toBeInTheDocument();
+    });
+
+    it('should add the chosen element to this stack', () => {
+      const onAddElementToForm = vi.fn();
+      render(
+        <StackAdapter
+          resource={createMockElement()}
+          stepId="step-1"
+          availableElements={stackElements}
+          onAddElementToForm={onAddElementToForm}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId('stack-add-component-button'));
+      fireEvent.click(screen.getByText('Button'));
+
+      expect(onAddElementToForm).toHaveBeenCalledWith(expect.objectContaining({type: 'ACTION'}), 'stack-1');
+    });
+  });
+
+  describe('Grid mode (multiple slots)', () => {
     it('should show empty placeholder slots for unoccupied grid positions', () => {
       const resource = createMockElement({
         items: 3,
@@ -181,7 +260,7 @@ describe('StackAdapter', () => {
       expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
     });
 
-    it('should show no empty slots when more children than grid items', () => {
+    it('should show a placeholder for the trailing cell of a partially filled last row', () => {
       const resource = createMockElement({
         items: 2,
         components: [createChildElement('child-1'), createChildElement('child-2'), createChildElement('child-3')],
@@ -189,7 +268,41 @@ describe('StackAdapter', () => {
 
       render(<StackAdapter resource={resource} stepId="step-1" />);
 
+      // 3 children across 2 columns fill row 1 and half of row 2.
+      expect(screen.getAllByText('Drop here')).toHaveLength(1);
+    });
+
+    it('should show no empty slots when the last row is exactly filled', () => {
+      const resource = createMockElement({
+        items: 2,
+        components: [
+          createChildElement('child-1'),
+          createChildElement('child-2'),
+          createChildElement('child-3'),
+          createChildElement('child-4'),
+        ],
+      });
+
+      render(<StackAdapter resource={resource} stepId="step-1" />);
+
       expect(screen.queryByText('Drop here')).not.toBeInTheDocument();
+    });
+
+    it('should fill the last row when children exceed two rows', () => {
+      const resource = createMockElement({
+        items: 3,
+        components: [
+          createChildElement('child-1'),
+          createChildElement('child-2'),
+          createChildElement('child-3'),
+          createChildElement('child-4'),
+        ],
+      });
+
+      render(<StackAdapter resource={resource} stepId="step-1" />);
+
+      // 4 children across 3 columns leave 2 empty cells in row 2.
+      expect(screen.getAllByText('Drop here')).toHaveLength(2);
     });
   });
 

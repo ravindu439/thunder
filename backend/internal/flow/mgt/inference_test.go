@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowmgt
 
@@ -804,10 +789,12 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthenticationProperties_NilPro
 
 func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_UpdatesLabelsAndRemovesSignUpLink() {
 	service := s.service.(*flowInferenceService)
-	signUpLinkLabel := `<p class="rich-text-paragraph">` +
+	recoveryLinkLabel := `<p data-component-ref="recovery-link" class="rich-text-paragraph">` +
+		`<a href="#" data-action-ref="action_forgot_password" class="rich-text-link">` +
+		`<span class="rich-text-pre-wrap">Forgot password?</span></a></p>`
+	signUpLinkLabel := `<p data-component-ref="self-sign-up-link" class="rich-text-paragraph">` +
 		`<span class="rich-text-pre-wrap">Don't have an account? </span>` +
-		`<a href="{{meta(application.sign_up_url)}}" target="_blank"` +
-		` rel="noopener noreferrer" class="rich-text-link">` +
+		`<a href="#" data-action-ref="action_signup" class="rich-text-link">` +
 		`<span class="rich-text-pre-wrap">Sign up</span></a></p>`
 	submitBtn := map[string]interface{}{
 		"type":      "ACTION",
@@ -815,10 +802,16 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_Updat
 		"eventType": "SUBMIT",
 		"label":     "Sign In",
 	}
+	recoveryComp := map[string]interface{}{
+		"category": "DISPLAY",
+		"type":     "RICH_TEXT",
+		"id":       "rich_text_forgot_password",
+		"label":    recoveryLinkLabel,
+	}
 	signUpComp := map[string]interface{}{
 		"category": "DISPLAY",
 		"type":     "RICH_TEXT",
-		"id":       "rich_text_p6ae",
+		"id":       "rich_text_signup",
 		"label":    signUpLinkLabel,
 	}
 	nodes := []providers.NodeDefinition{
@@ -827,7 +820,6 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_Updat
 			Type: string(common.NodeTypePrompt),
 			Meta: map[string]interface{}{
 				"components": []interface{}{
-					// Use a random-style ID to confirm matching is by content, not ID
 					map[string]interface{}{
 						"type":    "TEXT",
 						"id":      "text_hexl",
@@ -839,10 +831,11 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_Updat
 						"id":   "block_ms6e",
 						"components": []interface{}{
 							map[string]interface{}{"type": "TEXT_INPUT", "id": "input_username"},
+							recoveryComp,
 							submitBtn,
-							signUpComp,
 						},
 					},
+					signUpComp,
 				},
 			},
 		},
@@ -857,7 +850,7 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_Updat
 	heading := components[0].(map[string]interface{})
 	s.Equal("Sign Up", heading["label"])
 
-	// RICH_TEXT sign-up link should be removed from block (matched by label content, not ID)
+	// Recovery link should be removed from block, only TEXT_INPUT and ACTION remain
 	block := components[1].(map[string]interface{})
 	blockComponents := block["components"].([]interface{})
 	s.Len(blockComponents, 2)
@@ -877,6 +870,9 @@ func (s *FlowInferenceServiceTestSuite) TestCleanAuthProperties_PromptNode_Updat
 	}
 	s.NotNil(actionComp)
 	s.Equal("Sign Up", actionComp["label"])
+
+	// Sign-up link should be removed from top-level components
+	s.Len(components, 2, "sign-up link should be removed from top-level")
 }
 
 func (s *FlowInferenceServiceTestSuite) TestCleanAuthenticationProperties_PromptNode_NoSignUpLink() {

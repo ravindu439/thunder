@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {useConfig} from '@thunderid/contexts';
 import {useDesign, FlowComponentRenderer, AuthCardLayout} from '@thunderid/design';
@@ -25,11 +10,12 @@ import type {JSX} from 'react';
 import {useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {useNavigate, useSearchParams} from 'react-router';
-import ROUTES from '../../constants/routes';
+import RouteConfig from '../../configs/RouteConfig';
 
 export interface FlowChangeResponse {
   flowStatus?: string;
   assertion?: string;
+  errorAssertion?: string;
   data?: {additionalData?: Record<string, string>};
   error?: {
     code?: string;
@@ -52,24 +38,25 @@ export default function AcceptInviteBox(): JSX.Element {
   const baseUrl = getServerUrl() ?? (import.meta.env.VITE_THUNDER_BASE_URL as string);
 
   const handleGoToSignIn = () => {
-    const result = navigate(ROUTES.AUTH.SIGN_IN);
+    const result = navigate(RouteConfig.signIn());
     if (result instanceof Promise) {
       result.catch(() => null);
     }
   };
 
   /**
-   * Posts the completed flow assertion to the callback endpoint.
-   * Requires authId (from URL params) and assertion (from flow completion).
-   * callbackType is optional — the backend defaults to authorization_code when absent.
+   * Posts a flow outcome to the callback endpoint: a completed flow's assertion (success) or a signed
+   * error assertion (terminal failure). Both go in the same field; the backend tells them apart from
+   * the assertion's own claims. Requires authId (from URL params). callbackType is optional; the
+   * backend defaults to authorization_code when absent.
    *
    * Response handling is generic:
-   *   - redirect_uri present → redirect the browser (e.g. auth code flow)
-   *   - redirect_uri absent  → no redirect; the flow's completion components display the outcome
+   *   - redirect_uri present: redirect the browser (e.g. auth code flow, or an error redirect)
+   *   - redirect_uri absent: no redirect; the flow's completion components display the outcome
    */
   const handleFlowCallback = async (authId: string, assertion: string, callbackType?: string): Promise<void> => {
     try {
-      const body: Record<string, string> = {authId, assertion};
+      const body: Record<string, string> = {assertion, authId};
       if (callbackType) {
         body.type = callbackType;
       }
@@ -119,25 +106,32 @@ export default function AcceptInviteBox(): JSX.Element {
         }}
         onFlowChange={(response: FlowChangeResponse) => {
           const messageKey: string | undefined = response?.error?.message?.key;
-          if (messageKey) {
-            const translated: string = t(messageKey);
-            if (translated !== messageKey) {
-              setFlowError(translated);
+          const translated: string | undefined = messageKey ? t(messageKey) : undefined;
 
-              return;
-            }
+          if (translated && translated !== messageKey) {
+            setFlowError(translated);
+          } else {
+            const fallback: string | undefined =
+              response?.error?.message?.defaultValue ?? response?.error?.description?.defaultValue;
+            setFlowError(fallback ?? null);
           }
-          const fallback: string | undefined =
-            response?.error?.message?.defaultValue ?? response?.error?.description?.defaultValue;
-          setFlowError(fallback ?? null);
 
-          if (response.flowStatus === 'COMPLETE' && response.assertion) {
+          // Relay the terminal flow outcome to the waiting OAuth request: the assertion on success, or
+          // the signed error assertion on failure (auth code: error redirect; CIBA: request denied).
+          // flowStatus selects which field to read, since both are relayed in the same request field.
+          let assertion: string | undefined;
+
+          if (response.flowStatus === 'COMPLETE') {
+            assertion = response.assertion;
+          } else if (response.flowStatus === 'ERROR') {
+            assertion = response.errorAssertion;
+          }
+
+          if (assertion) {
             const authId = searchParams.get('auth_req_id') ?? searchParams.get('authId');
-            const {assertion} = response;
-            const callbackType = response.data?.additionalData?.callbackType;
 
-            if (authId && assertion) {
-              void handleFlowCallback(authId, assertion, callbackType);
+            if (authId) {
+              void handleFlowCallback(authId, assertion, response.data?.additionalData?.callbackType);
             }
           }
         }}

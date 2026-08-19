@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -32,6 +17,8 @@ import (
 	oupkg "github.com/thunder-id/thunderid/internal/ou"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
+	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
+	"github.com/thunder-id/thunderid/internal/system/sysauthz"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 	"github.com/thunder-id/thunderid/tests/mocks/entitymock"
@@ -39,6 +26,7 @@ import (
 	"github.com/thunder-id/thunderid/tests/mocks/groupmock"
 	"github.com/thunder-id/thunderid/tests/mocks/oumock"
 	"github.com/thunder-id/thunderid/tests/mocks/resourcemock"
+	"github.com/thunder-id/thunderid/tests/mocks/sysauthzmock"
 )
 
 const (
@@ -103,6 +91,7 @@ func (suite *RoleServiceTestSuite) SetupTest() {
 		suite.mockOUService,
 		suite.mockResourceService,
 		suite.transactioner,
+		newAllowAllRoleAuthz(suite.T()),
 	)
 }
 
@@ -1554,4 +1543,135 @@ permissions:
 	if role.OUID != "" {
 		t.Errorf("OUID = %q, want empty (resolution happens later)", role.OUID)
 	}
+}
+
+// CascadeDeleteDependencies Tests
+
+func (suite *RoleServiceTestSuite) TestGetResourceDependencies_ReportsNoUsages() {
+	deps, err := suite.service.GetResourceDependencies(
+		context.Background(), resourcedependency.ResourceTypeResource, "res1")
+
+	suite.NoError(err)
+	suite.Empty(deps)
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_IgnoresUnrelatedResourceTypes() {
+	for _, resourceType := range []string{
+		resourcedependency.ResourceTypeUser,
+		resourcedependency.ResourceTypeGroup,
+		resourcedependency.ResourceTypeApplication,
+	} {
+		deleted, err := suite.service.CascadeDeleteDependencies(context.Background(), resourceType, "id1")
+
+		suite.NoError(err)
+		suite.Equal(0, deleted)
+	}
+
+	suite.mockStore.AssertNotCalled(suite.T(), "GetReferencedPermissions", mock.Anything)
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_RemovesOrphanedPermissions() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).Return([]ResourcePermissions{
+		{ResourceServerID: "rs1", Permissions: []string{"read", "write"}},
+	}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs1", []string{"read", "write"}).Return([]string{"write"}, nil)
+	suite.mockStore.On("DeleteRolePermission", mock.Anything, "rs1", "write").Return(int64(2), nil)
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeAction, "action1")
+
+	suite.NoError(err)
+	suite.Equal(2, deleted)
+	suite.mockStore.AssertNotCalled(suite.T(), "DeleteRolePermission", mock.Anything, "rs1", "read")
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_KeepsValidPermissions() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).Return([]ResourcePermissions{
+		{ResourceServerID: "rs1", Permissions: []string{"read"}},
+	}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs1", []string{"read"}).Return([]string{}, nil)
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeResource, "res1")
+
+	suite.NoError(err)
+	suite.Equal(0, deleted)
+	suite.mockStore.AssertNotCalled(suite.T(), "DeleteRolePermission",
+		mock.Anything, mock.Anything, mock.Anything)
+}
+
+// A deleted resource server invalidates every permission scoped to it, so all of them are removed
+// while permissions of other resource servers are left alone.
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_RemovesAllPermissionsOfDeletedServer() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).Return([]ResourcePermissions{
+		{ResourceServerID: "rs1", Permissions: []string{"read", "write"}},
+		{ResourceServerID: "rs2", Permissions: []string{"list"}},
+	}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs1", []string{"read", "write"}).Return([]string{"read", "write"}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs2", []string{"list"}).Return([]string{}, nil)
+	suite.mockStore.On("DeleteRolePermission", mock.Anything, "rs1", "read").Return(int64(1), nil)
+	suite.mockStore.On("DeleteRolePermission", mock.Anything, "rs1", "write").Return(int64(1), nil)
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeResourceServer, "rs1")
+
+	suite.NoError(err)
+	suite.Equal(2, deleted)
+	suite.mockStore.AssertNotCalled(suite.T(), "DeleteRolePermission", mock.Anything, "rs2", "list")
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_StoreReadError() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).
+		Return([]ResourcePermissions{}, errors.New("database error"))
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeResource, "res1")
+
+	suite.Error(err)
+	suite.Equal(0, deleted)
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_ValidationError() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).Return([]ResourcePermissions{
+		{ResourceServerID: "rs1", Permissions: []string{"read"}},
+	}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs1", []string{"read"}).Return([]string(nil), &tidcommon.InternalServerError)
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeResource, "res1")
+
+	suite.Error(err)
+	suite.Equal(0, deleted)
+}
+
+func (suite *RoleServiceTestSuite) TestCascadeDeleteDependencies_DeleteError() {
+	suite.mockStore.On("GetReferencedPermissions", mock.Anything).Return([]ResourcePermissions{
+		{ResourceServerID: "rs1", Permissions: []string{"read"}},
+	}, nil)
+	suite.mockResourceService.On("ValidatePermissions", mock.Anything,
+		"rs1", []string{"read"}).Return([]string{"read"}, nil)
+	suite.mockStore.On("DeleteRolePermission", mock.Anything, "rs1", "read").
+		Return(int64(0), errors.New("database error"))
+
+	deleted, err := suite.service.CascadeDeleteDependencies(
+		context.Background(), resourcedependency.ResourceTypeResource, "res1")
+
+	suite.Error(err)
+	suite.Equal(0, deleted)
+}
+
+// newAllowAllRoleAuthz returns an authz mock that permits every grant check, so that
+// tests unrelated to the guard need not configure it.
+func newAllowAllRoleAuthz(t *testing.T) sysauthz.SystemAuthorizationServiceInterface {
+	mockAuthz := sysauthzmock.NewSystemAuthorizationServiceInterfaceMock(t)
+	mockAuthz.On("CanGrantPermissions", mock.Anything, mock.Anything).
+		Return((*tidcommon.ServiceError)(nil)).Maybe()
+	mockAuthz.On("CanGrantMembership", mock.Anything, mock.Anything, mock.Anything).
+		Return((*tidcommon.ServiceError)(nil)).Maybe()
+	return mockAuthz
 }

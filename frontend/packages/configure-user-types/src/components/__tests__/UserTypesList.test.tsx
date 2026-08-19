@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-return */
 import {render, screen, waitFor, userEvent} from '@thunderid/test-utils';
@@ -32,6 +17,7 @@ const {mockLoggerError} = vi.hoisted(() => ({
 
 const mockNavigate = vi.fn();
 const mockMutateAsync = vi.fn();
+const mockRefetchUserTypes = vi.fn();
 
 type MockDataGridRow = UserTypeListItem & Record<string, unknown>;
 
@@ -129,6 +115,21 @@ vi.mock('@wso2/oxygen-ui', async () => {
         </>
       ),
       RowActions: ({children}: {children: ReactNode}): ReactElement => children as ReactElement,
+      EmptyState: ({
+        title = undefined,
+        description = undefined,
+        action = undefined,
+      }: {
+        title?: string;
+        description?: string;
+        action?: ReactNode;
+      }) => (
+        <div>
+          {title && <div>{title}</div>}
+          {description && <div>{description}</div>}
+          {action}
+        </div>
+      ),
     },
   };
 });
@@ -199,6 +200,7 @@ describe('UserTypesList', () => {
       data: mockUserTypesData,
       isLoading: false,
       error: null,
+      refetch: mockRefetchUserTypes,
     } as unknown as ReturnType<typeof useGetUserTypesHook>);
     mockUseDeleteUserType.mockReturnValue({
       mutateAsync: mockMutateAsync,
@@ -270,13 +272,14 @@ describe('UserTypesList', () => {
     expect(screen.getByTestId('listing-table-provider')).toHaveAttribute('data-loading', 'true');
   });
 
-  it('displays error in snackbar', async () => {
+  it('renders a read error state in place of the grid', async () => {
     const error = new Error('Failed to load user types');
 
     mockUseGetUserTypes.mockReturnValue({
       data: undefined,
       isLoading: false,
       error,
+      refetch: mockRefetchUserTypes,
     } as unknown as ReturnType<typeof useGetUserTypesHook>);
 
     render(<UserTypesList />);
@@ -284,6 +287,26 @@ describe('UserTypesList', () => {
     await waitFor(() => {
       expect(screen.getByText('Failed to load user types')).toBeInTheDocument();
     });
+    expect(screen.queryByTestId('data-grid')).not.toBeInTheDocument();
+  });
+
+  it('retries the query when Refresh is clicked on the read error state', async () => {
+    const user = userEvent.setup();
+    const error = new Error('Failed to load user types');
+
+    mockUseGetUserTypes.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error,
+      refetch: mockRefetchUserTypes,
+    } as unknown as ReturnType<typeof useGetUserTypesHook>);
+
+    render(<UserTypesList />);
+
+    const refreshButton = await screen.findByRole('button', {name: /refresh/i});
+    await user.click(refreshButton);
+
+    expect(mockRefetchUserTypes).toHaveBeenCalled();
   });
 
   it('renders inline delete buttons for each row', () => {
@@ -377,7 +400,7 @@ describe('UserTypesList', () => {
     await user.click(deleteButtons[0]);
 
     await waitFor(() => {
-      expect(screen.getByText('Failed to delete')).toBeInTheDocument();
+      expect(screen.getByText('Failed to delete user type. Please try again.')).toBeInTheDocument();
     });
   });
 
@@ -390,30 +413,6 @@ describe('UserTypesList', () => {
 
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/user-types/schema1');
-    });
-  });
-
-  it('closes snackbar when close button is clicked', async () => {
-    const user = userEvent.setup();
-    const error = new Error('Failed to load user types');
-
-    mockUseGetUserTypes.mockReturnValue({
-      data: undefined,
-      isLoading: false,
-      error,
-    } as unknown as ReturnType<typeof useGetUserTypesHook>);
-
-    render(<UserTypesList />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Failed to load user types')).toBeInTheDocument();
-    });
-
-    const closeButton = screen.getByLabelText(/close/i);
-    await user.click(closeButton);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Failed to load user types')).not.toBeInTheDocument();
     });
   });
 

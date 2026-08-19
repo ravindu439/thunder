@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package openid4vp
 
@@ -68,20 +53,6 @@ var (
 		},
 	}
 
-	// ErrorExpiredState is distinct from ErrorUnknownState: state exists but is past its TTL.
-	ErrorExpiredState = tidcommon.ServiceError{
-		Type: tidcommon.ClientErrorType,
-		Code: "EUDI-1005",
-		Error: tidcommon.I18nMessage{
-			Key:          "error.eudi.expired_state",
-			DefaultValue: "Expired request",
-		},
-		ErrorDescription: tidcommon.I18nMessage{
-			Key:          "error.eudi.expired_state_description",
-			DefaultValue: "The request associated with the supplied state value has expired",
-		},
-	}
-
 	// ErrorUnknownDefinition indicates the requested presentation_definition_id is not registered.
 	ErrorUnknownDefinition = tidcommon.ServiceError{
 		Type: tidcommon.ClientErrorType,
@@ -109,7 +80,6 @@ var (
 	ErrPolicy                = errors.New("openid4vp: invalid verification policy")
 	ErrUnknownDefinition     = errors.New("openid4vp: unknown presentation definition")
 	ErrUnknownState          = errors.New("openid4vp: unknown or expired request state")
-	ErrExpiredState          = errors.New("openid4vp: request state expired")
 	ErrStateMismatch         = errors.New("openid4vp: response state mismatch")
 )
 
@@ -118,8 +88,6 @@ func toServiceError(err error) *tidcommon.ServiceError {
 	switch {
 	case errors.Is(err, ErrUnknownState):
 		return &ErrorUnknownState
-	case errors.Is(err, ErrExpiredState):
-		return &ErrorExpiredState
 	case errors.Is(err, ErrUnknownDefinition):
 		return &ErrorUnknownDefinition
 	case errors.Is(err, ErrPolicy):

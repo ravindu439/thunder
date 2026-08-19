@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package resource implements the resource management service.
 package resource
@@ -34,7 +19,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/resourcedependency"
 	"github.com/thunder-id/thunderid/internal/system/security"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	"github.com/thunder-id/thunderid/internal/system/utils"
 )
 
@@ -128,7 +112,7 @@ type resourceService struct {
 	resourceStore      resourceStoreInterface
 	ouService          oupkg.OrganizationUnitServiceInterface
 	defaultDelimiter   string
-	transactioner      transaction.Transactioner
+	transactioner      providers.Transactioner
 	dependencyRegistry resourcedependency.Registry
 }
 
@@ -170,6 +154,26 @@ func (rs *resourceService) ensureNoBlockingDependencies(
 	return &ErrorCannotDelete
 }
 
+// cascadeDeleteDependents removes the references that other resources (such as role permissions)
+// hold on the deleted target. It is called inside the delete transaction, after the target row is
+// gone, so that providers resolving references against this service no longer see the target and
+// roll back with the delete when cleanup fails.
+func (rs *resourceService) cascadeDeleteDependents(ctx context.Context, resourceType, id string) error {
+	if rs.dependencyRegistry == nil {
+		rs.logger.Error(ctx, "Dependency registry not set; cannot cascade-delete dependents",
+			log.String("resourceType", resourceType), log.String("id", id))
+		return errDependencyRegistryNotSet
+	}
+
+	if _, err := rs.dependencyRegistry.CascadeDelete(ctx, resourceType, id); err != nil {
+		rs.logger.Error(ctx, "Failed to cascade-delete dependents",
+			log.String("resourceType", resourceType), log.String("id", id), log.Error(err))
+		return err
+	}
+
+	return nil
+}
+
 // GetResourceDependencies implements resourcedependency.Provider. A resource server is blocked from
 // deletion while it still has resources or resource-server-level actions; a resource is blocked while
 // it still has sub-resources or actions. These dependents live in the same store, so their existence
@@ -205,7 +209,7 @@ func (rs *resourceService) GetResourceDependencies(
 func newResourceService(
 	ouService oupkg.OrganizationUnitServiceInterface,
 	resourceStore resourceStoreInterface,
-	transactionerInstance transaction.Transactioner,
+	transactionerInstance providers.Transactioner,
 ) (ResourceServiceInterface, error) {
 	// Load default delimiter from config
 	defaultDelimiter := getDefaultDelimiter()
@@ -535,7 +539,7 @@ func (rs *resourceService) DeleteResourceServer(ctx context.Context, id string) 
 			rs.logger.Error(ctx, "Failed to delete resource server", log.Error(err))
 			return err
 		}
-		return nil
+		return rs.cascadeDeleteDependents(txCtx, resourcedependency.ResourceTypeResourceServer, id)
 	}); err != nil {
 		return &tidcommon.InternalServerError
 	}
@@ -870,7 +874,7 @@ func (rs *resourceService) DeleteResource(
 			rs.logger.Error(ctx, "Failed to delete resource", log.Error(err))
 			return err
 		}
-		return nil
+		return rs.cascadeDeleteDependents(txCtx, resourcedependency.ResourceTypeResource, id)
 	}); err != nil {
 		return &tidcommon.InternalServerError
 	}
@@ -1234,7 +1238,7 @@ func (rs *resourceService) DeleteAction(
 			rs.logger.Error(ctx, "Failed to delete action", log.Error(err))
 			return err
 		}
-		return nil
+		return rs.cascadeDeleteDependents(txCtx, resourcedependency.ResourceTypeAction, id)
 	}); err != nil {
 		return &tidcommon.InternalServerError
 	}

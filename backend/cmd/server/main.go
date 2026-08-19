@@ -1,25 +1,11 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 // Package main is the entry point for starting the server.
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -39,9 +25,10 @@ import (
 	"github.com/thunder-id/thunderid/internal/system/cache"
 	"github.com/thunder-id/thunderid/internal/system/config"
 	"github.com/thunder-id/thunderid/internal/system/constants"
+	sysContext "github.com/thunder-id/thunderid/internal/system/context"
 	"github.com/thunder-id/thunderid/internal/system/database/provider"
 	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
-	"github.com/thunder-id/thunderid/internal/system/kmprovider"
+	"github.com/thunder-id/thunderid/internal/system/kmprovider/common"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/middleware"
 	"github.com/thunder-id/thunderid/internal/system/revocationcache"
@@ -129,7 +116,11 @@ func main() {
 		logger.Info(ctx, "TLS is not enabled, starting server without TLS")
 		ln = createListener(ctx, logger, server)
 	} else {
-		tlsConfig := loadCertConfig(ctx, logger, runtimeCryptoSvc)
+		tlsConfigProvider, ok := runtimeCryptoSvc.(common.TLSConfigProvider)
+		if !ok {
+			logger.Fatal(ctx, "Runtime crypto provider does not support TLS material retrieval")
+		}
+		tlsConfig := loadCertConfig(ctx, logger, tlsConfigProvider)
 		ln = createTLSListener(ctx, logger, server, tlsConfig)
 	}
 
@@ -160,7 +151,7 @@ func initRevocationCache(ctx context.Context, logger *log.Logger,
 	cfg *config.Config) (revocationcache.EnforcerInterface, revocationcache.Syncer) {
 	rc := cfg.Server.SecurityConfig.TokenRevocation
 	enforcer, syncer, err := revocationcache.Initialize(revocationcache.Config{
-		Enabled:      rc.Enabled,
+		Enabled:      rc.IsEnabled(),
 		Source:       rc.Source,
 		SyncInterval: time.Duration(rc.SyncIntervalSeconds) * time.Second,
 	})
@@ -212,7 +203,7 @@ func initThunderConfigurations(ctx context.Context, logger *log.Logger, serverHo
 }
 
 // loadCertConfig loads the TLS material via the runtime crypto provider.
-func loadCertConfig(ctx context.Context, logger *log.Logger, runtimeSvc kmprovider.RuntimeCryptoProvider) *tls.Config {
+func loadCertConfig(ctx context.Context, logger *log.Logger, runtimeSvc common.TLSConfigProvider) *tls.Config {
 	mat, err := runtimeSvc.GetTLSMaterial(ctx)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to load TLS material", log.Error(err))
@@ -243,11 +234,12 @@ func createHTTPServer(ctx context.Context, logger *log.Logger, cfg *config.Confi
 	securityMiddleware := createSecurityMiddleware(ctx, logger, mux, jwtService, revocationEnforcer)
 
 	// Build the middleware chain with proper execution order.
-	// Request flow: CorrelationID (outermost) -> AccessLog -> Security -> Route Handler (innermost)
+	// Request flow: CorrelationID (outermost) -> SecurityHeaders -> AccessLog -> Security -> Route Handler (innermost)
 	// Note: Middlewares are wrapped in reverse order - the last added will execute first.
 	// The Gate and Console frontend paths are always excluded from the access log to keep it
 	// focused on API traffic. Additional prefixes can be excluded via log.access.exclude_paths.
 	handler := log.AccessLogHandler(logger, accessLogExcludePaths(cfg.Log.Access.ExcludePaths), securityMiddleware)
+	handler = middleware.SecurityHeadersMiddleware()(handler)
 	handler = middleware.CorrelationIDMiddleware(handler)
 
 	// Build the server address using hostname and port from the configurations.
@@ -381,16 +373,23 @@ func createStaticFileHandler(routePrefix, directory string, logger *log.Logger) 
 	rootFS := root.FS()
 	fileServer := http.FileServerFS(rootFS)
 
-	// serveIndex serves index.html with no-cache headers. It reports whether index.html
-	// existed and was served.
+	// serveIndex serves index.html with no-cache headers, substituting the request's CSP nonce
+	// (see SecurityHeadersMiddleware) for the placeholder in its <meta property="csp-nonce"> tag, so
+	// the frontend can apply the same nonce to its own inline <style> tags. It reports whether
+	// index.html existed and was served.
 	serveIndex := func(w http.ResponseWriter, r *http.Request) bool {
-		if _, err := root.Stat("index.html"); err != nil {
+		content, err := fs.ReadFile(rootFS, "index.html")
+		if err != nil {
 			return false
 		}
+		nonce := sysContext.GetCSPNonce(r.Context())
+		content = bytes.ReplaceAll(content, []byte(constants.CSPNoncePlaceholder), []byte(nonce))
+
 		w.Header().Set(constants.CacheControlHeaderName, constants.CacheControlNoCacheComposite)
 		w.Header().Set(constants.PragmaHeaderName, constants.PragmaNoCache)
 		w.Header().Set(constants.ExpiresHeaderName, constants.ExpiresZero)
-		http.ServeFileFS(w, r, rootFS, "index.html")
+		w.Header().Set(constants.ContentTypeHeaderName, constants.ContentTypeHTML)
+		_, _ = w.Write(content)
 		return true
 	}
 

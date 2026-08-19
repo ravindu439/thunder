@@ -1,6 +1,6 @@
 # Project Overview
 
-ThunderID is a lightweight user and identity management product: a Go backend (`backend/`) and React frontend (`frontend/`) in a monorepo. It provides authentication and authorization via OAuth2/OIDC, flexible orchestration flows, and individual auth mechanisms (password, passwordless, social login).
+ThunderID is a lightweight, open-source IAM stack: a Go backend (`backend/`) and React frontend (`frontend/`) in a monorepo. It provides authentication and authorization via OAuth2/OIDC, flexible orchestration flows, and individual auth mechanisms (password, passwordless, social login).
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — read only for cross-cutting changes
 - Build and run: [Makefile](Makefile) and [README.md](README.md)
@@ -36,6 +36,13 @@ The `.agent/skills/` entries above are internal guidance for **developing** Thun
 - Always use `ThunderID` (or the appropriate template placeholder for the file type). Never use the bare word `thunder`, `Thunder`, or `THUNDER` as a short form of the product name.
 - PRs that introduce bare `thunder`/`Thunder`/`THUNDER` (not part of `thunderid`, `ThunderID`, or `THUNDERID`) must not be merged until corrected.
 - Exceptions: import paths/package names (e.g., `@thunderid/...`) and code identifiers where `thunder` is a structural prefix immediately followed by `id` in any casing are allowed.
+
+## Product Positioning
+
+- Canonical category descriptor (prose): **open-source IAM stack**. Use it wherever the product is defined in prose (READMEs, docs, Helm charts). Do not reintroduce "IAM engine/platform/server", "identity management suite/system/product/platform/service", or "Identity Provider" as the product category.
+- Audience triplet: **humans, AI agents, and machines**, in that order. Do not use "workloads" or "resources".
+- The four product pillars, in order: **Agent-native Identity**, **Post-quantum-safe by Design**, **Decentralized Identity**, **Lightweight Runtime with GitOps Support**. Reuse these names (match each surface's casing convention).
+- Exception: the docs marketing tagline **"Auth for Modern Apps and AI Agents"** (`docs/docusaurus.product.config.ts`) is a deliberate slogan, not the prose category descriptor; leave it as-is.
 
 ## General Rules
 

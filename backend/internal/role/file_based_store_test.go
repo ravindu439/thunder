@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package role
 
@@ -400,4 +385,65 @@ func (suite *RoleFileBasedStoreTestSuite) TestGetEntityRoleIDs_AlwaysEmpty() {
 			suite.NotNil(roleIDs, "must return [] not nil for safe composite union")
 		})
 	}
+}
+
+// A malformed declarative role must fail the enumeration rather than being skipped. This method
+// feeds the grant checks, where an omitted role understates what is conferred.
+func (suite *RoleFileBasedStoreTestSuite) TestGetAllPermissionsForAssignees_MalformedRoleFailsClosed() {
+	suite.seedRole(RoleWithPermissionsAndAssignments{
+		ID:   "good-role",
+		Name: "Good",
+		OUID: "ou1",
+		Permissions: []ResourcePermissions{
+			{ResourceServerID: "rs1", Permissions: []string{"system:user"}},
+		},
+		Assignments: []RoleAssignment{{ID: "user1", Type: assigneeTypeEntity}},
+	})
+	// Bypass the typed Create so a malformed entry lands in the store.
+	suite.Require().NoError(suite.store.GenericFileBasedStore.Create("broken-role", "not a role"))
+
+	result, err := suite.store.GetAllPermissionsForAssignees(context.Background(), "user1", nil)
+
+	suite.Error(err, "a malformed declarative role must not be silently skipped")
+	suite.Nil(result)
+}
+
+// The happy path must still enumerate permissions when every entry parses.
+func (suite *RoleFileBasedStoreTestSuite) TestGetAllPermissionsForAssignees_EnumeratesWhenAllEntriesParse() {
+	suite.seedRole(RoleWithPermissionsAndAssignments{
+		ID:   "ok-role",
+		Name: "Ok",
+		OUID: "ou1",
+		Permissions: []ResourcePermissions{
+			{ResourceServerID: "rs1", Permissions: []string{"system:user"}},
+		},
+		Assignments: []RoleAssignment{{ID: "user2", Type: assigneeTypeEntity}},
+	})
+
+	result, err := suite.store.GetAllPermissionsForAssignees(context.Background(), "user2", nil)
+
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal([]string{"system:user"}, result[0].Permissions)
+}
+
+// Declarative role permissions are immutable, so the cascade hooks report nothing and remove
+// nothing rather than attempting to mutate the file store.
+func (suite *RoleFileBasedStoreTestSuite) TestCascadeHooksAreNoOps() {
+	suite.seedRole(RoleWithPermissionsAndAssignments{
+		ID:   "declarative-role",
+		Name: "Declarative",
+		OUID: "ou1",
+		Permissions: []ResourcePermissions{
+			{ResourceServerID: "rs1", Permissions: []string{"system:user"}},
+		},
+	})
+
+	referenced, err := suite.store.GetReferencedPermissions(context.Background())
+	suite.NoError(err)
+	suite.Empty(referenced)
+
+	deleted, err := suite.store.DeleteRolePermission(context.Background(), "rs1", "system:user")
+	suite.NoError(err)
+	suite.Equal(int64(0), deleted)
 }

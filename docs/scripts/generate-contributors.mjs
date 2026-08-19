@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {existsSync, mkdirSync, writeFileSync} from 'fs';
 import {join, dirname} from 'path';
@@ -28,6 +13,7 @@ const __dirname = dirname(__filename);
 const OUTPUT_FILE = join(__dirname, '..', 'static', 'data', 'contributors.json');
 
 const GITHUB_REPO = DocusaurusProductConfig.project.source.github.fullName;
+const PROJECT_NAME = DocusaurusProductConfig.project.name;
 const GITHUB_REPO_API_URL = `https://api.github.com/repos/${GITHUB_REPO}`;
 const GITHUB_CONTRIBUTORS_API_URL = `${GITHUB_REPO_API_URL}/contributors`;
 
@@ -49,7 +35,7 @@ const IGNORED_LOGINS = new Set(
 
 function getGitHubHeaders() {
   return {
-    'User-Agent': 'Thunder-Docs-Contributors-Generator',
+    'User-Agent': `${PROJECT_NAME}-Docs-Contributors-Generator`,
     ...(process.env.GITHUB_TOKEN ? {Authorization: `token ${process.env.GITHUB_TOKEN}`} : {}),
   };
 }

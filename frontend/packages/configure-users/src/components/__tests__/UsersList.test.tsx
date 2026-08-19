@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, waitFor, userEvent} from '@thunderid/test-utils';
 import type * as OxygenUI from '@wso2/oxygen-ui';
@@ -137,6 +122,21 @@ vi.mock('@wso2/oxygen-ui', async () => {
       ),
       CellIcon: ({primary}: {primary: string}) => <span>{primary}</span>,
       RowActions: ({children}: {children: React.ReactNode}): React.ReactElement => children as React.ReactElement,
+      EmptyState: ({
+        title = '',
+        description = '',
+        action = null,
+      }: {
+        title?: string;
+        description?: string;
+        action?: React.ReactNode;
+      }) => (
+        <div>
+          {title && <div>{title}</div>}
+          {description && <div>{description}</div>}
+          {action}
+        </div>
+      ),
     },
   };
 });
@@ -342,9 +342,7 @@ describe('UsersList', () => {
     });
   });
 
-  it('closes snackbar when close button is clicked', async () => {
-    const user = userEvent.setup();
-
+  it('renders the error in place of the grid, not a dismissible snackbar', async () => {
     mockUseGetUsers.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -357,12 +355,7 @@ describe('UsersList', () => {
       expect(screen.getByText('Failed to load users')).toBeInTheDocument();
     });
 
-    const closeButton = screen.getByLabelText(/close/i);
-    await user.click(closeButton);
-
-    await waitFor(() => {
-      expect(screen.queryByText('Failed to load users')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByTestId('data-grid')).not.toBeInTheDocument();
   });
 
   it('handles error when row click navigation fails', async () => {

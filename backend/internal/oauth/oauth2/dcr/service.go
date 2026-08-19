@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package dcr
 
@@ -36,7 +21,6 @@ import (
 	"github.com/thunder-id/thunderid/internal/ou"
 	i18nmgt "github.com/thunder-id/thunderid/internal/system/i18n/mgt"
 	"github.com/thunder-id/thunderid/internal/system/log"
-	"github.com/thunder-id/thunderid/internal/system/transaction"
 	sysutils "github.com/thunder-id/thunderid/internal/system/utils"
 )
 
@@ -52,7 +36,7 @@ type dcrService struct {
 	appService    application.ApplicationServiceInterface
 	ouService     ou.OrganizationUnitServiceInterface
 	i18nService   i18nmgt.I18nServiceInterface
-	transactioner transaction.Transactioner
+	transactioner providers.Transactioner
 }
 
 // newDCRService creates a new instance of dcrService.
@@ -60,7 +44,7 @@ func newDCRService(
 	appService application.ApplicationServiceInterface,
 	ouService ou.OrganizationUnitServiceInterface,
 	i18nService i18nmgt.I18nServiceInterface,
-	transactioner transaction.Transactioner,
+	transactioner providers.Transactioner,
 ) DCRServiceInterface {
 	return &dcrService{
 		appService:    appService,
@@ -265,9 +249,12 @@ func (ds *dcrService) convertDCRToApplication(request *DCRRegistrationRequest) (
 	}
 
 	appDTO := &model.ApplicationDTO{
-		ID:                appID,
-		OUID:              request.OUID,
-		Name:              appName,
+		ID:   appID,
+		OUID: request.OUID,
+		Name: appName,
+		// Dynamic Client Registration (RFC 7591) has no concept of ThunderID's application type, and
+		// a DCR-registered client can take any shape, so it is always registered as custom.
+		Type:              model.ApplicationTypeCustom,
 		URL:               request.ClientURI,
 		LogoURL:           request.LogoURI,
 		InboundAuthConfig: inboundAuthConfig,

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package inboundclient
 
@@ -64,10 +49,16 @@ var (
 	ErrFKLayoutNotFound = errors.New("layout not found")
 	// ErrFKInvalidUserType is returned when the specified user type is invalid.
 	ErrFKInvalidUserType = errors.New("invalid user type")
+	// ErrFKInvalidSubjectAttributeMapping is returned when the specified subject attribute mapping is invalid.
+	ErrFKInvalidSubjectAttributeMapping = errors.New("invalid subject attribute mapping")
 	// ErrUserSchemaLookupFailed is returned when the user-schema service fails (e.g. DB outage)
 	// while validating allowed user types. Distinct from ErrFKInvalidUserType so the handler
 	// can map it to a server error instead of a client validation error.
 	ErrUserSchemaLookupFailed = errors.New("user schema lookup failed")
+	// ErrUniqueAttributeLookupFailed is returned when the user-schema service fails (e.g. DB outage)
+	// while retrieving unique attributes for validation. Distinct from ErrFKInvalidSubjectAttributeMapping
+	// so the handler can map it to a server error instead of a client validation error.
+	ErrUniqueAttributeLookupFailed = errors.New("unique attribute lookup failed")
 	// ErrInvalidUserAttribute is returned when a user attribute is not valid for any of the allowed user types.
 	ErrInvalidUserAttribute = errors.New("invalid user attribute")
 
@@ -85,26 +76,28 @@ var (
 	ErrOAuthClientCredentialsCannotUseResponseTypes = errors.New("client_credentials grant cannot use response types")
 	// ErrOAuthAuthCodeRequiresCodeResponseType is returned when authorization_code grant lacks code response type.
 	ErrOAuthAuthCodeRequiresCodeResponseType = errors.New("authorization_code grant requires code response type")
-	// ErrOAuthRefreshTokenCannotBeSoleGrant is returned when refresh_token is the only grant type.
-	ErrOAuthRefreshTokenCannotBeSoleGrant = errors.New("refresh_token cannot be the sole grant type")
+	// ErrOAuthRefreshTokenRequiresTokenIssuingGrant is returned when refresh_token is set without a
+	// token-issuing grant (authorization_code or ciba).
+	ErrOAuthRefreshTokenRequiresTokenIssuingGrant = errors.New(
+		"refresh_token grant type requires a token-issuing grant type")
 	// ErrOAuthPKCERequiresAuthCode is returned when PKCE is enabled without authorization_code grant.
 	ErrOAuthPKCERequiresAuthCode = errors.New("PKCE requires authorization_code grant type")
 	// ErrOAuthResponseTypesRequireAuthCode is returned when response types are set without authorization_code grant.
 	ErrOAuthResponseTypesRequireAuthCode = errors.New("response types require authorization_code grant type")
 	// ErrOAuthInvalidTokenEndpointAuthMethod is returned when an unsupported auth method is specified.
 	ErrOAuthInvalidTokenEndpointAuthMethod = errors.New("invalid token endpoint auth method")
+	// ErrOAuthDefaultAudienceTooLong is returned when the access token default audience exceeds the maximum length.
+	ErrOAuthDefaultAudienceTooLong = errors.New("default audience exceeds the maximum allowed length")
 	// ErrOAuthPrivateKeyJWTRequiresCertificate is returned when private_key_jwt is used without a certificate.
 	ErrOAuthPrivateKeyJWTRequiresCertificate = errors.New("private_key_jwt requires a certificate")
 	// ErrOAuthCertificateRequiresClientID is returned when a certificate is provided without an OAuth client ID.
 	ErrOAuthCertificateRequiresClientID = errors.New("certificate requires an OAuth client ID")
 	// ErrOAuthPrivateKeyJWTCannotHaveClientSecret is returned when private_key_jwt is used with a client secret.
 	ErrOAuthPrivateKeyJWTCannotHaveClientSecret = errors.New("private_key_jwt cannot have a client secret")
-	// ErrOAuthClientSecretCannotHaveCertificate is returned when client-secret auth is used with a certificate.
-	ErrOAuthClientSecretCannotHaveCertificate = errors.New("client secret auth cannot have a certificate")
 	// ErrOAuthNoneAuthRequiresPublicClient is returned when none auth method is used without a public client.
 	ErrOAuthNoneAuthRequiresPublicClient = errors.New("none auth method requires a public client")
-	// ErrOAuthNoneAuthCannotHaveCertOrSecret is returned when none auth method is used with a certificate or secret.
-	ErrOAuthNoneAuthCannotHaveCertOrSecret = errors.New("none auth method cannot have certificate or secret")
+	// ErrOAuthNoneAuthCannotHaveSecret is returned when none auth method is used with a client secret.
+	ErrOAuthNoneAuthCannotHaveSecret = errors.New("none auth method cannot have a client secret")
 	// ErrOAuthClientCredentialsCannotUseNoneAuth is returned when client_credentials uses none auth method.
 	ErrOAuthClientCredentialsCannotUseNoneAuth = errors.New("client_credentials cannot use none auth method")
 	// ErrOAuthClientJWTBearerCannotUseNoneAuth is returned when the jwt-bearer grant uses none auth method.
@@ -144,14 +137,12 @@ var (
 	ErrOAuthUserInfoJWKSURINotSSRFSafe = errors.New("userinfo JWKS URI must be a publicly reachable HTTPS URL")
 	// ErrOAuthUserInfoUnsupportedResponseType is returned when an unsupported userinfo response type is specified.
 	ErrOAuthUserInfoUnsupportedResponseType = errors.New("unsupported userinfo response type")
-	// ErrOAuthUserInfoJWSRequiresSigningAlg is returned when responseType is JWS but signingAlg is not set.
-	ErrOAuthUserInfoJWSRequiresSigningAlg = errors.New("signingAlg is required when userinfo responseType is JWS")
 	// ErrOAuthUserInfoJWERequiresEncryption is returned when responseType is JWE but encryption fields are missing.
 	ErrOAuthUserInfoJWERequiresEncryption = errors.New(
 		"encryptionAlg and encryptionEnc are required when userinfo responseType is JWE")
-	// ErrOAuthUserInfoNestedJWTRequiresAll is returned when responseType is NESTED_JWT but fields are missing.
+	// ErrOAuthUserInfoNestedJWTRequiresAll is returned when responseType is NESTED_JWT but encryption is missing.
 	ErrOAuthUserInfoNestedJWTRequiresAll = errors.New(
-		"signingAlg, encryptionAlg, and encryptionEnc are required when userinfo responseType is NESTED_JWT")
+		"encryptionAlg and encryptionEnc are required when userinfo responseType is NESTED_JWT")
 	// ErrOAuthUserInfoAlgRequiresResponseType is returned when algorithm fields
 	// are set without an explicit responseType.
 	ErrOAuthUserInfoAlgRequiresResponseType = errors.New(

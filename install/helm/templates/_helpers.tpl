@@ -1,19 +1,6 @@
 {{/*
-Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
-
-WSO2 LLC. licenses this file to you under the Apache License,
-Version 2.0 (the "License"); you may not use this file except
-in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing,
-software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-KIND, either express or implied. See the License for the
-specific language governing permissions and limitations
-under the License.
+Copyright 2025 The ThunderID Authors
+SPDX-License-Identifier: Apache-2.0
 */}}
 
 {{/*
@@ -81,6 +68,19 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
+Returns "true" when the admin password is auto-generated, i.e. the setup job is enabled
+and neither an existing Secret nor an inline password is supplied. Used to gate the
+generated -admin-credentials Secret and the retrieval instructions in NOTES.txt.
+*/}}
+{{- define "thunderid.adminPasswordGenerated" -}}
+{{- $admin := default dict .Values.setup.admin -}}
+{{- $passwordRef := default dict $admin.passwordRef -}}
+{{- if and .Values.setup.enabled (not $passwordRef.name) (not $admin.password) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{/*
 Check if auto-generated database credentials Secret should be included in checksum annotation.
 Returns true if any database password is set without a passwordRef.key.
 This is used to trigger pod restarts when auto-generated Secrets change.
@@ -99,7 +99,8 @@ This is used to trigger pod restarts when auto-generated Secrets change.
 {{- $runtimePersistentPostgres := default dict $runtimePersistent.postgres -}}
 {{- $cache := default dict $configuration.cache -}}
 {{- $redis := default dict $cache.redis -}}
-{{- if or (and $configPostgres.password (not (default dict $configPostgres.passwordRef).key)) (and $runtimeTransientPostgres.password (not (default dict $runtimeTransientPostgres.passwordRef).key)) (and $runtimeTransientRedis.password (not (default dict $runtimeTransientRedis.passwordRef).key)) (and $entityPostgres.password (not (default dict $entityPostgres.passwordRef).key)) (and $runtimePersistentPostgres.password (not (default dict $runtimePersistentPostgres.passwordRef).key)) (and $redis.password (eq $cache.type "redis") (not (default dict $redis.passwordRef).key)) }}true{{- end }}
+{{- $smtp := default dict (default dict $configuration.email).smtp -}}
+{{- if or (and $configPostgres.password (not (default dict $configPostgres.passwordRef).key)) (and $runtimeTransientPostgres.password (not (default dict $runtimeTransientPostgres.passwordRef).key)) (and $runtimeTransientRedis.password (not (default dict $runtimeTransientRedis.passwordRef).key)) (and $entityPostgres.password (not (default dict $entityPostgres.passwordRef).key)) (and $runtimePersistentPostgres.password (not (default dict $runtimePersistentPostgres.passwordRef).key)) (and $redis.password (eq $cache.type "redis") (not (default dict $redis.passwordRef).key)) (and $smtp.host $smtp.password (not (default dict $smtp.passwordRef).key)) }}true{{- end }}
 {{- end }}
 
 {{/*
@@ -177,6 +178,38 @@ Injects CACHE_REDIS_PASSWORD from auto-generated database credentials Secret whe
     secretKeyRef:
       name: {{ if $redisPasswordRef.key }}{{ $redisPasswordRef.name | default $defaultDbSecretName }}{{ else }}{{ $defaultDbSecretName }}{{ end }}
       key: {{ $redisPasswordRef.key | default "cache-redis-password" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Validate and echo a resource store mode.
+Expected input:
+  - value: the configured mode
+  - field: the values path, used in the failure message
+*/}}
+{{- define "thunderid.validateStoreMode" -}}
+{{- if not (has .value (list "mutable" "declarative" "composite")) }}
+{{- fail (printf "Invalid %s value %q: expected mutable, declarative, or composite." .field .value) }}
+{{- end }}
+{{- .value }}
+{{- end }}
+
+{{/*
+Generate the SMTP password environment variable definition.
+Injects SMTP_PASSWORD from either the auto-generated Secret or an external one.
+*/}}
+{{- define "thunderid.smtpPasswordEnvVars" -}}
+{{- $defaultDbSecretName := printf "%s-db-credentials" (include "thunderid.fullname" .) -}}
+{{- $configuration := default dict .Values.configuration -}}
+{{- $email := default dict $configuration.email -}}
+{{- $smtp := default dict $email.smtp -}}
+{{- $smtpPasswordRef := default dict $smtp.passwordRef -}}
+{{- if and $smtp.host (or $smtp.password $smtpPasswordRef.key) }}
+- name: SMTP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ if $smtpPasswordRef.key }}{{ $smtpPasswordRef.name | default $defaultDbSecretName }}{{ else }}{{ $defaultDbSecretName }}{{ end }}
+      key: {{ $smtpPasswordRef.key | default "smtp-password" }}
 {{- end }}
 {{- end }}
 

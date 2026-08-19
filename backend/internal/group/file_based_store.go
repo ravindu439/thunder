@@ -1,26 +1,12 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package group
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	declarativeresource "github.com/thunder-id/thunderid/internal/system/declarative_resource"
@@ -35,7 +21,7 @@ type fileBasedGroupStore struct {
 }
 
 // newFileBasedGroupStore creates a new file-based store for groups.
-func newFileBasedGroupStore() (groupStoreInterface, transaction.Transactioner) {
+func newFileBasedGroupStore() (groupStoreInterface, providers.Transactioner) {
 	return &fileBasedGroupStore{
 		GenericFileBasedStore: declarativeresource.NewGenericFileBasedStore(entitystore.KeyTypeGroup),
 	}, transaction.NewNoOpTransactioner()
@@ -553,6 +539,45 @@ func (f *fileBasedGroupStore) GetTransitiveGroupsForEntity(
 	}
 
 	return result, nil
+}
+
+// GetDirectGroupParents retrieves the IDs of declarative groups that directly contain any of the
+// given groups as a nested member.
+func (f *fileBasedGroupStore) GetDirectGroupParents(
+	ctx context.Context, groupIDs []string,
+) ([]string, error) {
+	if len(groupIDs) == 0 {
+		return []string{}, nil
+	}
+
+	list, err := f.GenericFileBasedStore.List()
+	if err != nil {
+		return nil, err
+	}
+
+	wanted := make(map[string]bool, len(groupIDs))
+	for _, id := range groupIDs {
+		wanted[id] = true
+	}
+
+	parents := make([]string, 0)
+	for _, item := range list {
+		grpData, err := groupFromDeclarativeData(item.ID.ID, item.Data)
+		if err != nil {
+			// Return the error rather than skipping: a skipped entry could be a parent, and this
+			// result feeds an authorization decision. GetTransitiveGroupsForEntity keeps skipping,
+			// since it feeds listings.
+			return nil, fmt.Errorf("declarative group %q could not be parsed while resolving "+
+				"group ancestors: %w", item.ID.ID, err)
+		}
+		for _, member := range grpData.Members {
+			if member.Type == MemberTypeGroup && wanted[member.ID] {
+				parents = append(parents, grpData.ID)
+				break
+			}
+		}
+	}
+	return parents, nil
 }
 
 // isGroupNotFoundError checks whether the error signals a missing entity.

@@ -1,25 +1,11 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authz
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
 	engineconfig "github.com/thunder-id/thunderid/pkg/thunderidengine/config"
@@ -72,10 +58,10 @@ func (suite *AuthorizationValidatorTestSuite) TestnewAuthorizationValidator() {
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_Success() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -89,9 +75,9 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_MissingClientID() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -105,10 +91,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_InvalidRedirectURI() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://malicious.example.com/callback", // not in allowed list
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://malicious.example.com/callback"}, // not in allowed list
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -132,10 +118,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzRequest_CodeGrant
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -149,9 +135,9 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzRequest_CodeGrant
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_MissingResponseType() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:    "test-client-id",
-			constants.RequestParamRedirectURI: "https://client.example.com/callback",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:    {"test-client-id"},
+			constants.RequestParamRedirectURI: {"https://client.example.com/callback"},
 		},
 	}
 
@@ -175,10 +161,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -192,10 +178,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_EmptyRedirectURI() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "", // empty redirect URI should be OK if app has only one registered
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {""}, // empty redirect URI should be OK if app has only one registered
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 		},
 	}
 
@@ -211,11 +197,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ValidResource() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "https://api.example.com/resource",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"https://api.example.com/resource"},
 		},
 		Resources: []string{"https://api.example.com/resource"},
 	}
@@ -230,11 +216,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ValidMCPServerResource() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "https://mcp.example.com/mcp",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"https://mcp.example.com/mcp"},
 		},
 		Resources: []string{"https://mcp.example.com/mcp"},
 	}
@@ -249,11 +235,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ValidResourceWithPort() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "https://mcp.example.com:8443",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"https://mcp.example.com:8443"},
 		},
 		Resources: []string{"https://mcp.example.com:8443"},
 	}
@@ -268,11 +254,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_EmptyResource() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {""},
 		},
 	}
 
@@ -286,11 +272,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ResourceMissingScheme() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "api.example.com/resource",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"api.example.com/resource"},
 		},
 		Resources: []string{"api.example.com/resource"},
 	}
@@ -305,11 +291,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ResourceWithFragment() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "https://api.example.com/resource#fragment",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"https://api.example.com/resource#fragment"},
 		},
 		Resources: []string{"https://api.example.com/resource#fragment"},
 	}
@@ -324,11 +310,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ResourceRelativeURI() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "/api/resource",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"/api/resource"},
 		},
 		Resources: []string{"/api/resource"},
 	}
@@ -343,11 +329,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ResourceInvalidURI() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "not a valid uri format",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"not a valid uri format"},
 		},
 		Resources: []string{"not a valid uri format"},
 	}
@@ -363,11 +349,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_ResourceParameterWithQuery() {
 	// Test resource parameter with query component (should be valid per RFC 8707)
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamResource:     "https://api.example.com/resource?param=value",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamResource:     {"https://api.example.com/resource?param=value"},
 		},
 		Resources: []string{"https://api.example.com/resource?param=value"},
 	}
@@ -393,10 +379,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzReq_PKCERequired_
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 			// Missing code_challenge
 		},
 	}
@@ -422,12 +408,12 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzReq_PKCERequired_
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:            "test-client-id",
-			constants.RequestParamRedirectURI:         "https://client.example.com/callback",
-			constants.RequestParamResponseType:        string(providers.ResponseTypeCode),
-			constants.RequestParamCodeChallenge:       "invalid-challenge",
-			constants.RequestParamCodeChallengeMethod: "plain", // Not supported per OAuth 2.0 Security BCP
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:            {"test-client-id"},
+			constants.RequestParamRedirectURI:         {"https://client.example.com/callback"},
+			constants.RequestParamResponseType:        {string(providers.ResponseTypeCode)},
+			constants.RequestParamCodeChallenge:       {"invalid-challenge"},
+			constants.RequestParamCodeChallengeMethod: {"plain"}, // Not supported per OAuth 2.0 Security BCP
 		},
 	}
 
@@ -454,12 +440,12 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 	// Use a valid S256 code challenge (base64url encoded SHA256 hash)
 	// This is a valid format for testing
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:            "test-client-id",
-			constants.RequestParamRedirectURI:         "https://client.example.com/callback",
-			constants.RequestParamResponseType:        string(providers.ResponseTypeCode),
-			constants.RequestParamCodeChallenge:       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-			constants.RequestParamCodeChallengeMethod: "S256",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:            {"test-client-id"},
+			constants.RequestParamRedirectURI:         {"https://client.example.com/callback"},
+			constants.RequestParamResponseType:        {string(providers.ResponseTypeCode)},
+			constants.RequestParamCodeChallenge:       {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
+			constants.RequestParamCodeChallengeMethod: {"S256"},
 		},
 	}
 
@@ -484,11 +470,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzReq_PKCERequired_
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:      "test-client-id",
-			constants.RequestParamRedirectURI:   "https://client.example.com/callback",
-			constants.RequestParamResponseType:  string(providers.ResponseTypeCode),
-			constants.RequestParamCodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:      {"test-client-id"},
+			constants.RequestParamRedirectURI:   {"https://client.example.com/callback"},
+			constants.RequestParamResponseType:  {string(providers.ResponseTypeCode)},
+			constants.RequestParamCodeChallenge: {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
 			// Missing code_challenge_method - should fail instead of defaulting to S256
 		},
 	}
@@ -514,10 +500,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 			// No PKCE parameters - should be OK since PKCE is not required
 		},
 	}
@@ -543,11 +529,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzReq_PKCENotRequir
 	}
 
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:      "test-client-id",
-			constants.RequestParamRedirectURI:   "https://client.example.com/callback",
-			constants.RequestParamResponseType:  string(providers.ResponseTypeCode),
-			constants.RequestParamCodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:      {"test-client-id"},
+			constants.RequestParamRedirectURI:   {"https://client.example.com/callback"},
+			constants.RequestParamResponseType:  {string(providers.ResponseTypeCode)},
+			constants.RequestParamCodeChallenge: {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
 			// Missing code_challenge_method - should fail even when PKCE is not required
 		},
 	}
@@ -564,11 +550,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateAuthzReq_PKCENotRequir
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptNone_LoginRequired() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "none",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"none"},
 		},
 	}
 
@@ -582,11 +568,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRequest_PromptLogin_Success() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "login",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"login"},
 		},
 	}
 
@@ -600,11 +586,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptConsent_Success() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "consent",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"consent"},
 		},
 	}
 
@@ -618,11 +604,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptNoneCombined_InvalidRequest() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "none login",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"none login"},
 		},
 	}
 
@@ -636,11 +622,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptInvalidValue_InvalidRequest() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "invalid_value",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"invalid_value"},
 		},
 	}
 
@@ -654,11 +640,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptSelectAccount() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "select_account",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"select_account"},
 		},
 	}
 
@@ -672,11 +658,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptLoginConsent_Success() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "login consent",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {"login consent"},
 		},
 	}
 
@@ -690,11 +676,11 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_Pr
 
 func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthzRequest_PromptEmpty_InvalidRequest() {
 	msg := &OAuthMessage{
-		RequestQueryParams: map[string]string{
-			constants.RequestParamClientID:     "test-client-id",
-			constants.RequestParamRedirectURI:  "https://client.example.com/callback",
-			constants.RequestParamResponseType: string(providers.ResponseTypeCode),
-			constants.RequestParamPrompt:       "",
+		RequestQueryParams: url.Values{
+			constants.RequestParamClientID:     {"test-client-id"},
+			constants.RequestParamRedirectURI:  {"https://client.example.com/callback"},
+			constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
+			constants.RequestParamPrompt:       {""},
 		},
 	}
 
@@ -804,10 +790,10 @@ func (suite *AuthorizationValidatorTestSuite) TestValidateInitialAuthorizationRe
 				TokenEndpointAuthMethod: providers.TokenEndpointAuthMethodClientSecretPost,
 			}
 			msg := &OAuthMessage{
-				RequestQueryParams: map[string]string{
-					constants.RequestParamClientID:     "test-client-id",
-					constants.RequestParamRedirectURI:  tt.incomingURI,
-					constants.RequestParamResponseType: string(providers.ResponseTypeCode),
+				RequestQueryParams: url.Values{
+					constants.RequestParamClientID:     {"test-client-id"},
+					constants.RequestParamRedirectURI:  {tt.incomingURI},
+					constants.RequestParamResponseType: {string(providers.ResponseTypeCode)},
 				},
 			}
 

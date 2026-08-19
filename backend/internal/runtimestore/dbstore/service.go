@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package dbstore
 
@@ -66,6 +51,35 @@ func (d *dbStore) Put(ctx context.Context, namespace providers.RuntimeStoreNames
 
 	d.logger.Debug(ctx, "Stored in database", log.String("key", key))
 	return nil
+}
+
+// PutIfNotExists atomically stores a value only if the key does not already hold a non-expired
+// value. A non-positive ttlSeconds stores the entry without expiry.
+func (d *dbStore) PutIfNotExists(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key string, value []byte, ttlSeconds int64) (bool, error) {
+	dbClient, err := d.dbProvider.GetRuntimeTransientDBClient()
+	if err != nil {
+		return false, fmt.Errorf("failed to get database client: %w", err)
+	}
+
+	now := time.Now().UTC()
+	var expiryTime interface{}
+	if ttlSeconds > 0 {
+		expiryTime = now.Add(time.Duration(ttlSeconds) * time.Second)
+	}
+
+	results, err := dbClient.QueryContext(
+		ctx, queryPutIfNotExistsRuntimeStore, d.deploymentID, string(namespace), key, value, expiryTime, now,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to store in database: %w", err)
+	}
+	if len(results) == 0 {
+		return false, nil
+	}
+
+	d.logger.Debug(ctx, "Stored in database", log.String("key", key))
+	return true, nil
 }
 
 // Get retrieves a value from the database runtime store by its key.
@@ -175,6 +189,25 @@ func (d *dbStore) ExtendTTL(ctx context.Context, namespace providers.RuntimeStor
 		return providers.ErrRuntimeStoreKeyNotFound
 	}
 	return nil
+}
+
+// CompareFieldAndSwap replaces the stored value with newValue only when the top-level JSON string
+// field of the current, non-expired value equals expected, preserving its TTL.
+func (d *dbStore) CompareFieldAndSwap(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key, field, expected string, newValue []byte) (bool, error) {
+	dbClient, err := d.dbProvider.GetRuntimeTransientDBClient()
+	if err != nil {
+		return false, fmt.Errorf("failed to get database client: %w", err)
+	}
+
+	rowsAffected, err := dbClient.ExecuteContext(
+		ctx, queryCompareFieldAndSwapRuntimeStore,
+		d.deploymentID, string(namespace), key, newValue, time.Now().UTC(), field, expected,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to compare-and-swap in database: %w", err)
+	}
+	return rowsAffected > 0, nil
 }
 
 // parseStoreValue extracts the VALUE column from a result row, handling both string and []byte.

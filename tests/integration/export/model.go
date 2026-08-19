@@ -1,27 +1,18 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package export
 
 // ExportRequest represents the request structure for exporting resources.
 type ExportRequest struct {
-	Applications []string `json:"applications,omitempty"`
-	Connections  []string `json:"connections,omitempty"`
+	Applications             []string `json:"applications,omitempty"`
+	Connections              []string `json:"connections,omitempty"`
+	CredentialConfigurations []string `json:"credentialConfigurations,omitempty"`
+	PresentationDefinitions  []string `json:"presentationDefinitions,omitempty"`
+	Users                    []string `json:"users,omitempty"`
+	UserTypes                []string `json:"userTypes,omitempty"`
+	AgentTypes               []string `json:"agentTypes,omitempty"`
+	Translations             []string `json:"translations,omitempty"`
 }
 
 // ExportResponse represents the response structure for exporting resources.
@@ -47,6 +38,7 @@ type Application struct {
 	OUID                      string              `json:"ouId,omitempty"`
 	Name                      string              `json:"name"`
 	Description               string              `json:"description,omitempty"`
+	Type                      string              `json:"type,omitempty"`
 	ClientID                  string              `json:"clientId,omitempty"`
 	ClientSecret              string              `json:"clientSecret,omitempty"`
 	AuthFlowID                string              `json:"authFlowId,omitempty"`

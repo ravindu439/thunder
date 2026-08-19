@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 import {render, screen} from '@thunderid/test-utils';
@@ -106,5 +91,30 @@ describe('AttributesSummarySection', () => {
     render(<AttributesSummarySection agent={{...baseAgent, attributes: {email: 'a@b.com'}}} />);
 
     expect(screen.getByText('Email Address')).toBeInTheDocument();
+  });
+
+  describe('variant="bare"', () => {
+    it('renders each attribute as a single "label: value" chip, with no card title', () => {
+      render(<AttributesSummarySection agent={baseAgent} variant="bare" />);
+
+      expect(screen.getByText('email: a@b.com')).toBeInTheDocument();
+      expect(screen.getByText('count: 5')).toBeInTheDocument();
+      expect(screen.getByText('isAdmin: Yes')).toBeInTheDocument();
+      expect(screen.getByText('tags: a, b')).toBeInTheDocument();
+      expect(screen.queryByText('Attributes')).not.toBeInTheDocument();
+    });
+
+    it('still shows the empty state when there are no attribute values', () => {
+      render(<AttributesSummarySection agent={{...baseAgent, attributes: {}}} variant="bare" />);
+
+      expect(screen.getByText('No attributes available.')).toBeInTheDocument();
+    });
+
+    it('still shows a loading spinner while the schema is loading', () => {
+      mockUseGetAgentType.mockReturnValue({data: undefined, isLoading: true});
+      render(<AttributesSummarySection agent={baseAgent} variant="bare" />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
   });
 });

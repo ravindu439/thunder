@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "📦 Verifying sample artifacts..."
 
-$SAMPLE_APPS = @("react-vanilla", "react-sdk", "react-api-based", "wayfinder")
+$SAMPLE_APPS = @("vanilla", "react-sdk", "react-api-based", "wayfinder")
 $MISSING_COUNT = 0
 
 foreach ($app in $SAMPLE_APPS) {

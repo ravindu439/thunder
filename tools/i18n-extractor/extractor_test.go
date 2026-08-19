@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
@@ -32,7 +17,7 @@ func TestExtractFromDirectory(t *testing.T) {
 	file1Content := `
 package main
 
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 
 var msg1 = core.I18nMessage{
     Key: "key.one",
@@ -43,7 +28,7 @@ var msg1 = core.I18nMessage{
 	file2Content := `
 package sub
 
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 
 var msg2 = core.I18nMessage{
     Key: "key.two",
@@ -54,7 +39,7 @@ var msg2 = core.I18nMessage{
 	file3Content := `
 package deep
 
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 
 var msg3 = core.I18nMessage{
     Key: "key.three",
@@ -86,7 +71,7 @@ var msg3 = core.I18nMessage{
 	// Create a test file (should be ignored)
 	testFileContent := `
 package main
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 var testMsg = core.I18nMessage{Key: "ignored", DefaultValue: "Ignored"}
 `
 	if err := os.WriteFile(filepath.Join(tempDir, "file_test.go"), []byte(testFileContent), 0644); err != nil {
@@ -136,7 +121,7 @@ func TestExtractParenthesizedStringExpression(t *testing.T) {
 	fileContent := `
 package main
 
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 
 var msg1 = core.I18nMessage{
     Key: ("paren.key"),
@@ -195,7 +180,7 @@ func TestExtractMultilineStringConcatenation(t *testing.T) {
 	fileContent := `
 package main
 
-import "github.com/wso2/thunder/backend/internal/system/i18n/core"
+import "github.com/thunder-id/thunderid/backend/internal/system/i18n/core"
 
 var msg1 = core.I18nMessage{
     Key: "multiline.key",

@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package model
 
@@ -93,7 +78,7 @@ func (s *CredentialTestSuite) TestGetAttributes_CredentialOnly_ReturnsOnlyCreden
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(true, false, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowCredential: true})
 	names := make([]string, 0, len(attrs))
 	for _, a := range attrs {
 		names = append(names, a.Attribute)
@@ -110,7 +95,7 @@ func (s *CredentialTestSuite) TestGetAttributes_CredentialOnly_EmptyWhenNoCreden
 	}`))
 	s.Require().NoError(err)
 
-	attrs := schema.GetAttributes(true, false, false)
+	attrs := schema.GetAttributes(AttributeFilter{AllowCredential: true})
 	s.Require().Empty(attrs)
 }
 

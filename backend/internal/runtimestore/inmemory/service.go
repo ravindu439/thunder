@@ -1,25 +1,11 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package inmemory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -70,6 +56,29 @@ func (s *inMemoryStore) Put(ctx context.Context, namespace providers.RuntimeStor
 
 	s.logger.Debug(ctx, "Stored in memory", log.String("key", key))
 	return nil
+}
+
+// PutIfNotExists atomically stores a value only if the key does not already hold a non-expired value.
+func (s *inMemoryStore) PutIfNotExists(ctx context.Context, namespace providers.RuntimeStoreNamespace,
+	key string, value []byte, ttlSeconds int64) (bool, error) {
+	e := &entry{value: value}
+	if ttlSeconds > 0 {
+		e.expiresAt = time.Now().Add(time.Duration(ttlSeconds) * time.Second)
+	}
+
+	fk := s.getFormattedKey(namespace, key)
+
+	s.mu.Lock()
+	existing, ok := s.data[fk]
+	if ok && !existing.isExpired() {
+		s.mu.Unlock()
+		return false, nil
+	}
+	s.data[fk] = e
+	s.mu.Unlock()
+
+	s.logger.Debug(ctx, "Stored in memory", log.String("key", key))
+	return true, nil
 }
 
 // Get retrieves a value from the in-memory store by its key.
@@ -130,6 +139,34 @@ func (s *inMemoryStore) Take(ctx context.Context, namespace providers.RuntimeSto
 
 	s.logger.Debug(ctx, "Taken from memory", log.String("key", key))
 	return e.value, nil
+}
+
+// CompareFieldAndSwap replaces the stored value with newValue only when the top-level JSON string
+// field of the current value equals expected, preserving the existing TTL.
+func (s *inMemoryStore) CompareFieldAndSwap(_ context.Context, namespace providers.RuntimeStoreNamespace,
+	key, field, expected string, newValue []byte) (bool, error) {
+	fk := s.getFormattedKey(namespace, key)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.data[fk]
+	if !ok || e.isExpired() {
+		return false, nil
+	}
+
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(e.value, &doc); err != nil {
+		return false, fmt.Errorf("failed to unmarshal stored value: %w", err)
+	}
+
+	var current string
+	if err := json.Unmarshal(doc[field], &current); err != nil || current != expected {
+		return false, nil
+	}
+
+	s.data[fk] = &entry{value: newValue, expiresAt: e.expiresAt}
+	return true, nil
 }
 
 // ExtendTTL extends the TTL of an existing entry in the in-memory store.

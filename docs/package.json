@@ -3,7 +3,7 @@
   "name": "@thunderid/docs",
   "version": "0.0.0",
   "description": "Documentation for ⚡️ ThunderID",
-  "author": "WSO2",
+  "author": "The ThunderID Authors",
   "license": "Apache-2.0",
   "homepage": "https://github.com/thunder-id/thunderid/tree/main/docs#readme",
   "bugs": {
@@ -17,8 +17,7 @@
     "thunderid",
     "thunderid",
     "docs",
-    "documentation",
-    "wso2"
+    "documentation"
   ],
   "scripts": {
     "build": "pnpm setup && docusaurus build",
@@ -32,6 +31,7 @@
     "generate:changelog": "node ./scripts/generate-changelog.mjs",
     "generate:contributors": "node ./scripts/generate-contributors.mjs",
     "generate:postman-collections": "node ./scripts/generate-postman-collections.mjs",
+    "generate:prompts": "node ./scripts/generate-prompts.mjs",
     "generate:sdk-releases": "node ./scripts/generate-sdk-releases.mjs",
     "setup": "node ./scripts/prebuild.mjs",
     "lint": "eslint .",
@@ -49,12 +49,20 @@
     "@docusaurus/plugin-content-docs": "3.9.2",
     "@docusaurus/preset-classic": "3.9.2",
     "@docusaurus/theme-common": "3.9.2",
+    "@docusaurus/theme-mermaid": "3.9.2",
     "@mdx-js/react": "3.0.0",
     "@scalar/api-reference-react": "0.9.38",
+    "@tanstack/react-query": "catalog:",
+    "@thunderid/components": "workspace:^",
+    "@thunderid/contexts": "workspace:^",
     "@thunderid/design": "workspace:^",
     "@thunderid/eslint-plugin": "workspace:^",
+    "@thunderid/hooks": "workspace:^",
+    "@thunderid/i18n": "workspace:^",
     "@thunderid/logger": "workspace:^",
     "@thunderid/prettier-config": "workspace:^",
+    "@thunderid/react": "catalog:",
+    "@thunderid/utils": "workspace:^",
     "@wso2/oxygen-ui": "catalog:",
     "@wso2/oxygen-ui-icons-react": "catalog:",
     "clsx": "2.1.1",
@@ -63,7 +71,9 @@
     "prism-react-renderer": "2.3.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-github-btn": "1.4.0"
+    "react-github-btn": "1.4.0",
+    "react-i18next": "catalog:",
+    "react-router": "catalog:"
   },
   "devDependencies": {
     "@docusaurus/module-type-aliases": "3.9.2",

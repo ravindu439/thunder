@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package flowexec
 
@@ -1173,6 +1158,67 @@ func (s *ModelTestSuite) TestToEngineContext_WithFrameStack_NilResolver_Empty() 
 	resultCtx, err := dbModel.ToEngineContext(context.Background(), mockGraph, nil)
 	s.NoError(err)
 	s.Equal(0, resultCtx.frameDepth())
+}
+
+// --- InitiatorRequest round-trip ---
+
+func (s *ModelTestSuite) TestInitiatorRequest_RoundTrip() {
+	mockGraph := coremock.NewGraphInterfaceMock(s.T())
+	mockGraph.On("GetID").Return("graph-init-req")
+	mockGraph.On("GetType").Return(providers.FlowTypeAuthentication)
+
+	ctx := EngineContext{
+		Context:          context.Background(),
+		ExecutionID:      "exec-init-req",
+		FlowType:         providers.FlowTypeAuthentication,
+		AppID:            "app-id",
+		Graph:            mockGraph,
+		UserInputs:       map[string]string{},
+		RuntimeData:      map[string]string{},
+		ExecutionHistory: map[string]*providers.NodeExecutionRecord{},
+	}
+	ctx.SetInitiatorRequest(&providers.InitiatorRequest{
+		Headers:     map[string][]string{"X-Request-Id": {"req-123"}, "Content-Type": {"application/json"}},
+		QueryParams: map[string][]string{"client_id": {"my-client"}, "scope": {"openid"}},
+	})
+
+	dbModel := &FlowContextDB{}
+	s.NoError(dbModel.FromEngineContext(ctx))
+
+	restored, err := dbModel.ToEngineContext(context.Background(), mockGraph, nil)
+	s.NoError(err)
+
+	req := restored.GetInitiatorRequest()
+	s.Require().NotNil(req)
+	s.Equal([]string{"req-123"}, req.Headers["X-Request-Id"])
+	s.Equal([]string{"application/json"}, req.Headers["Content-Type"])
+	s.Equal([]string{"my-client"}, req.QueryParams["client_id"])
+	s.Equal([]string{"openid"}, req.QueryParams["scope"])
+}
+
+func (s *ModelTestSuite) TestInitiatorRequest_NilRoundTrip() {
+	mockGraph := coremock.NewGraphInterfaceMock(s.T())
+	mockGraph.On("GetID").Return("graph-nil-init")
+	mockGraph.On("GetType").Return(providers.FlowTypeAuthentication)
+
+	ctx := EngineContext{
+		Context:          context.Background(),
+		ExecutionID:      "exec-nil-init",
+		FlowType:         providers.FlowTypeAuthentication,
+		AppID:            "app-id",
+		Graph:            mockGraph,
+		UserInputs:       map[string]string{},
+		RuntimeData:      map[string]string{},
+		ExecutionHistory: map[string]*providers.NodeExecutionRecord{},
+	}
+	// initiatorRequest is nil by default
+
+	dbModel := &FlowContextDB{}
+	s.NoError(dbModel.FromEngineContext(ctx))
+
+	restored, err := dbModel.ToEngineContext(context.Background(), mockGraph, nil)
+	s.NoError(err)
+	s.Nil(restored.GetInitiatorRequest())
 }
 
 // --- serializeFrameStack ---

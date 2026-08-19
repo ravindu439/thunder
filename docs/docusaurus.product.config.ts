@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 export interface DocusaurusProductConfig {
   project: {
@@ -68,8 +53,7 @@ const DocusaurusProductConfig = {
   project: {
     emoji: '⚡',
     name: 'ThunderID',
-    description:
-      'Open Source Auth for Modern Apps and AI Agents',
+    description: 'Open Source Auth for Modern Apps and AI Agents',
     source: {
       github: {
         name: 'thunderid',
@@ -77,7 +61,7 @@ const DocusaurusProductConfig = {
         url: 'https://github.com/thunder-id/thunderid',
         discussionsUrl: 'https://github.com/thunder-id/thunderid/discussions',
         issuesUrl: 'https://github.com/thunder-id/thunderid/issues',
-        releasesUrl: '/docs/next/releases',
+        releasesUrl: '/releases',
         editUrls: {
           blog: 'https://github.com/thunder-id/thunderid/tree/main/blog/',
           content: 'https://github.com/thunder-id/thunderid/tree/main/docs/',
@@ -95,7 +79,7 @@ const DocusaurusProductConfig = {
   },
   documentation: {
     versioning: {
-      enabled: false,
+      enabled: true,
     },
     deployment: {
       production: {

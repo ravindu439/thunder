@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -66,7 +51,7 @@ func (suite *OIDCAuthExecutorTestSuite) SetupTest() {
 
 func newOIDCAuthenticatedUser() providers.AuthUser {
 	var authUser providers.AuthUser
-	_ = authUser.UnmarshalJSON([]byte(`{"entityReferenceToken":"tok","attributeToken":"tok"}`))
+	_ = authUser.UnmarshalJSON([]byte(`{"default":{"entityReferenceToken":"tok","attributeToken":"tok"}}`))
 	return authUser
 }
 
@@ -202,6 +187,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestExecute_CodeProvided_ValidIDToken_Au
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -238,6 +224,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_ValidIDToken
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -270,13 +257,14 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_NoLocalUser_
 		RuntimeData:    make(map[string]string),
 	}
 
-	// newOIDCAuthenticatedUser carries an entity-reference token but no resolved EntityReference,
-	// modeling account linking that found no matching local account.
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(newOIDCAuthenticatedUser(), providers.AuthenticatedClaims{
 			"sub": "user-sub-123", "email": "new@example.com",
 		}, (*tidcommon.ServiceError)(nil))
+	// Entity reference resolution finds no matching local account, modeling account linking
+	// that did not resolve to an existing local user.
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, newOIDCAuthenticatedUser())
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -303,14 +291,13 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_LocalUser_En
 		RuntimeData:    make(map[string]string),
 	}
 
-	// A resolved EntityReference models account linking matching an existing local user.
-	var authUser providers.AuthUser
-	authUser.SetEntityReference(&providers.EntityReference{EntityID: "local-user-123"})
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
-		Return(authUser, providers.AuthenticatedClaims{
+		Return(newOIDCAuthenticatedUser(), providers.AuthenticatedClaims{
 			"sub": "user-sub-123", "email": "existing@example.com",
 		}, (*tidcommon.ServiceError)(nil))
+	// A resolved EntityReference models account linking matching an existing local user.
+	expectEntityReferenceResolved(suite.mockAuthnProvider, newOIDCAuthenticatedUser())
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -378,6 +365,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_ValidNonce()
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -550,6 +538,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_Registration
 		Return(providers.AuthUser{}, providers.AuthenticatedClaims{
 			"sub": "new-user-sub", "email": "newuser@example.com", "name": "New User",
 		}, (*tidcommon.ServiceError)(nil))
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, providers.AuthUser{})
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -580,6 +569,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_AuthFlow_Use
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(providers.AuthUser{}, providers.AuthenticatedClaims{}, (*tidcommon.ServiceError)(nil))
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, providers.AuthUser{})
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -606,6 +596,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_UserAlreadyE
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -661,6 +652,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_FiltersNonUs
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -705,6 +697,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_EmailInIDTok
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -739,6 +732,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_NoEmailInIDT
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -773,6 +767,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_EmptyEmailIn
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -817,6 +812,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_Registration
 			"iss":   "https://provider.com",
 			"aud":   "client-id",
 		}, (*tidcommon.ServiceError)(nil))
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, providers.AuthUser{})
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -846,6 +842,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_EmailFromUse
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -883,6 +880,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_EmailInIDTok
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -934,6 +932,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_AllowAuthWit
 			"iss":   "https://provider.com",
 			"aud":   "client-123",
 		}, (*tidcommon.ServiceError)(nil))
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, providers.AuthUser{})
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -966,6 +965,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_PreventAuthW
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(providers.AuthUser{}, providers.AuthenticatedClaims{}, (*tidcommon.ServiceError)(nil))
+	expectEntityReferenceNotFound(suite.mockAuthnProvider, providers.AuthUser{})
 
 	err := suite.executor.ProcessAuthFlowResponse(ctx, execResp)
 
@@ -993,6 +993,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_AllowRegistr
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{
@@ -1032,6 +1033,7 @@ func (suite *OIDCAuthExecutorTestSuite) TestProcessAuthFlowResponse_PreventRegis
 	}
 
 	authenticatedAuthUser := newOIDCAuthenticatedUser()
+	expectEntityReferenceResolved(suite.mockAuthnProvider, authenticatedAuthUser)
 	suite.mockAuthnProvider.On("AuthenticateUser", mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything, mock.Anything, mock.Anything).
 		Return(authenticatedAuthUser, providers.AuthenticatedClaims{

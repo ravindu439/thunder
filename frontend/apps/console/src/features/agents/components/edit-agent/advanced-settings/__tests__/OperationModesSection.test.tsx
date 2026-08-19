@@ -1,30 +1,26 @@
-/**
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type {OAuth2Config} from '@thunderid/configure-applications';
 import {describe, it, expect, vi} from 'vitest';
-import type {OAuth2Config} from '../../../../../applications/models/oauth';
 import OperationModesSection from '../OperationModesSection';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback ?? key,
+  }),
+  Trans: ({defaults = ''}: {defaults?: string}) => <span>{defaults}</span>,
+}));
+
+vi.mock('@thunderid/react', () => ({
+  useThunderID: () => ({
+    discovery: {
+      wellKnown: {
+        token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post', 'none'],
+      },
+    },
   }),
 }));
 
@@ -48,14 +44,14 @@ describe('OperationModesSection', () => {
   it('renders the card title and description', () => {
     render(<OperationModesSection oauth2Config={autonomousOnlyConfig} />);
 
-    expect(screen.getByText('OAuth Configuration')).toBeInTheDocument();
+    expect(screen.getByText('OAuth 2 Configuration')).toBeInTheDocument();
   });
 
   it('shows an info note explaining the Delegated-mode dependency, before the grant types selector', () => {
     render(<OperationModesSection oauth2Config={autonomousOnlyConfig} onOAuth2ConfigChange={vi.fn()} />);
 
     expect(
-      screen.getByText(/greyed-out grants unlock once you turn on Delegated mode in the Flows tab/i),
+      screen.getByText(/greyed-out grants unlock once you turn on Delegated mode at the top of this tab/i),
     ).toBeInTheDocument();
   });
 
@@ -165,6 +161,149 @@ describe('OperationModesSection', () => {
       render(<OperationModesSection oauth2Config={delegatedConfig} onOAuth2ConfigChange={vi.fn()} disabled />);
 
       expect(document.getElementById('agent-grant-types')).toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  describe('Client Authentication Method', () => {
+    it('shows the placeholder when no method is set', () => {
+      render(<OperationModesSection oauth2Config={autonomousOnlyConfig} />);
+
+      expect(screen.getByText('Select an auth method')).toBeInTheDocument();
+    });
+
+    it('locks the token method when the client is public', () => {
+      render(<OperationModesSection oauth2Config={{...autonomousOnlyConfig, publicClient: true}} />);
+
+      expect(screen.getByText('Set to "none" because this agent is a public client.')).toBeInTheDocument();
+      expect(document.getElementById('agent_token_endpoint_auth_method')).toHaveClass('Mui-disabled');
+    });
+
+    it('renders the currently selected method', () => {
+      render(
+        <OperationModesSection
+          oauth2Config={{...autonomousOnlyConfig, tokenEndpointAuthMethod: 'client_secret_basic'}}
+        />,
+      );
+
+      expect(screen.getByText('client_secret_basic')).toBeInTheDocument();
+    });
+
+    it('calls onOAuth2ConfigChange when a new method is selected', async () => {
+      const user = userEvent.setup();
+      const onOAuth2ConfigChange = vi.fn();
+      render(
+        <OperationModesSection
+          oauth2Config={{...autonomousOnlyConfig, tokenEndpointAuthMethod: 'client_secret_basic'}}
+          onOAuth2ConfigChange={onOAuth2ConfigChange}
+        />,
+      );
+
+      await user.click(document.getElementById('agent_token_endpoint_auth_method')!);
+      await user.click(screen.getByRole('option', {name: 'client_secret_post'}));
+
+      expect(onOAuth2ConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({tokenEndpointAuthMethod: 'client_secret_post'}) as Partial<OAuth2Config>,
+      );
+    });
+  });
+
+  describe('Require PKCE', () => {
+    it('checks PKCE automatically when authorization_code is selected', () => {
+      render(<OperationModesSection oauth2Config={delegatedConfig} />);
+
+      expect(screen.getByLabelText('Require PKCE')).toBeChecked();
+    });
+
+    it('unchecks PKCE when authorization_code is not selected', () => {
+      render(<OperationModesSection oauth2Config={autonomousOnlyConfig} />);
+
+      expect(screen.getByLabelText('Require PKCE')).not.toBeChecked();
+    });
+
+    it('checks PKCE when the client is public even without authorization_code', () => {
+      render(<OperationModesSection oauth2Config={{...autonomousOnlyConfig, publicClient: true}} />);
+
+      expect(screen.getByLabelText('Require PKCE')).toBeChecked();
+    });
+
+    it('is never directly editable by the user', () => {
+      render(<OperationModesSection oauth2Config={delegatedConfig} onOAuth2ConfigChange={vi.fn()} />);
+
+      expect(screen.getByLabelText('Require PKCE')).toBeDisabled();
+    });
+
+    it('shows the not-applicable caption when authorization_code is off', () => {
+      render(<OperationModesSection oauth2Config={autonomousOnlyConfig} />);
+
+      expect(screen.getByText(/PKCE only applies to the/)).toBeInTheDocument();
+    });
+  });
+
+  describe('Require Pushed Authorization Requests', () => {
+    it('reflects the configured value', () => {
+      render(<OperationModesSection oauth2Config={{...delegatedConfig, requirePushedAuthorizationRequests: true}} />);
+
+      expect(screen.getByLabelText('Require Pushed Authorization Requests')).toBeChecked();
+    });
+
+    it('treats an unset value as unchecked', () => {
+      render(<OperationModesSection oauth2Config={delegatedConfig} />);
+
+      expect(screen.getByLabelText('Require Pushed Authorization Requests')).not.toBeChecked();
+    });
+
+    it('calls onOAuth2ConfigChange when toggled', async () => {
+      const user = userEvent.setup();
+      const onOAuth2ConfigChange = vi.fn();
+      render(<OperationModesSection oauth2Config={delegatedConfig} onOAuth2ConfigChange={onOAuth2ConfigChange} />);
+
+      await user.click(screen.getByLabelText('Require Pushed Authorization Requests'));
+
+      expect(onOAuth2ConfigChange).toHaveBeenCalledWith({requirePushedAuthorizationRequests: true});
+    });
+
+    it('is disabled and unchecked when the authorization_code grant is off', () => {
+      render(
+        <OperationModesSection
+          oauth2Config={{...autonomousOnlyConfig, requirePushedAuthorizationRequests: true}}
+          onOAuth2ConfigChange={vi.fn()}
+        />,
+      );
+
+      const parSwitch = screen.getByLabelText('Require Pushed Authorization Requests');
+      expect(parSwitch).toBeDisabled();
+      expect(parSwitch).not.toBeChecked();
+    });
+  });
+
+  describe('Default audience', () => {
+    it('renders the current default audience', () => {
+      render(
+        <OperationModesSection
+          oauth2Config={{
+            ...autonomousOnlyConfig,
+            token: {accessToken: {defaultAudience: 'https://api.example.com'}} as OAuth2Config['token'],
+          }}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('https://api.example.com')).toBeInTheDocument();
+    });
+
+    it('calls onOAuth2ConfigChange when the audience changes', async () => {
+      const user = userEvent.setup();
+      const onOAuth2ConfigChange = vi.fn();
+      render(<OperationModesSection oauth2Config={autonomousOnlyConfig} onOAuth2ConfigChange={onOAuth2ConfigChange} />);
+
+      await user.type(screen.getByLabelText('Default audience (aud)'), 'a');
+
+      expect(onOAuth2ConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          token: expect.objectContaining({
+            accessToken: expect.objectContaining({defaultAudience: 'a'}) as Record<string, unknown>,
+          }) as Record<string, unknown>,
+        }),
+      );
     });
   });
 });

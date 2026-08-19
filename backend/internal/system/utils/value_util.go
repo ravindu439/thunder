@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package utils
 
@@ -147,8 +132,41 @@ func ToInt64(v any) (int64, bool) {
 	}
 }
 
-// SecondsToMinutes converts seconds to minutes and returns as a string.
-func SecondsToMinutes(seconds int64) string {
-	minutes := seconds / 60
-	return strconv.FormatInt(minutes, 10)
+// ToBool attempts to convert a value to bool.
+// Supports bool and string types ("true"/"false"/"1"/"0" etc. via strconv.ParseBool).
+// Returns the bool value and true if successful, or false and false if not convertible.
+func ToBool(v any) (bool, bool) {
+	switch n := v.(type) {
+	case bool:
+		return n, true
+	case string:
+		b, err := strconv.ParseBool(n)
+		if err != nil {
+			return false, false
+		}
+		return b, true
+	default:
+		return false, false
+	}
+}
+
+// FormatExpiryDuration converts a duration in seconds into a human readable string using the
+// largest unit that divides the value evenly, so the rendered duration is never rounded.
+func FormatExpiryDuration(seconds int64) string {
+	if seconds <= 0 {
+		return "0 seconds"
+	}
+
+	value, unit := seconds, "second"
+	switch {
+	case seconds%3600 == 0:
+		value, unit = seconds/3600, "hour"
+	case seconds%60 == 0:
+		value, unit = seconds/60, "minute"
+	}
+
+	if value > 1 {
+		unit += "s"
+	}
+	return strconv.FormatInt(value, 10) + " " + unit
 }

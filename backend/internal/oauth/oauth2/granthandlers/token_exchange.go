@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package granthandlers
 
@@ -22,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
+	oauthconfig "github.com/thunder-id/thunderid/internal/oauth/config"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/constants"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/dpop"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/model"
@@ -30,37 +17,31 @@ import (
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/revocation"
 	"github.com/thunder-id/thunderid/internal/oauth/oauth2/tokenservice"
 	oauth2utils "github.com/thunder-id/thunderid/internal/oauth/oauth2/utils"
-	"github.com/thunder-id/thunderid/internal/serverconfig"
+	"github.com/thunder-id/thunderid/internal/system/jose/jwt"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 )
 
 // tokenExchangeGrantHandler handles the token exchange grant type.
 type tokenExchangeGrantHandler struct {
-	tokenBuilder        tokenservice.TokenBuilderInterface
-	tokenValidator      tokenservice.TokenValidatorInterface
-	authzService        providers.AuthorizationProvider
-	actorProvider       providers.ActorProvider
-	resourceService     providers.ResourceServerProvider
-	serverConfigService serverconfig.ServerConfigService
+	tokenBuilder    tokenservice.TokenBuilderInterface
+	tokenValidator  tokenservice.TokenValidatorInterface
+	resourceService providers.ResourceServerProvider
+	cfg             oauthconfig.Config
 }
 
 // newTokenExchangeGrantHandler creates a new instance of tokenExchangeGrantHandler.
 func newTokenExchangeGrantHandler(
 	tokenBuilder tokenservice.TokenBuilderInterface,
 	tokenValidator tokenservice.TokenValidatorInterface,
-	authzService providers.AuthorizationProvider,
-	actorProvider providers.ActorProvider,
 	resourceService providers.ResourceServerProvider,
-	serverConfigService serverconfig.ServerConfigService,
+	cfg oauthconfig.Config,
 ) GrantHandlerInterface {
 	return &tokenExchangeGrantHandler{
-		tokenBuilder:        tokenBuilder,
-		tokenValidator:      tokenValidator,
-		authzService:        authzService,
-		actorProvider:       actorProvider,
-		resourceService:     resourceService,
-		serverConfigService: serverConfigService,
+		tokenBuilder:    tokenBuilder,
+		tokenValidator:  tokenValidator,
+		resourceService: resourceService,
+		cfg:             cfg,
 	}
 }
 
@@ -174,16 +155,41 @@ func (h *tokenExchangeGrantHandler) HandleGrant(ctx context.Context, tokenReques
 	subjectClaims, err := h.tokenValidator.ValidateSubjectToken(ctx, tokenRequest.SubjectToken, oauthApp)
 	if err != nil {
 		logger.Debug(ctx, "Failed to validate subject token", log.Error(err))
-		if errors.Is(err, revocation.ErrEnforcementUnavailable) {
+		switch {
+		case errors.Is(err, revocation.ErrEnforcementUnavailable):
 			return nil, &model.ErrorResponse{
 				Error:            constants.ErrorServerError,
 				ErrorDescription: "Token revocation status could not be verified",
 			}
+		case errors.Is(err, tokenservice.ErrTokenExpired):
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidRequest,
+				ErrorDescription: "The subject_token has expired",
+			}
+		case errors.Is(err, tokenservice.ErrIssuerNotTrusted):
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidRequest,
+				ErrorDescription: "The subject_token issuer is not registered as a trusted token exchange issuer",
+			}
+		case errors.Is(err, tokenservice.ErrAudienceNotAccepted):
+			return nil, &model.ErrorResponse{
+				Error: constants.ErrorInvalidRequest,
+				ErrorDescription: "The subject_token audience does not contain this server's issuer or the " +
+					"trusted token audience configured for its issuer",
+			}
+		default:
+			return nil, &model.ErrorResponse{
+				Error:            constants.ErrorInvalidRequest,
+				ErrorDescription: "Invalid subject_token",
+			}
 		}
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorInvalidRequest,
-			ErrorDescription: "Invalid subject_token",
-		}
+	}
+
+	// Enforce RFC 9068: a token presented as subject_token_type=access_token must carry the at+jwt typ
+	// header.
+	if errResp := h.validateAccessTokenType(tokenRequest.SubjectToken,
+		tokenRequest.SubjectTokenType, "subject_token"); errResp != nil {
+		return nil, errResp
 	}
 
 	// Enforce subject_token DPoP binding. The proof's jkt is verified earlier in the
@@ -198,16 +204,41 @@ func (h *tokenExchangeGrantHandler) HandleGrant(ctx context.Context, tokenReques
 		actorClaims, err = h.tokenValidator.ValidateSubjectToken(ctx, tokenRequest.ActorToken, oauthApp)
 		if err != nil {
 			logger.Debug(ctx, "Failed to validate actor token", log.Error(err))
-			if errors.Is(err, revocation.ErrEnforcementUnavailable) {
+			// Attribute the actor_token rejection the same way as the subject_token above.
+			switch {
+			case errors.Is(err, revocation.ErrEnforcementUnavailable):
 				return nil, &model.ErrorResponse{
 					Error:            constants.ErrorServerError,
 					ErrorDescription: "Token revocation status could not be verified",
 				}
+			case errors.Is(err, tokenservice.ErrTokenExpired):
+				return nil, &model.ErrorResponse{
+					Error:            constants.ErrorInvalidRequest,
+					ErrorDescription: "The actor_token has expired",
+				}
+			case errors.Is(err, tokenservice.ErrIssuerNotTrusted):
+				return nil, &model.ErrorResponse{
+					Error:            constants.ErrorInvalidRequest,
+					ErrorDescription: "The actor_token issuer is not registered as a trusted token exchange issuer",
+				}
+			case errors.Is(err, tokenservice.ErrAudienceNotAccepted):
+				return nil, &model.ErrorResponse{
+					Error: constants.ErrorInvalidRequest,
+					ErrorDescription: "The actor_token audience does not contain this server's issuer or the " +
+						"trusted token audience configured for its issuer",
+				}
+			default:
+				return nil, &model.ErrorResponse{
+					Error:            constants.ErrorInvalidRequest,
+					ErrorDescription: "Invalid actor_token",
+				}
 			}
-			return nil, &model.ErrorResponse{
-				Error:            constants.ErrorInvalidRequest,
-				ErrorDescription: "Invalid actor_token",
-			}
+		}
+
+		// Apply the same RFC 9068 access-token typ enforcement to the actor_token.
+		if errResp := h.validateAccessTokenType(tokenRequest.ActorToken,
+			tokenRequest.ActorTokenType, "actor_token"); errResp != nil {
+			return nil, errResp
 		}
 	}
 
@@ -217,24 +248,24 @@ func (h *tokenExchangeGrantHandler) HandleGrant(ctx context.Context, tokenReques
 		return nil, errResp
 	}
 
-	// Retain OIDC scopes (governed by the app's OIDC scope configuration); only permission scopes
-	// are downscoped to the target resource server and filtered by the app's authorization.
+	// Retain OIDC scopes (governed by the app's scope-to-claims mapping); only permission scopes
+	// are downscoped to the target resource server.
 	oidcScopes, permissionScopes := oauth2utils.SeparateOIDCAndNonOIDCScopes(
 		tokenservice.JoinScopes(finalScopes), oauthApp.ScopeClaims)
-	oidcScopes = oauth2utils.FilterOIDCScopesByAllowedScopes(oidcScopes, oauthApp.Scopes)
 
 	// Bind the token to a single target resource server (RFC 8707 resource or configured default).
 	// The RFC 8693 audience parameter is not honored. A request that resolves no permission scopes
-	// and carries no resource is not bound to a resource server: its audience is the client_id.
+	// and carries no resource is not bound to a resource server: its audience is the app's configured
+	// default audiences, falling back to the client_id.
 	targetRS, resErr := resourceindicators.ResolveAudienceBinding(
-		ctx, h.resourceService, h.serverConfigService, tokenRequest.Resources, permissionScopes)
+		ctx, h.resourceService, tokenRequest.Resources, permissionScopes)
 	if resErr != nil {
 		return nil, resErr
 	}
 
 	var finalAudiences []string
 	if targetRS == nil {
-		finalAudiences = []string{tokenRequest.ClientID}
+		finalAudiences = []string{oauthApp.ResolveDefaultAudience(tokenRequest.ClientID)}
 		finalScopes = oidcScopes
 	} else {
 		permissionScopes, resErr = resourceindicators.DownscopeToResourceServer(
@@ -242,16 +273,25 @@ func (h *tokenExchangeGrantHandler) HandleGrant(ctx context.Context, tokenReques
 		if resErr != nil {
 			return nil, resErr
 		}
-		permissionScopes, errResp = h.filterScopesAuthorizedForApp(ctx, oauthApp, targetRS.ID, permissionScopes)
-		if errResp != nil {
-			return nil, errResp
-		}
 
 		finalScopes = make([]string, 0, len(oidcScopes)+len(permissionScopes))
 		finalScopes = append(finalScopes, oidcScopes...)
 		finalScopes = append(finalScopes, permissionScopes...)
 
 		finalAudiences = []string{targetRS.Identifier}
+	}
+
+	// Resolve how the exchanged token relates to the subject token's revocation family: inherit joins
+	// the subject's family (both revoked together); none (the default, and the empty value) issues an
+	// independent token with no tfid. An unrecognized value is treated as none and surfaced.
+	var exchangedTokenFamilyID string
+	switch h.cfg.OAuth.TokenExchange.TokenFamily {
+	case constants.TokenExchangeTokenFamilyInherit:
+		exchangedTokenFamilyID = subjectClaims.TokenFamilyID
+	case constants.TokenExchangeTokenFamilyNone, "":
+	default:
+		logger.Warn(ctx, "Unrecognized oauth.token_exchange.token_family mode; issuing an independent token",
+			log.String("mode", h.cfg.OAuth.TokenExchange.TokenFamily))
 	}
 
 	// Build access token using token builder
@@ -267,6 +307,7 @@ func (h *tokenExchangeGrantHandler) HandleGrant(ctx context.Context, tokenReques
 		ActorClaims:       actorClaims,
 		ValidityPeriod:    userSubConfig.ValidityPeriodOrZero(),
 		DPoPJkt:           dpop.GetJkt(ctx),
+		TokenFamilyID:     exchangedTokenFamilyID,
 	})
 	if err != nil {
 		logger.Error(ctx, "Failed to generate token", log.Error(err))
@@ -384,6 +425,37 @@ func (h *tokenExchangeGrantHandler) handleIDJAGGrant(ctx context.Context, tokenR
 	}, nil
 }
 
+// validateAccessTokenType enforces the RFC 9068 typ header for a token presented as an access token.
+// When the declared token type is urn:ietf:params:oauth:token-type:access_token, the token's typ
+// header must be at+jwt.
+func (h *tokenExchangeGrantHandler) validateAccessTokenType(
+	token string,
+	tokenType string,
+	tokenLabel string,
+) *model.ErrorResponse {
+	if constants.TokenTypeIdentifier(tokenType) != constants.TokenTypeIdentifierAccessToken {
+		return nil
+	}
+
+	header, err := jwt.DecodeJWTHeader(token)
+	if err != nil {
+		return &model.ErrorResponse{
+			Error:            constants.ErrorInvalidRequest,
+			ErrorDescription: "Invalid " + tokenLabel,
+		}
+	}
+
+	if typ, _ := header["typ"].(string); !strings.EqualFold(typ, jwt.TokenTypeAccessToken) &&
+		!strings.EqualFold(typ, jwt.TokenTypeAccessTokenWithPrefix) {
+		return &model.ErrorResponse{
+			Error:            constants.ErrorInvalidRequest,
+			ErrorDescription: "The " + tokenLabel + " is not an access token (missing at+jwt typ header)",
+		}
+	}
+
+	return nil
+}
+
 // getScopes validates and determines the scopes for the new token.
 func (h *tokenExchangeGrantHandler) getScopes(
 	tokenRequest *model.TokenRequest,
@@ -423,56 +495,4 @@ func (h *tokenExchangeGrantHandler) getScopes(
 	}
 
 	return validRequestedScopes, nil
-}
-
-func (h *tokenExchangeGrantHandler) filterScopesAuthorizedForApp(
-	ctx context.Context,
-	oauthApp *providers.OAuthClient,
-	resourceServerID string,
-	scopes []string,
-) ([]string, *model.ErrorResponse) {
-	if len(scopes) == 0 {
-		return scopes, nil
-	}
-
-	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, "TokenExchangeGrantHandler"))
-
-	if h.authzService == nil {
-		logger.Error(ctx, "Authorization provider is not configured for token exchange")
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorServerError,
-			ErrorDescription: "Failed to generate token",
-		}
-	}
-
-	var groupIDs []string
-	if h.actorProvider != nil {
-		groups, groupErr := h.actorProvider.GetActorGroups(oauthApp.ID)
-		if groupErr != nil {
-			logger.Error(ctx, "Failed to resolve app group memberships",
-				log.String("appID", oauthApp.ID), log.String("error", groupErr.Error.DefaultValue))
-			return nil, &model.ErrorResponse{
-				Error:            constants.ErrorServerError,
-				ErrorDescription: "Failed to generate token",
-			}
-		}
-		for _, group := range groups {
-			if group.ID != "" && !slices.Contains(groupIDs, group.ID) {
-				groupIDs = append(groupIDs, group.ID)
-			}
-		}
-	}
-
-	authzResp, svcErr := h.authzService.EvaluateAccessBatch(ctx,
-		buildAccessEvaluationsRequest(oauthApp.ID, groupIDs, scopes, resourceServerID))
-	if svcErr != nil {
-		logger.Error(ctx, "Failed to get authorized permissions for app",
-			log.String("appID", oauthApp.ID), log.String("error", svcErr.Error.DefaultValue))
-		return nil, &model.ErrorResponse{
-			Error:            constants.ErrorServerError,
-			ErrorDescription: "Failed to generate token",
-		}
-	}
-
-	return filterAuthorizedScopes(scopes, authzResp.Evaluations), nil
 }

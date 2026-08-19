@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package authentication
 
@@ -30,10 +15,9 @@ import (
 	"github.com/thunder-id/thunderid/tests/integration/testutils"
 )
 
-// This suite verifies the platform-attestation guard for POST /flow/execute for an iOS (public,
-// authorization_code) application that configures Apple App Attest. Attestation takes precedence
-// over the redirect classification, so the app may initiate a flow directly only by presenting a
-// valid Attestation-Token header:
+// This suite verifies the platform-attestation guard for POST /flow/execute for an iOS mobile
+// application that configures Apple App Attest. The app may initiate a flow directly only by
+// presenting a valid Attestation-Token header:
 //   - a missing token is rejected with 401 (FES-1014);
 //   - a malformed token is rejected with 401 (FES-1015). Unlike Play Integrity, App Attest is
 //     verified entirely offline (no outbound API call), so a token that cannot be decoded is a
@@ -107,12 +91,12 @@ var appleAttestationGuardFlow = testutils.Flow{
 	},
 }
 
-// appleAttestationMobileApp is a public, redirect-based (authorization_code) iOS application that
-// configures Apple App Attest attestation. Attestation takes precedence over the redirect
-// classification, so the app may initiate a flow directly — but only with a valid attestation token.
+// appleAttestationMobileApp is an iOS mobile application that configures Apple App Attest
+// attestation. Mobile apps initiate flows directly by presenting a valid attestation token.
 var appleAttestationMobileApp = testutils.Application{
 	Name:                      "App Attest iOS App",
 	Description:               "iOS application for Apple attestation guard testing",
+	Type:                      "mobile",
 	IsRegistrationFlowEnabled: false,
 	ClientID:                  "apple_attestation_mobile_client",
 	RedirectURIs:              []string{"myiosapp://callback"},

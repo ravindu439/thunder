@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package entitytype
 
@@ -1148,7 +1133,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_Credential_ReturnsCredent
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "customer", true, false, false,
+		context.Background(), TypeCategoryUser, "customer", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(svcErr)
@@ -1181,7 +1166,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_Credential_NoCredentials_
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "customer", true, false, false,
+		context.Background(), TypeCategoryUser, "customer", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(svcErr)
@@ -1201,7 +1186,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_SchemaNotFound_ReturnsErr
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "unknown", true, false, false,
+		context.Background(), TypeCategoryUser, "unknown", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(attrs)
@@ -1218,7 +1203,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_EmptyEntityType_ReturnsEr
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "", true, false, false,
+		context.Background(), TypeCategoryUser, "", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(attrs)
@@ -1239,7 +1224,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_StoreError_ReturnsInterna
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "customer", true, false, false,
+		context.Background(), TypeCategoryUser, "customer", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(attrs)
@@ -1266,7 +1251,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_CredentialRequiredOnly_Re
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "customer", true, false, true,
+		context.Background(), TypeCategoryUser, "customer", AttributeFilter{AllowCredential: true, RequiredOnly: true},
 	)
 
 	s.Require().Nil(svcErr)
@@ -1295,7 +1280,7 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_CredentialAllAttrs_Includ
 	}
 
 	attrs, svcErr := service.GetAttributes(
-		context.Background(), TypeCategoryUser, "customer", true, false, false,
+		context.Background(), TypeCategoryUser, "customer", AttributeFilter{AllowCredential: true},
 	)
 
 	s.Require().Nil(svcErr)
@@ -1788,7 +1773,8 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredentialRequiredOnly
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL", false, true, true)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL",
+		AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Require().Nil(svcErr)
 	s.Require().Len(attrs, 2)
@@ -1822,7 +1808,8 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredential_UnknownEnti
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "unknown", false, true, true)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "unknown",
+		AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Require().NotNil(svcErr)
 	s.Require().Equal(ErrorEntityTypeNotFound.Code, svcErr.Code)
@@ -1835,7 +1822,8 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredential_EmptyEntity
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "", false, true, true)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "",
+		AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Require().NotNil(svcErr)
 	s.Require().Equal(ErrorEntityTypeNotFound.Code, svcErr.Code)
@@ -1858,7 +1846,8 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredential_AllCredenti
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL", false, true, true)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL",
+		AttributeFilter{AllowNonCredential: true, RequiredOnly: true})
 
 	s.Require().Nil(svcErr)
 	s.Require().Empty(attrs)
@@ -1882,7 +1871,8 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredentialAllAttrs_Inc
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL", false, true, false)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL",
+		AttributeFilter{AllowNonCredential: true})
 
 	s.Require().Nil(svcErr)
 	s.Require().Len(attrs, 2, "email and mobile_number should be returned; password excluded as credential")
@@ -1909,11 +1899,73 @@ func (s *EntityTypeServiceTestSuite) TestGetAttributes_NonCredential_StoreError_
 		transactioner:   &mockTransactioner{},
 	}
 
-	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL", false, true, false)
+	attrs, svcErr := service.GetAttributes(context.Background(), TypeCategoryUser, "INTERNAL",
+		AttributeFilter{AllowNonCredential: true})
 
 	s.Require().NotNil(svcErr)
 	s.Require().Equal(tidcommon.InternalServerError, *svcErr)
 	s.Require().Nil(attrs)
+}
+
+func (s *EntityTypeServiceTestSuite) TestGetEntityTypeSchema_Success() {
+	storeMock := newEntityTypeStoreInterfaceMock(s.T())
+	storeMock.
+		On("GetEntityTypeByName", context.Background(), TypeCategoryUser, "employee").
+		Return(EntityType{Name: "employee", Schema: json.RawMessage(`{}`)}, nil).
+		Once()
+
+	service := &entityTypeService{entityTypeStore: storeMock}
+
+	entityType, svcErr := service.GetEntityTypeSchema(context.Background(), TypeCategoryUser, "employee")
+	s.Require().Nil(svcErr)
+	s.Require().NotNil(entityType)
+	s.Require().Equal("employee", entityType.Name)
+}
+
+func (s *EntityTypeServiceTestSuite) TestGetEntityTypeSchema_InvalidCategory() {
+	service := &entityTypeService{}
+	entityType, svcErr := service.GetEntityTypeSchema(context.Background(), TypeCategory("invalid"), "employee")
+	s.Require().Nil(entityType)
+	s.Require().NotNil(svcErr)
+	s.Require().Equal(ErrorInvalidEntityTypeRequest.Code, svcErr.Code)
+}
+
+func (s *EntityTypeServiceTestSuite) TestGetEntityTypeSchema_EmptyName() {
+	service := &entityTypeService{}
+	entityType, svcErr := service.GetEntityTypeSchema(context.Background(), TypeCategoryUser, "")
+	s.Require().Nil(entityType)
+	s.Require().NotNil(svcErr)
+	s.Require().Equal(ErrorInvalidEntityTypeRequest.Code, svcErr.Code)
+}
+
+func (s *EntityTypeServiceTestSuite) TestGetEntityTypeSchema_NotFound() {
+	storeMock := newEntityTypeStoreInterfaceMock(s.T())
+	storeMock.
+		On("GetEntityTypeByName", context.Background(), TypeCategoryUser, "employee").
+		Return(EntityType{}, ErrEntityTypeNotFound).
+		Once()
+
+	service := &entityTypeService{entityTypeStore: storeMock}
+
+	entityType, svcErr := service.GetEntityTypeSchema(context.Background(), TypeCategoryUser, "employee")
+	s.Require().Nil(entityType)
+	s.Require().NotNil(svcErr)
+	s.Require().Equal(ErrorEntityTypeNotFound.Code, svcErr.Code)
+}
+
+func (s *EntityTypeServiceTestSuite) TestGetEntityTypeSchema_StoreError() {
+	storeMock := newEntityTypeStoreInterfaceMock(s.T())
+	storeMock.
+		On("GetEntityTypeByName", context.Background(), TypeCategoryUser, "employee").
+		Return(EntityType{}, errors.New("db error")).
+		Once()
+
+	service := &entityTypeService{entityTypeStore: storeMock}
+
+	entityType, svcErr := service.GetEntityTypeSchema(context.Background(), TypeCategoryUser, "employee")
+	s.Require().Nil(entityType)
+	s.Require().NotNil(svcErr)
+	s.Require().Equal(tidcommon.InternalServerError, *svcErr)
 }
 
 // TestGetCompiledSchemaForEntityType_CompileError verifies that a stored schema which fails to

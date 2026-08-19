@@ -1,25 +1,10 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
+import {ApplicationQueryKeys} from '@thunderid/configure-applications';
+import type {ApplicationListResponse} from '@thunderid/configure-applications';
 import {waitFor, renderHook} from '@thunderid/test-utils';
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
-import ApplicationQueryKeys from '../../constants/application-query-keys';
-import type {ApplicationListResponse} from '../../models/responses';
 import useDeleteApplication from '../useDeleteApplication';
 
 // Mock the dependencies
@@ -32,20 +17,22 @@ vi.mock('@thunderid/contexts', async (importOriginal) => {
   return {
     ...actual,
     useConfig: vi.fn(),
-    useToast: vi.fn().mockReturnValue({showToast: vi.fn()}),
+    useToast: vi.fn(),
   };
 });
 
 const {useThunderID} = await import('@thunderid/react');
-const {useConfig} = await import('@thunderid/contexts');
+const {useConfig, useToast} = await import('@thunderid/contexts');
 
 describe('useDeleteApplication', () => {
   let mockHttpRequest: ReturnType<typeof vi.fn>;
   let mockGetServerUrl: ReturnType<typeof vi.fn>;
+  let mockShowToast: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mockHttpRequest = vi.fn();
     mockGetServerUrl = vi.fn().mockReturnValue('https://api.test.com');
+    mockShowToast = vi.fn();
 
     vi.mocked(useThunderID).mockReturnValue({
       http: {
@@ -56,6 +43,10 @@ describe('useDeleteApplication', () => {
     vi.mocked(useConfig).mockReturnValue({
       getServerUrl: mockGetServerUrl,
     } as unknown as ReturnType<typeof useConfig>);
+
+    vi.mocked(useToast).mockReturnValue({
+      showToast: mockShowToast,
+    } as unknown as ReturnType<typeof useToast>);
   });
 
   afterEach(() => {
@@ -90,6 +81,7 @@ describe('useDeleteApplication', () => {
     expect(result.current.data).toBeUndefined();
     expect(result.current.error).toBeNull();
     expect(result.current.isPending).toBe(false);
+    expect(mockShowToast).toHaveBeenCalledWith(expect.any(String), 'success');
   });
 
   it('should make correct API call with application ID', async () => {
@@ -157,6 +149,21 @@ describe('useDeleteApplication', () => {
     expect(result.current.error).toEqual(apiError);
     expect(result.current.data).toBeUndefined();
     expect(result.current.isPending).toBe(false);
+  });
+
+  it('should not show a toast on error', async () => {
+    mockHttpRequest.mockRejectedValueOnce(new Error('Failed to delete application'));
+
+    const applicationId = '550e8400-e29b-41d4-a716-446655440000';
+    const {result} = renderHook(() => useDeleteApplication());
+
+    result.current.mutate(applicationId);
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true);
+    });
+
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it('should handle network error', async () => {

@@ -9,15 +9,15 @@
 [![GitHub Release](https://img.shields.io/github/v/release/thunder-id/thunderid?color=blue)](https://github.com/thunder-id/thunderid/releases/latest)
 
 
-ThunderID is a lightweight, open-source Identity and Access Management (IAM) engine built to secure access for humans, AI agents, and machines.
+ThunderID is a lightweight, open-source IAM stack built to secure access for humans, AI agents, and machines.
 
-Designed for the agentic era, ThunderID provides a developer-first IAM platform and supporting tools for securing applications, APIs, services, and agent-driven workflows. It works across traditional and decentralized identity ecosystems, with post-quantum-ready security built in from the start.
+Designed for the agentic era, ThunderID provides a developer-first IAM stack and supporting tools for securing applications, APIs, services, and agent-driven workflows. It works across traditional and decentralized identity ecosystems, with post-quantum-ready security built in from the start.
 
 Core design goals of ThunderID include:
 - **Agent-native identity:** Manage AI agents as first-class identities with delegated authority, consent-aware access, traceability, and support for issuing verifiable credentials to agents. ThunderID also aims to expose IAM capabilities through interfaces that agents can use safely and programmatically.
+- **Post-quantum-safe by design:** Build on a crypto-agile foundation where algorithms, key types, signing methods, and token protection mechanisms can evolve over time, including support for post-quantum-safe algorithms and hybrid transition approaches across key management, credential issuance, assertions, and secure service-to-service communication.
 - **Decentralized identity:** Bridge the adoption gap for relying parties by making it practical for service providers to consume, verify, and trust decentralized identity in real-world applications, including DIDs, verifiable credentials, digital wallets, trust registries, and issuer-verifier-holder interaction models.
-- **Cloud-native IAM:** Provide a lightweight, containerized identity product that can run across on-premises and cloud environments, with declarative identity flows, policies, and configuration suitable for automation, versioning, and GitOps practices.
-- **Post-quantum-safe security:** Build on a crypto-agile foundation where algorithms, key types, signing methods, and token protection mechanisms can evolve over time, including support for post-quantum-safe algorithms and hybrid transition approaches across key management, credential issuance, assertions, and secure service-to-service communication.
+- **Lightweight runtime with GitOps support:** Provide a lightweight, containerized runtime that can run across on-premises and cloud environments, with declarative identity flows, policies, and configuration suitable for automation, versioning, and GitOps practices.
 
 
 ## Getting Started
@@ -29,7 +29,7 @@ Get started by exploring how ThunderID can be used to secure:
 
  To learn more about overall requirements, solution patterns of these scenarios, refer to the [Use Cases](https://thunderid.dev/docs/next/use-cases/overview/) section.
 
-Visit [Get ThunderID](https://thunderid.dev/docs/next/guides/getting-started/get-thunderid/) to learn more about installation methods.
+Visit [Get ThunderID](https://thunderid.dev/docs/next/getting-started/get-thunderid/) to learn more about installation methods.
 
 
 ## Architecture
@@ -40,7 +40,7 @@ Visit [Get ThunderID](https://thunderid.dev/docs/next/guides/getting-started/get
 ## Features
 
 * **Identity Management**
-    * Humans, AI agents, and workloads as first-class identity types
+    * Humans, AI agents, and machines as first-class identity types
     * Hierarchical organizational units (OUs) and groups
 
 * **Standards**
@@ -84,6 +84,3 @@ For code contributions, refer to the [Contributing Code](https://thunderid.dev/d
 ## License
 
 Licenses this source under the Apache License, Version 2.0 ([LICENSE](LICENSE)), You may not use this file except in compliance with the License.
-
----------------------------------------------------------------------------
-(c) Copyright 2026 WSO2 LLC.

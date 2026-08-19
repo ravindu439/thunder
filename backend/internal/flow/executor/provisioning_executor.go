@@ -1,20 +1,5 @@
-/*
- * Copyright (c) 2025-2026, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025-2026 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 package executor
 
@@ -27,6 +12,7 @@ import (
 	tidcommon "github.com/thunder-id/thunderid/pkg/thunderidengine/common"
 	"github.com/thunder-id/thunderid/pkg/thunderidengine/providers"
 
+	authnprovidercm "github.com/thunder-id/thunderid/internal/authnprovider/common"
 	"github.com/thunder-id/thunderid/internal/entityprovider"
 	"github.com/thunder-id/thunderid/internal/entitytype"
 	"github.com/thunder-id/thunderid/internal/flow/common"
@@ -234,7 +220,7 @@ func (p *provisioningExecutor) Execute(ctx *providers.NodeContext) (*providers.E
 func (p *provisioningExecutor) authenticateProvisionedUser(ctx *providers.NodeContext, userID string,
 	execResp *providers.ExecutorResponse) {
 	credential := map[string]interface{}{
-		"provisionedEntityID": userID,
+		authnprovidercm.CredentialTypeProvisionedEntityID: userID,
 	}
 	authUser, authenticatedClaims, err := p.authnProvider.AuthenticateUser(ctx.Context, nil, credential,
 		nil, nil, execResp.AuthUser)
@@ -488,14 +474,14 @@ func (p *provisioningExecutor) buildMissingInputs(
 			}
 			input := providers.Input{
 				Identifier:  attr.Attribute,
-				Type:        providers.InputTypeText,
+				Type:        inputTypeForSchemaType(attr.Type),
 				DisplayName: attr.DisplayName,
 			}
 			if inNodeInputs {
 				input = nodeInp
 				input.Identifier = attr.Attribute
 				if input.Type == "" {
-					input.Type = providers.InputTypeText
+					input.Type = inputTypeForSchemaType(attr.Type)
 				}
 				if input.DisplayName == "" {
 					input.DisplayName = attr.DisplayName
@@ -530,7 +516,8 @@ func (p *provisioningExecutor) fetchSchemaAttributes(
 		return nil, fmt.Errorf("user type not found")
 	}
 	attrs, svcErr := p.entityTypeService.GetAttributes(ctx.Context,
-		entitytype.TypeCategoryUser, userType, allowCredential, allowNonCredential, false)
+		entitytype.TypeCategoryUser, userType,
+		entitytype.AttributeFilter{AllowCredential: allowCredential, AllowNonCredential: allowNonCredential})
 	if svcErr != nil {
 		return nil, fmt.Errorf("failed to fetch schema attributes for user type %q: %s",
 			userType, svcErr.Error.DefaultValue)
@@ -591,7 +578,8 @@ func (p *provisioningExecutor) isAttrSatisfied(ctx *providers.NodeContext, attr 
 // returning identifying (non-credential) and credential attributes as separate maps.
 // Schema is the whitelist for both maps.
 // Credential values are resolved from non-empty UserInputs then non-empty RuntimeData only.
-// Non-credential values additionally fall back to AuthenticatedUser.Attributes.
+// Non-credential values additionally fall back to AuthenticatedUser.Attributes, and are converted
+// from the engine's string representation to the type declared by the schema attribute.
 func (p *provisioningExecutor) getAttributesForProvisioning(
 	ctx *providers.NodeContext,
 ) (identifyingAttrs map[string]interface{}, credentialAttrs map[string]interface{}, err error) {
@@ -616,9 +604,9 @@ func (p *provisioningExecutor) getAttributesForProvisioning(
 			}
 		} else {
 			if value, exists := ctx.UserInputs[a.Attribute]; exists && value != "" {
-				identifyingAttrs[a.Attribute] = value
+				identifyingAttrs[a.Attribute] = convertToSchemaType(value, a.Type)
 			} else if runtimeValue, exists := ctx.RuntimeData[a.Attribute]; exists && runtimeValue != "" {
-				identifyingAttrs[a.Attribute] = runtimeValue
+				identifyingAttrs[a.Attribute] = convertToSchemaType(runtimeValue, a.Type)
 			}
 		}
 	}

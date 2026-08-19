@@ -1,20 +1,5 @@
-/**
- * Copyright (c) 2025, WSO2 LLC. (https://www.wso2.com).
- *
- * WSO2 LLC. licenses this file to you under the Apache License,
- * Version 2.0 (the "License"); you may not use this file except
- * in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
+// Copyright 2025 The ThunderID Authors
+// SPDX-License-Identifier: Apache-2.0
 
 import {render, screen, fireEvent} from '@testing-library/react';
 import type {ReactNode} from 'react';
@@ -92,11 +77,17 @@ vi.mock('../TextPropertyField', () => ({
     propertyKey,
     propertyValue,
     onChange,
+    suggestions,
+    supportsDynamicValue,
+    type,
   }: {
     resource: Resource;
     propertyKey: string;
     propertyValue: string;
     onChange: (key: string, value: string, resource: Resource) => void;
+    suggestions?: string[];
+    supportsDynamicValue?: boolean;
+    type?: string;
   }) => (
     <div data-testid="text-property-field">
       <input
@@ -104,6 +95,9 @@ vi.mock('../TextPropertyField', () => ({
         value={propertyValue}
         onChange={(e) => onChange(propertyKey, e.target.value, resource)}
         data-property-key={propertyKey}
+        data-suggestions={suggestions ? suggestions.join(',') : undefined}
+        data-supports-dynamic-value={String(supportsDynamicValue ?? true)}
+        data-type={type}
       />
     </div>
   ),
@@ -587,7 +581,7 @@ describe('CommonElementPropertyFactory', () => {
       expect(mockOnChange).toHaveBeenCalledWith('align', 'center', textResource);
     });
 
-    it('should not render align dropdown for non-Text elements', () => {
+    it('should not render the align Select for non-Text elements', () => {
       const resource: Resource = {
         id: 'resource-1',
         type: ElementTypes.TextInput,
@@ -604,9 +598,126 @@ describe('CommonElementPropertyFactory', () => {
         {wrapper: createWrapper()},
       );
 
-      // A non-Text element with align key renders a TextPropertyField, not a Select
+      // A non-Text element with align still renders the text field, not a Select
       expect(container.querySelector('select')).not.toBeInTheDocument();
       expect(screen.getByTestId('text-property-field')).toBeInTheDocument();
+    });
+  });
+
+  describe('Layout property suggestions', () => {
+    const stackResource: Resource = {
+      id: 'stack-1',
+      type: ElementTypes.Stack,
+      config: {},
+    } as Resource;
+
+    const renderLayoutField = (propertyKey: string, propertyValue: unknown) =>
+      render(
+        <CommonElementPropertyFactory
+          resource={stackResource}
+          propertyKey={propertyKey}
+          propertyValue={propertyValue}
+          onChange={mockOnChange}
+        />,
+        {wrapper: createWrapper()},
+      );
+
+    it.each([
+      ['direction', 'row,column,row-reverse,column-reverse'],
+      ['align', 'stretch,center,flex-start,flex-end,baseline,start,end'],
+      ['justify', 'stretch,center,flex-start,flex-end,space-between,space-around,space-evenly'],
+    ])('passes the known %s values as suggestions', (propertyKey, expected) => {
+      const {container} = renderLayoutField(propertyKey, '');
+
+      expect(container.querySelector(`[data-property-key="${propertyKey}"]`)).toHaveAttribute(
+        'data-suggestions',
+        expected,
+      );
+    });
+
+    it('leaves other string properties without suggestions', () => {
+      const {container} = renderLayoutField('label', 'Continue');
+
+      expect(container.querySelector('[data-property-key="label"]')).not.toHaveAttribute('data-suggestions');
+    });
+
+    it('does not treat inherited Object keys as layout properties', () => {
+      // `LAYOUT_PROPERTY_SUGGESTIONS['toString']` resolves through the prototype
+      // chain, and element config keys are arbitrary.
+      const {container} = renderLayoutField('toString', 'some value');
+
+      expect(container.querySelector('[data-property-key="toString"]')).not.toHaveAttribute('data-suggestions');
+    });
+
+    it.each(['direction', 'align', 'justify'])('does not offer dynamic values for %s', (propertyKey) => {
+      const {container} = renderLayoutField(propertyKey, '');
+
+      expect(container.querySelector(`[data-property-key="${propertyKey}"]`)).toHaveAttribute(
+        'data-supports-dynamic-value',
+        'false',
+      );
+    });
+
+    it.each(['items', 'gap'])('renders %s as a number field without dynamic values', (propertyKey) => {
+      const {container} = renderLayoutField(propertyKey, 2);
+
+      const input = container.querySelector(`[data-property-key="${propertyKey}"]`);
+      expect(input).toHaveAttribute('data-supports-dynamic-value', 'false');
+      expect(input).toHaveAttribute('data-type', 'number');
+    });
+
+    it('offers only the axis directions once a stack is a grid', () => {
+      // CSS Grid has no reverse auto-flow, so those values are flex-mode only.
+      const gridStack = {id: 'stack-2', type: ElementTypes.Stack, items: 2, config: {}} as unknown as Resource;
+
+      const {container} = render(
+        <CommonElementPropertyFactory
+          resource={gridStack}
+          propertyKey="direction"
+          propertyValue="row"
+          onChange={mockOnChange}
+        />,
+        {wrapper: createWrapper()},
+      );
+
+      expect(container.querySelector('[data-property-key="direction"]')).toHaveAttribute(
+        'data-suggestions',
+        'row,column',
+      );
+    });
+
+    it('keeps the reverse directions for a flex stack', () => {
+      const flexStack = {id: 'stack-3', type: ElementTypes.Stack, items: 1, config: {}} as unknown as Resource;
+
+      const {container} = render(
+        <CommonElementPropertyFactory
+          resource={flexStack}
+          propertyKey="direction"
+          propertyValue="row"
+          onChange={mockOnChange}
+        />,
+        {wrapper: createWrapper()},
+      );
+
+      expect(container.querySelector('[data-property-key="direction"]')).toHaveAttribute(
+        'data-suggestions',
+        'row,column,row-reverse,column-reverse',
+      );
+    });
+
+    it('keeps dynamic values available for other numeric properties', () => {
+      const {container} = renderLayoutField('size', 24);
+
+      expect(container.querySelector('[data-property-key="size"]')).toHaveAttribute(
+        'data-supports-dynamic-value',
+        'true',
+      );
+    });
+
+    it('falls through to the checkbox field when a layout key holds a boolean', () => {
+      renderLayoutField('align', true);
+
+      expect(screen.getByTestId('checkbox-property-field')).toBeInTheDocument();
     });
   });
 });

@@ -10,6 +10,11 @@
       "outputs": ["build/**"],
       "env": ["DOCUSAURUS_URL", "DOCUSAURUS_BASE_URL"]
     },
+    "@thunderid/console#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "inputs": ["$TURBO_DEFAULT$", "src/features/welcome/data/sample-bundles/**"]
+    },
     "typecheck": {
       "dependsOn": ["^build"]
     },
@@ -18,7 +23,13 @@
       "cache": false
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH"]
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "passThroughEnv": ["PLAYWRIGHT_BROWSERS_PATH", "CI"],
+      "outputs": ["coverage/**"]
     },
     "dev": {
       "cache": false,
