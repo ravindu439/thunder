@@ -146,7 +146,7 @@ func TestHandleUsersReplaceRequest_Success(t *testing.T) {
 		},
 	}
 	mockSvc.On(
-		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL,
+		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, false,
 	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -272,7 +272,7 @@ func TestHandleMeReplaceRequest_Success(t *testing.T) {
 		},
 	}
 	mockSvc.On(
-		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL,
+		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, true,
 	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -342,7 +342,7 @@ func TestHandleMeReplaceRequest_InvalidJSON_Returns400(t *testing.T) {
 func TestHandleMeReplaceRequest_ServiceError_Returns404(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
 	mockSvc.On("ReplaceUser", mock.Anything, "user-123",
-		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL).
+		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, true).
 		Return((*SCIMUser)(nil), &ErrorUserNotFound)
 
 	body := `{"schemas":["urn:thunderid:params:scim:schemas:person:2.0:User"],` +
@@ -589,7 +589,7 @@ func TestHandleUsersReplaceRequest_InvalidJSON_Returns400(t *testing.T) {
 func TestHandleUsersReplaceRequest_NotFound_Returns404(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
 	mockSvc.On("ReplaceUser", mock.Anything, "no-such",
-		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL).
+		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, false).
 		Return((*SCIMUser)(nil), &ErrorUserNotFound)
 
 	body := `{"schemas":["urn:thunderid:params:scim:schemas:person:2.0:User"],` +
@@ -609,7 +609,7 @@ func TestHandleUsersReplaceRequest_NotFound_Returns404(t *testing.T) {
 func TestHandleUsersReplaceRequest_MutabilityViolation_Returns400(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
 	mockSvc.On("ReplaceUser", mock.Anything, "readonly",
-		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL).
+		mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, false).
 		Return((*SCIMUser)(nil), &ErrorMutabilityViolation)
 
 	body := `{"schemas":["urn:thunderid:params:scim:schemas:person:2.0:User"],` +
@@ -892,6 +892,25 @@ func TestHandleUsersSearchRequest_CustomPagination(t *testing.T) {
 	require.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestHandleUsersSearchRequest_ExplicitZeroCount(t *testing.T) {
+	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
+	mockSvc.On("ListUsers", mock.Anything, 1, 0, mock.Anything, testBaseURL).
+		Return(SCIMUserListResponse{
+			Schemas: []string{SCIMListResponseSchemaURN}, StartIndex: 1, ItemsPerPage: 0, TotalResults: 5,
+			Resources: []SCIMUser{},
+		}, (*tidcommon.ServiceError)(nil))
+
+	body := `{"schemas": ["` + SCIMSearchSchemaURN + `"], "count": 0}`
+	h := newSCIMUsersHandler(mockSvc, testBaseURL)
+	req := httptest.NewRequest(http.MethodPost, "/scim/v2/Users/.search", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", constants.SCIMContentType)
+	rr := httptest.NewRecorder()
+
+	h.HandleUsersSearchRequest(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+}
+
 func TestHandleUsersSearchRequest_CapsMaxCount(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
 	mockSvc.On("ListUsers", mock.Anything, 1, scimconfig.FilterMaxResults, mock.Anything, testBaseURL).
@@ -1000,7 +1019,7 @@ func TestHandleUsersSearchRequest_ServiceError_Returns500(t *testing.T) {
 func TestHandleUsersReplaceRequest_PreconditionFailed(t *testing.T) {
 	mockSvc := NewSCIMUsersServiceInterfaceMock(t)
 	mockSvc.On("ReplaceUser", mock.Anything, "user-123",
-		mock.AnythingOfType("*scim.SCIMUserPayload"), `W/"stale"`, testBaseURL).
+		mock.AnythingOfType("*scim.SCIMUserPayload"), `W/"stale"`, testBaseURL, false).
 		Return((*SCIMUser)(nil), &ErrorPreconditionFailed)
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)
@@ -1267,7 +1286,7 @@ func TestHandleUsersReplaceRequest_AppliesAttributeProjection(t *testing.T) {
 		},
 	}
 	mockSvc.On(
-		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL,
+		"ReplaceUser", mock.Anything, "user-123", mock.AnythingOfType("*scim.SCIMUserPayload"), "", testBaseURL, false,
 	).Return(expectedUser, (*tidcommon.ServiceError)(nil))
 
 	h := newSCIMUsersHandler(mockSvc, testBaseURL)

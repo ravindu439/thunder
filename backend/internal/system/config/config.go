@@ -390,6 +390,15 @@ type GroupConfig struct {
 	Store string `yaml:"store" json:"store"`
 }
 
+// SCIMConfig holds the SCIM service configuration.
+type SCIMConfig struct {
+	// ReturnMappedCoreAttrsOnGet controls whether GET responses (GetUser,
+	// ListUsers) include core schema fields (userName, emails, name, etc.)
+	// mapped from stored attributes, or only the custom extension schema.
+	// Pointer so an explicit `false` in deployment.yaml can override the default.
+	ReturnMappedCoreAttrsOnGet *bool `yaml:"core_attrs_on_get" json:"core_attrs_on_get"`
+}
+
 // RoleConfig holds the role service configuration.
 type RoleConfig struct {
 	// Store defines the storage mode for roles.
@@ -604,6 +613,7 @@ type Config struct {
 	Translation          TranslationConfig                `yaml:"translation"           json:"translation"`
 	Email                EmailConfig                      `yaml:"email"                 json:"email"`
 	Notification         NotificationConfig               `yaml:"notification"          json:"notification"`
+	SCIM                 SCIMConfig                       `yaml:"scim"                  json:"scim"`
 }
 
 // LoadConfig loads the configurations from the specified YAML file and applies defaults.

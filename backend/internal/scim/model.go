@@ -145,5 +145,5 @@ type SCIMSearchRequest struct {
 	SortBy             string   `json:"sortBy,omitempty"`
 	SortOrder          string   `json:"sortOrder,omitempty"`
 	StartIndex         int      `json:"startIndex,omitempty"`
-	Count              int      `json:"count,omitempty"`
+	Count              *int     `json:"count,omitempty"`
 }

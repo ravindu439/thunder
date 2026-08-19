@@ -37,7 +37,7 @@ func (sh *scimDiscoveryHandler) HandleServiceProviderConfigGetRequest(w http.Res
 }
 
 // HandleSchemaListRequest handles GET /scim/v2/Schemas.
-// Returns all SCIM schemas: the core User schema plus one per ThunderID user-type, entity type.
+// Returns all SCIM schemas: the core User schema plus one per ThunderID user type.
 func (sh *scimDiscoveryHandler) HandleSchemaListRequest(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, handlerLoggerComponentName))

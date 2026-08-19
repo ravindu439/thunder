@@ -127,6 +127,27 @@ func TestListGroups_Success(t *testing.T) {
 	require.Equal(t, "user-1", resp.Resources[0].Members[0].Value)
 }
 
+func TestListGroups_ExplicitZeroCountReturnsNoResources(t *testing.T) {
+	mockGroupService := groupmock.NewGroupServiceInterfaceMock(t)
+	service := newSCIMGroupsService(mockGroupService)
+
+	listResp := &group.GroupListResponse{
+		TotalResults: 5,
+		Groups: []group.GroupBasic{
+			{ID: "group-1", Name: "Administrators"},
+		},
+	}
+	mockGroupService.On("GetGroupList", mock.Anything, 1, 0, true).
+		Return(listResp, (*tidcommon.ServiceError)(nil))
+
+	resp, err := service.ListGroups(context.Background(), 1, 0, testBaseURL)
+
+	require.Nil(t, err)
+	require.Equal(t, 5, resp.TotalResults)
+	require.Empty(t, resp.Resources)
+	require.Equal(t, 0, resp.ItemsPerPage)
+}
+
 // TestCreateGroup_Success verifies that CreateGroup re-fetches the created group
 // instead of returning the raw creation result, since group.Service.CreateGroup
 // strips member Display when persisting and never resolves it before returning.

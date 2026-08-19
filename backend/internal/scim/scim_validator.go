@@ -18,7 +18,7 @@ import (
 type SCIMUserPayload struct {
 	// ExtensionURN is the full ThunderID extension URN exactly as sent by the client.
 	ExtensionURN string
-	// UserTypeName is the entity type name extracted from the extension URN (e.g. "employee").
+	// UserTypeName is the user type name extracted from the extension URN (e.g. "employee").
 	UserTypeName string
 	// CoreAttrs holds top-level request fields that are NOT "schemas" and NOT the extension URN object.
 	CoreAttrs map[string]json.RawMessage
@@ -26,8 +26,8 @@ type SCIMUserPayload struct {
 	ExtensionAttrs map[string]json.RawMessage
 }
 
-// validateSCIMUserRequest parses and validates a SCIM user payload.
-func validateSCIMUserRequest(body []byte) (*SCIMUserPayload, *tidcommon.ServiceError) {
+// parseAndValidateSCIMUserRequest parses, extracts, and validates a SCIM user payload.
+func parseAndValidateSCIMUserRequest(body []byte) (*SCIMUserPayload, *tidcommon.ServiceError) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, &ErrorInvalidRequestBody
@@ -186,9 +186,9 @@ func validateCoreUserSchemaDeclared(schemas []string, coreAttrs map[string]json.
 // Groups — POST / PUT validation
 // ---------------------------------------------------------------------------
 
-// validateSCIMGroupWriteRequest parses and validates a SCIM Group POST/PUT request body.
+// parseAndValidateSCIMGroupWriteRequest parses, extracts, and validates a SCIM Group POST/PUT request body.
 // It ensures the core Group schema URN is declared and that displayName is non-empty.
-func validateSCIMGroupWriteRequest(body []byte) (*SCIMGroupPayload, *tidcommon.ServiceError) {
+func parseAndValidateSCIMGroupWriteRequest(body []byte) (*SCIMGroupPayload, *tidcommon.ServiceError) {
 	var raw struct {
 		Schemas     []string          `json:"schemas"`
 		DisplayName string            `json:"displayName"`
@@ -210,9 +210,9 @@ func validateSCIMGroupWriteRequest(body []byte) (*SCIMGroupPayload, *tidcommon.S
 // Groups — PATCH validation
 // ---------------------------------------------------------------------------
 
-// validateSCIMGroupPatchRequest parses and validates a SCIM Group PATCH request body,
+// parseAndValidateSCIMGroupPatchRequest parses, extracts, and validates a SCIM Group PATCH request body,
 // returning a normalized list of actions ready to apply (RFC 7644 §3.5.2).
-func validateSCIMGroupPatchRequest(body []byte) ([]SCIMGroupPatchAction, *tidcommon.ServiceError) {
+func parseAndValidateSCIMGroupPatchRequest(body []byte) ([]SCIMGroupPatchAction, *tidcommon.ServiceError) {
 	var req SCIMGroupPatchRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, &ErrorInvalidRequestBody
