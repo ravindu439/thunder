@@ -36,8 +36,10 @@ func TestGetUser_Success(t *testing.T) {
 	}
 	mockUserService.On("GetUser", mock.Anything, "user-123", false).Return(internalUser, (*tidcommon.ServiceError)(nil))
 	mockUserTypeService.On(
+
 		"GetAttributes", mock.Anything, entitytype.TypeCategoryUser, testUserTypeEmployee,
 		entitytype.AttributeFilter{AllowCredential: true, AllowNonCredential: false, RequiredOnly: false},
+
 	).Return([]entitytype.AttributeInfo{{Attribute: "password"}}, (*tidcommon.ServiceError)(nil))
 
 	scimUser, err := service.GetUser(context.Background(), "user-123", testBaseURL)

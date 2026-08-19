@@ -424,6 +424,14 @@ packages:
       pkgname: scim
       filename: "{{.InterfaceName}}_mock_test.go"
 
+  github.com/thunder-id/thunderid/internal/scim:
+    config:
+      all: true
+      dir: internal/scim
+      structname: '{{.InterfaceName}}Mock'
+      pkgname: scim
+      filename: "{{.InterfaceName}}_mock_test.go"
+
   github.com/thunder-id/thunderid/internal/system/resourcedependency:
     config:
       all: true
