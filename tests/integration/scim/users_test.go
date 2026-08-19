@@ -184,8 +184,8 @@ func (ts *SCIMUsersTestSuite) TestCreateAndGetUser() {
 	var fetched map[string]interface{}
 	ts.Require().NoError(json.Unmarshal(body, &fetched))
 	ts.Equal(id, fetched["id"])
-	gotEmail, ok = firstEmailValue(fetched)
-	ts.Require().True(ok)
+	gotEmail, ok = extensionStringValue(fetched, ts.extensionURN, "email")
+	ts.Require().True(ok, "GET response should include the custom-schema email attribute")
 	ts.Equal(email, gotEmail)
 }
 

@@ -59,7 +59,7 @@ func (h *scimGroupsHandler) HandleGroupsCreateRequest(w http.ResponseWriter, r *
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	payload, svcErr := validateSCIMGroupWriteRequest(body)
+	payload, svcErr := parseAndValidateSCIMGroupWriteRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -113,7 +113,7 @@ func (h *scimGroupsHandler) HandleGroupsReplaceRequest(w http.ResponseWriter, r 
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	payload, svcErr := validateSCIMGroupWriteRequest(body)
+	payload, svcErr := parseAndValidateSCIMGroupWriteRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return
@@ -148,7 +148,7 @@ func (h *scimGroupsHandler) HandleGroupsPatchRequest(w http.ResponseWriter, r *h
 		handleSCIMError(w, r, &ErrorInvalidRequestBody)
 		return
 	}
-	actions, svcErr := validateSCIMGroupPatchRequest(body)
+	actions, svcErr := parseAndValidateSCIMGroupPatchRequest(body)
 	if svcErr != nil {
 		handleSCIMError(w, r, svcErr)
 		return

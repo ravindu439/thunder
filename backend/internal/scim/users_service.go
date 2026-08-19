@@ -11,7 +11,6 @@ import (
 
 	"github.com/thunder-id/thunderid/internal/entitytype"
 	scimconfig "github.com/thunder-id/thunderid/internal/scim/config"
-	serverconst "github.com/thunder-id/thunderid/internal/system/constants"
 	"github.com/thunder-id/thunderid/internal/system/log"
 	"github.com/thunder-id/thunderid/internal/system/security"
 	"github.com/thunder-id/thunderid/internal/user"
@@ -31,25 +30,28 @@ type SCIMUsersServiceInterface interface {
 	) (*SCIMUser, *tidcommon.ServiceError)
 	GetUser(ctx context.Context, userID, baseURL string) (*SCIMUser, *tidcommon.ServiceError)
 	ReplaceUser(
-		ctx context.Context, userID string, payload *SCIMUserPayload, ifMatch, baseURL string,
+		ctx context.Context, userID string, payload *SCIMUserPayload, ifMatch, baseURL string, isSelf bool,
 	) (*SCIMUser, *tidcommon.ServiceError)
 	DeleteUser(ctx context.Context, userID string, ifMatch string) *tidcommon.ServiceError
 }
 
 // scimUsersService implements SCIMUsersServiceInterface.
 type scimUsersService struct {
-	userService       user.UserServiceInterface
-	entityTypeService entitytype.EntityTypeServiceInterface
+	userService     user.UserServiceInterface
+	userTypeService entitytype.EntityTypeServiceInterface
+	cfg             scimconfig.SCIMConfig
 }
 
 // newSCIMUsersService creates a new scimUsersService.
 func newSCIMUsersService(
 	userService user.UserServiceInterface,
-	entityTypeService entitytype.EntityTypeServiceInterface,
+	userTypeService entitytype.EntityTypeServiceInterface,
+	cfg scimconfig.SCIMConfig,
 ) SCIMUsersServiceInterface {
 	return &scimUsersService{
-		userService:       userService,
-		entityTypeService: entityTypeService,
+		userService:     userService,
+		userTypeService: userTypeService,
+		cfg:             cfg,
 	}
 }
 
@@ -61,15 +63,26 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 	if startIndex < 1 {
 		startIndex = 1
 	}
-	if count < 1 {
-		count = serverconst.DefaultPageSize
+	if count < 0 {
+		count = 0
+	}
+
+	// GetUserList rejects a limit below 1, so a count of 0 (client wants only
+	// totalResults, no resources per RFC 7644 §3.4.2.4) fetches a single row
+	// and discards it below.
+	fetchLimit := count
+	if fetchLimit == 0 {
+		fetchLimit = 1
 	}
 
 	offset := startIndex - 1
-	listResp, svcErr := s.userService.GetUserList(ctx, count, offset, filters, false)
+	listResp, svcErr := s.userService.GetUserList(ctx, fetchLimit, offset, filters, false)
 	if svcErr != nil {
 		logger.Error(ctx, "SCIM ListUsers: failed to get user list", log.Any("error", svcErr))
 		return SCIMUserListResponse{}, mapUserServiceErrorToSCIM(svcErr)
+	}
+	if count == 0 {
+		return buildSCIMUserListResponse(nil, listResp.TotalResults, startIndex, 0), nil
 	}
 	scimUsers := make([]SCIMUser, 0, len(listResp.Users))
 	credKeysByType := make(map[string]map[string]struct{})
@@ -83,7 +96,7 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 			var svcErr *tidcommon.ServiceError
 			credKeys, svcErr = s.getCredentialKeys(ctx, u.Type)
 			if svcErr != nil {
-				logger.Warn(ctx, "SCIM ListUsers: omitting user with unresolvable entity type",
+				logger.Warn(ctx, "SCIM ListUsers: omitting user with unresolvable user type",
 					log.String("userID", u.ID), log.String("userType", u.Type))
 				unresolvedTypes[u.Type] = struct{}{}
 				continue
@@ -92,7 +105,7 @@ func (s *scimUsersService) ListUsers(ctx context.Context, startIndex, count int,
 		}
 		extensionURN := buildSchemaURN(u.Type)
 		scimUsers = append(scimUsers, buildSCIMUserResource(
-			ctx, u, extensionURN, baseURL, credKeys, scimconfig.ReturnMappedCoreAttrsOnGet))
+			ctx, u, extensionURN, baseURL, credKeys, s.cfg.ReturnMappedCoreAttrsOnGet))
 	}
 
 	return buildSCIMUserListResponse(scimUsers, listResp.TotalResults, startIndex, len(scimUsers)), nil
@@ -116,46 +129,47 @@ func (s *scimUsersService) GetUser(
 	if svcErr != nil {
 		return nil, svcErr
 	}
-	scimUser := buildSCIMUserResource(ctx, *u, extensionURN, baseURL, credKeys, scimconfig.ReturnMappedCoreAttrsOnGet)
+	scimUser := buildSCIMUserResource(ctx, *u, extensionURN, baseURL, credKeys, s.cfg.ReturnMappedCoreAttrsOnGet)
 	return &scimUser, nil
 }
 
-// CreateUser validates the entity type, then delegates to user.UserService.CreateUser.
+// CreateUser validates the user type, then delegates to user.UserService.CreateUser.
 func (s *scimUsersService) CreateUser(
 	ctx context.Context, payload *SCIMUserPayload, baseURL string,
 ) (*SCIMUser, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	runtimeCtx := security.WithRuntimeContext(ctx)
-	var canonicalName string
+	var resolvedUserTypeName string
 	var svcErr *tidcommon.ServiceError
 	if payload.UserTypeName == "" {
-		canonicalName, svcErr = resolveDefaultEntityTypeName(runtimeCtx, s.entityTypeService)
+		resolvedUserTypeName, svcErr = resolveDefaultUserTypeName(runtimeCtx, s.userTypeService)
 		if svcErr != nil {
 			logger.Error(ctx, "SCIM CreateUser: no default user type available", log.Any("error", svcErr))
 			return nil, svcErr
 		}
 	} else {
-		canonicalName, svcErr = resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
-		if svcErr != nil || canonicalName == "" {
-			logger.Error(ctx, "SCIM CreateUser: entity type not found",
+		resolvedUserTypeName, svcErr = resolveUserTypeNameForSchemaURN(
+			runtimeCtx, s.userTypeService, payload.UserTypeName)
+		if svcErr != nil || resolvedUserTypeName == "" {
+			logger.Error(ctx, "SCIM CreateUser: user type not found",
 				log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
 			return nil, &ErrorUnknownUserType
 		}
 	}
 
-	et, svcErr := s.entityTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, canonicalName)
+	et, svcErr := s.userTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, resolvedUserTypeName)
 
 	if svcErr != nil {
-		logger.Error(ctx, "SCIM CreateUser: entity type not found",
-			log.String("userTypeName", canonicalName), log.Any("error", svcErr))
+		logger.Error(ctx, "SCIM CreateUser: user type not found",
+			log.String("userTypeName", resolvedUserTypeName), log.Any("error", svcErr))
 		return nil, &ErrorUnknownUserType
 	}
 
 	if len(payload.CoreAttrs) > 0 {
 		reverseMapped, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
 		if err != nil {
-			logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+			logger.Error(ctx, "SCIM CreateUser: failed to parse user type schema", log.Error(err))
 			return nil, &ErrorInternalServer
 		}
 		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
@@ -166,23 +180,23 @@ func (s *scimUsersService) CreateUser(
 	}
 	missing, err := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, false)
 	if err != nil {
-		logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+		logger.Error(ctx, "SCIM CreateUser: failed to parse user type schema", log.Error(err))
 		return nil, &ErrorInternalServer
 	}
 	if len(missing) > 0 {
 		logger.Debug(ctx, "SCIM CreateUser: missing required attributes for user type",
-			log.String("userType", canonicalName), log.Any("missing", missing))
-		return nil, newMissingRequiredAttributesError(canonicalName, missing)
+			log.String("userType", resolvedUserTypeName), log.Any("missing", missing))
+		return nil, newMissingRequiredAttributesError(resolvedUserTypeName, missing)
 	}
 	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, et.Schema)
 	if err != nil {
-		logger.Error(ctx, "SCIM CreateUser: failed to parse entity type schema", log.Error(err))
+		logger.Error(ctx, "SCIM CreateUser: failed to parse user type schema", log.Error(err))
 		return nil, &ErrorInternalServer
 	}
 	if len(undeclared) > 0 {
 		logger.Debug(ctx, "SCIM CreateUser: undeclared attributes for user type",
-			log.String("userType", canonicalName), log.Any("undeclared", undeclared))
-		return nil, newUndeclaredAttributesError(canonicalName, undeclared)
+			log.String("userType", resolvedUserTypeName), log.Any("undeclared", undeclared))
+		return nil, newUndeclaredAttributesError(resolvedUserTypeName, undeclared)
 	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {
@@ -191,7 +205,7 @@ func (s *scimUsersService) CreateUser(
 	}
 	newUser := &user.User{
 		OUID:       et.OUID,
-		Type:       canonicalName,
+		Type:       resolvedUserTypeName,
 		Attributes: attrsJSON,
 	}
 
@@ -201,7 +215,7 @@ func (s *scimUsersService) CreateUser(
 		return nil, mapUserServiceErrorToSCIM(svcErr)
 	}
 	extensionURN := buildSchemaURN(created.Type)
-	credKeys, svcErr := s.getCredentialKeys(ctx, canonicalName)
+	credKeys, svcErr := s.getCredentialKeys(ctx, resolvedUserTypeName)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -209,9 +223,11 @@ func (s *scimUsersService) CreateUser(
 	return &scimUser, nil
 }
 
-// ReplaceUser performs a full PUT replace on the user.
+// ReplaceUser performs a full PUT replace on the user. isSelf marks a
+// self-service caller (SCIM /Me), whose type and OU are already pinned to
+// their existing values below, so only attributes are ever mutated for them.
 func (s *scimUsersService) ReplaceUser(
-	ctx context.Context, userID string, payload *SCIMUserPayload, ifMatch, baseURL string,
+	ctx context.Context, userID string, payload *SCIMUserPayload, ifMatch, baseURL string, isSelf bool,
 ) (*SCIMUser, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
@@ -233,32 +249,33 @@ func (s *scimUsersService) ReplaceUser(
 	// The user's type is immutable, so an omitted extension URN defaults to the
 	// existing type rather than being treated as ambiguous. A supplied URN must
 	// still match the existing type.
-	canonicalName := existingUser.Type
+	resolvedUserTypeName := existingUser.Type
 	if payload.UserTypeName != "" {
-		resolvedName, svcErr := resolveEntityTypeNameForSchemaURN(runtimeCtx, s.entityTypeService, payload.UserTypeName)
-		if svcErr != nil || resolvedName == "" {
-			logger.Error(runtimeCtx, "SCIM ReplaceUser: entity type not found",
+		requestedUserTypeName, svcErr := resolveUserTypeNameForSchemaURN(
+			runtimeCtx, s.userTypeService, payload.UserTypeName)
+		if svcErr != nil || requestedUserTypeName == "" {
+			logger.Error(runtimeCtx, "SCIM ReplaceUser: user type not found",
 				log.String("userTypeName", payload.UserTypeName), log.Any("error", svcErr))
 			return nil, &ErrorUnknownUserType
 		}
-		if resolvedName != existingUser.Type {
+		if requestedUserTypeName != existingUser.Type {
 			logger.Error(ctx, "SCIM ReplaceUser: user type mismatch",
 				log.String("userID", userID), log.String("existingType", existingUser.Type),
-				log.String("requestedType", resolvedName))
+				log.String("requestedType", requestedUserTypeName))
 			return nil, &ErrorImmutableUserType
 		}
 	}
 
-	et, svcErr := s.entityTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, canonicalName)
+	et, svcErr := s.userTypeService.GetEntityTypeByName(runtimeCtx, entitytype.TypeCategoryUser, resolvedUserTypeName)
 	if svcErr != nil {
-		logger.Error(runtimeCtx, "SCIM ReplaceUser: entity type not found",
-			log.String("userTypeName", canonicalName), log.Any("error", svcErr))
+		logger.Error(runtimeCtx, "SCIM ReplaceUser: user type not found",
+			log.String("userTypeName", resolvedUserTypeName), log.Any("error", svcErr))
 		return nil, &ErrorUnknownUserType
 	}
 	if len(payload.CoreAttrs) > 0 {
 		reverseMapped, err := reverseMapCoreAttrsForSchema(payload.CoreAttrs, et.Schema)
 		if err != nil {
-			logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+			logger.Error(ctx, "SCIM ReplaceUser: failed to parse user type schema", log.Error(err))
 			return nil, &ErrorInternalServer
 		}
 		if svcErr := mergeReverseMappedCoreAttrs(payload.ExtensionAttrs, reverseMapped); svcErr != nil {
@@ -269,36 +286,46 @@ func (s *scimUsersService) ReplaceUser(
 	}
 	missing, err := missingRequiredAttrs(payload.ExtensionAttrs, et.Schema, true)
 	if err != nil {
-		logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+		logger.Error(ctx, "SCIM ReplaceUser: failed to parse user type schema", log.Error(err))
 		return nil, &ErrorInternalServer
 	}
 	if len(missing) > 0 {
 		logger.Debug(ctx, "SCIM ReplaceUser: missing required attributes for user type",
-			log.String("userType", canonicalName), log.Any("missing", missing))
-		return nil, newMissingRequiredAttributesError(canonicalName, missing)
+			log.String("userType", resolvedUserTypeName), log.Any("missing", missing))
+		return nil, newMissingRequiredAttributesError(resolvedUserTypeName, missing)
 	}
 	undeclared, err := undeclaredAttrs(payload.ExtensionAttrs, et.Schema)
 	if err != nil {
-		logger.Error(ctx, "SCIM ReplaceUser: failed to parse entity type schema", log.Error(err))
+		logger.Error(ctx, "SCIM ReplaceUser: failed to parse user type schema", log.Error(err))
 		return nil, &ErrorInternalServer
 	}
 	if len(undeclared) > 0 {
 		logger.Debug(ctx, "SCIM ReplaceUser: undeclared attributes for user type",
-			log.String("userType", canonicalName), log.Any("undeclared", undeclared))
-		return nil, newUndeclaredAttributesError(canonicalName, undeclared)
+			log.String("userType", resolvedUserTypeName), log.Any("undeclared", undeclared))
+		return nil, newUndeclaredAttributesError(resolvedUserTypeName, undeclared)
 	}
 	attrsJSON, err := json.Marshal(payload.ExtensionAttrs)
 	if err != nil {
 		logger.Error(ctx, "SCIM ReplaceUser: failed to marshal extension attrs", log.Error(err))
 		return nil, &ErrorInvalidRequestBody
 	}
-	updatedUser := &user.User{
-		ID:         userID,
-		OUID:       et.OUID,
-		Type:       canonicalName,
-		Attributes: attrsJSON,
+	var result *user.User
+	if isSelf {
+		// Self-service replace: type and OU can't change (enforced above), so this
+		// goes through the same attribute-only update path as native /users/me,
+		// skipping user.UpdateUser's OU/type validation. That validation requires
+		// system:usertype:view with no self-access bypass, so self-service callers
+		// would otherwise hit it and fail.
+		result, svcErr = s.userService.UpdateUserAttributes(ctx, userID, attrsJSON)
+	} else {
+		updatedUser := &user.User{
+			ID:         userID,
+			OUID:       et.OUID,
+			Type:       resolvedUserTypeName,
+			Attributes: attrsJSON,
+		}
+		result, svcErr = s.userService.UpdateUser(ctx, userID, updatedUser)
 	}
-	result, svcErr := s.userService.UpdateUser(ctx, userID, updatedUser)
 	if svcErr != nil {
 		logger.Error(ctx, "SCIM ReplaceUser: user service error",
 			log.String("userID", userID), log.Any("error", svcErr))
@@ -306,7 +333,7 @@ func (s *scimUsersService) ReplaceUser(
 	}
 
 	extensionURN := buildSchemaURN(result.Type)
-	credKeys, svcErr := s.getCredentialKeys(ctx, canonicalName)
+	credKeys, svcErr := s.getCredentialKeys(ctx, resolvedUserTypeName)
 	if svcErr != nil {
 		return nil, svcErr
 	}
@@ -341,17 +368,17 @@ func (s *scimUsersService) DeleteUser(ctx context.Context, userID string, ifMatc
 
 // getCredentialKeys returns a set of attribute names that represent credentials for the given user type.
 func (s *scimUsersService) getCredentialKeys(
-	ctx context.Context, canonicalName string,
+	ctx context.Context, resolvedUserTypeName string,
 ) (map[string]struct{}, *tidcommon.ServiceError) {
 	logger := log.GetLogger().With(log.String(log.LoggerKeyComponentName, usersServiceLoggerComponentName))
 
 	credKeys := make(map[string]struct{})
 	// Use elevated runtime context if necessary, but we are just reading schema info.
-	credentialInfos, err := s.entityTypeService.GetAttributes(security.WithRuntimeContext(ctx),
-		entitytype.TypeCategoryUser, canonicalName, true, false, false)
+	credentialInfos, err := s.userTypeService.GetAttributes(security.WithRuntimeContext(ctx),
+		entitytype.TypeCategoryUser, resolvedUserTypeName, true, false, false)
 	if err != nil {
 		logger.Error(ctx, "SCIM: failed to resolve credential attribute keys",
-			log.String("userType", canonicalName), log.Any("error", err))
+			log.String("userType", resolvedUserTypeName), log.Any("error", err))
 		return nil, &ErrorInternalServer
 	}
 	for _, info := range credentialInfos {

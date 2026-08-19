@@ -182,30 +182,37 @@ func handleSCIMError(w http.ResponseWriter, r *http.Request, svcErr *tidcommon.S
 // parseSCIMPaginationQueryParams extracts and clamps startIndex and count query parameters
 // per RFC 7644 §3.4.2.4.
 func parseSCIMPaginationQueryParams(r *http.Request) (int, int) {
-	startIndex, count := 1, constants.DefaultPageSize
+	startIndex := 1
 	if v := strings.TrimSpace(r.URL.Query().Get("startIndex")); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			startIndex = n
 		}
 	}
+	var count *int
 	if v := strings.TrimSpace(r.URL.Query().Get("count")); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			count = n
+		if n, err := strconv.Atoi(v); err == nil {
+			count = &n
 		}
 	}
 	return normalizeSCIMPagination(startIndex, count)
 }
 
-// normalizeSCIMPagination clamps integer startIndex and count parameters per RFC 7644 §3.4.2.4.
-func normalizeSCIMPagination(startIndex, count int) (int, int) {
+// normalizeSCIMPagination clamps startIndex and count per RFC 7644 §3.4.2.4. A nil count means
+// count was not specified, and falls back to the default page size; a negative count is
+// interpreted as 0 (no resources, totalResults only), matching an explicit 0.
+func normalizeSCIMPagination(startIndex int, count *int) (int, int) {
 	if startIndex < 1 {
 		startIndex = 1
 	}
-	if count < 1 {
-		count = constants.DefaultPageSize
+	resolvedCount := constants.DefaultPageSize
+	if count != nil {
+		resolvedCount = *count
+		if resolvedCount < 0 {
+			resolvedCount = 0
+		}
 	}
-	if count > scimconfig.FilterMaxResults {
-		count = scimconfig.FilterMaxResults
+	if resolvedCount > scimconfig.FilterMaxResults {
+		resolvedCount = scimconfig.FilterMaxResults
 	}
-	return startIndex, count
+	return startIndex, resolvedCount
 }

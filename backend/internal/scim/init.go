@@ -22,14 +22,14 @@ var scimServerStartTime = time.Now().UTC().Format(time.RFC3339)
 func Initialize(
 	mux *http.ServeMux,
 	userService user.UserServiceInterface,
-	entityTypeService entitytype.EntityTypeServiceInterface,
+	userTypeService entitytype.EntityTypeServiceInterface,
 	groupService group.GroupServiceInterface,
 	cfg scimconfig.SCIMConfig,
 ) {
-	svc := newSCIMDiscoveryService(entityTypeService, cfg)
+	svc := newSCIMDiscoveryService(userTypeService, cfg)
 	h := newSCIMDiscoveryHandler(svc, cfg.PublicURL)
 
-	uSvc := newSCIMUsersService(userService, entityTypeService)
+	uSvc := newSCIMUsersService(userService, userTypeService, cfg)
 	uh := newSCIMUsersHandler(uSvc, cfg.PublicURL)
 
 	gSvc := newSCIMGroupsService(groupService)
