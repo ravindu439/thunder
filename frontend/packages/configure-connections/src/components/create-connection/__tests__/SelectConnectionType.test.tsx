@@ -9,13 +9,14 @@ describe('SelectConnectionType', () => {
   const onSelect = vi.fn();
   beforeEach(() => vi.clearAllMocks());
 
-  it('renders the OIDC, OAuth2, trusted-idp, and SMS gateway options', () => {
+  it('renders the OIDC, OAuth2, trusted-idp, SCIM inbound, and SMS gateway options', () => {
     render(<SelectConnectionType selectedType={null} onSelect={onSelect} />);
     expect(screen.getByText('What kind of connection do you want to add?')).toBeInTheDocument();
     expect(screen.queryByText('Connection type')).not.toBeInTheDocument();
     expect(screen.getByTestId('connection-type-option-oidc')).toBeInTheDocument();
     expect(screen.getByTestId('connection-type-option-oauth')).toBeInTheDocument();
     expect(screen.getByTestId('connection-type-option-trusted-idp')).toBeInTheDocument();
+    expect(screen.getByTestId('connection-type-option-scim-inbound')).toBeInTheDocument();
     expect(screen.getByTestId('connection-type-option-sms-gateway')).toBeInTheDocument();
   });
 
@@ -41,6 +42,12 @@ describe('SelectConnectionType', () => {
     render(<SelectConnectionType selectedType={null} onSelect={onSelect} />);
     fireEvent.click(screen.getByTestId('connection-type-option-trusted-idp'));
     expect(onSelect).toHaveBeenCalledWith('trusted-idp');
+  });
+
+  it('selects the SCIM inbound provisioning type when clicked', () => {
+    render(<SelectConnectionType selectedType={null} onSelect={onSelect} />);
+    fireEvent.click(screen.getByTestId('connection-type-option-scim-inbound'));
+    expect(onSelect).toHaveBeenCalledWith('scim-inbound');
   });
 
   it('selects a type when Enter is pressed', () => {

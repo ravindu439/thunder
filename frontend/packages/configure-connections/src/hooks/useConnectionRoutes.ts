@@ -27,6 +27,9 @@ export interface ConnectionRoutePaths {
   trustedIssuers: {
     detail: (id: string) => string;
   };
+  scimConnections: {
+    detail: (id: string) => string;
+  };
 }
 
 /**
@@ -45,6 +48,9 @@ export const defaultConnectionRoutePaths: ConnectionRoutePaths = {
   trustedIssuers: {
     detail: (id) => `/trusted-issuers/${id}`,
   },
+  scimConnections: {
+    detail: (id) => `/scim-connections/${id}`,
+  },
 };
 
 /**
@@ -61,5 +67,6 @@ export default function useConnectionRoutes(): ConnectionRoutePaths {
   return {
     connections: routes.connections ?? defaultConnectionRoutePaths.connections,
     trustedIssuers: routes.trustedIssuers ?? defaultConnectionRoutePaths.trustedIssuers,
+    scimConnections: routes.scimConnections ?? defaultConnectionRoutePaths.scimConnections,
   };
 }

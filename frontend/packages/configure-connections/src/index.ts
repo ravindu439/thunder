@@ -12,6 +12,12 @@ export {default as useDeleteConnection} from './api/useDeleteConnection';
 export {default as useIdentityProviders} from './api/useIdentityProviders';
 export {default as useSMSProviders} from './api/useSMSProviders';
 export {default as useUpdateConnection} from './api/useUpdateConnection';
+export {default as useScimConnections} from './api/useScimConnections';
+export {default as useScimConnection} from './api/useScimConnection';
+export {default as useCreateScimConnection} from './api/useCreateScimConnection';
+export {default as useDeleteScimConnection} from './api/useDeleteScimConnection';
+export {default as useUpdateScimConnection} from './api/useUpdateScimConnection';
+export type {ScimConnectionUpdateInput} from './api/useUpdateScimConnection';
 
 // Components
 export {default as AddCustomConnectionCard} from './components/AddCustomConnectionCard';
@@ -26,6 +32,8 @@ export {default as KeyValuePairsField} from './components/KeyValuePairsField';
 export {default as MaskedSecretField} from './components/MaskedSecretField';
 export {default as ReadOnlyCopyField} from './components/ReadOnlyCopyField';
 export {default as SelectConnectionType} from './components/create-connection/SelectConnectionType';
+export {default as ScimAttributeMappingTable} from './components/scim/ScimAttributeMappingTable';
+export {default as ScimConnectionCreateForm} from './components/scim/ScimConnectionCreateForm';
 
 // Config
 export * from './config/connectionFormFields';
@@ -35,6 +43,7 @@ export * from './config/connectionVendorMeta';
 export {default as ConnectionConstants} from './constants/connection-constants';
 export {default as ConnectionQueryKeys} from './constants/query-keys';
 export * from './constants/connection-categories';
+export * from './constants/scim-field-catalog';
 
 // Models
 export * from './models/authenticators';
@@ -42,6 +51,7 @@ export * from './models/connection';
 export * from './models/identity-provider';
 export * from './models/requests';
 export * from './models/responses';
+export * from './models/scim-connection';
 
 // Pages
 export {default as ConnectionConfigureWizardPage} from './pages/ConnectionConfigureWizardPage';
@@ -49,6 +59,7 @@ export {default as ConnectionCreateWizardPage} from './pages/ConnectionCreateWiz
 export {default as ConnectionDetailPage} from './pages/ConnectionDetailPage';
 export {default as ConnectionsListPage} from './pages/ConnectionsListPage';
 export {default as TrustedIssuerDetailPage} from './pages/TrustedIssuerDetailPage';
+export {default as ScimConnectionDetailPage} from './pages/ScimConnectionDetailPage';
 
 // Routes
 export type {ConnectionRoutePaths} from './hooks/useConnectionRoutes';
@@ -57,6 +68,7 @@ export {defaultConnectionRoutePaths, default as useConnectionRoutes} from './hoo
 // Utils
 export * from './utils/attributeConfiguration';
 export {default as buildConnectionCards} from './utils/buildConnectionCards';
+export {default as buildScimConnectionCards} from './utils/buildScimConnectionCards';
 export * from './utils/connectionFormMapping';
 export {default as getConnectionIcon} from './utils/getConnectionIcon';
 export {default as isConflictError} from './utils/isConflictError';

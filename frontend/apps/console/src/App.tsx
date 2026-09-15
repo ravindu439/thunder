@@ -125,6 +125,9 @@ const SettingsPage = lazy(() => import('@thunderid/configure-settings').then((m)
 const TrustedIssuerDetailPage = lazy(() =>
   import('@thunderid/configure-connections').then((m) => ({default: m.TrustedIssuerDetailPage})),
 );
+const ScimConnectionDetailPage = lazy(() =>
+  import('@thunderid/configure-connections').then((m) => ({default: m.ScimConnectionDetailPage})),
+);
 const VerifiablePresentationsListPage = lazy(() =>
   import('@thunderid/configure-verifiable-credentials').then((m) => ({default: m.VerifiablePresentationsListPage})),
 );
@@ -186,6 +189,7 @@ export default function App(): JSX.Element {
                   element={<Navigate to={RouteConfig.connections.list()} replace />}
                 />
                 <Route path={`${ROUTE_SEGMENTS.trustedIssuers}/:id`} element={<TrustedIssuerDetailPage />} />
+                <Route path={`${ROUTE_SEGMENTS.scimConnections}/:id`} element={<ScimConnectionDetailPage />} />
                 <Route path={ROUTE_SEGMENTS.groups} element={<GroupsListPage />} />
                 <Route path={`${ROUTE_SEGMENTS.groups}/:groupId`} element={<GroupEditPage />} />
                 <Route path={ROUTE_SEGMENTS.roles} element={<RolesListPage />} />

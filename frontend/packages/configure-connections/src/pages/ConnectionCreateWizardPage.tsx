@@ -15,6 +15,7 @@ import ConnectionNameStep from '../components/create-connection/ConnectionNameSt
 import SelectConnectionType, {
   type SelectableConnectionType,
 } from '../components/create-connection/SelectConnectionType';
+import ScimConnectionCreateForm from '../components/scim/ScimConnectionCreateForm';
 import TrustedIssuerCreateForm from '../components/TrustedIssuerCreateForm';
 import {CONNECTION_FORM_FIELDS, fieldsForMode} from '../config/connectionFormFields';
 import {VENDOR_META_BY_TYPE} from '../config/connectionVendorMeta';
@@ -51,12 +52,13 @@ export default function ConnectionCreateWizardPage(): JSX.Element {
   const [generalError, setGeneralError] = useState<string | null>(null);
 
   const isTrustedIdp: boolean = selectedType === 'trusted-idp';
+  const isScimInbound: boolean = selectedType === 'scim-inbound';
 
-  // Defaults to OIDC before the user picks a type on the first step; the trusted-idp pseudo-type
-  // renders via TrustedIssuerCreateForm instead, so this is only read when rendering the generic
-  // configure step.
+  // Defaults to OIDC before the user picks a type on the first step; the trusted-idp and
+  // scim-inbound pseudo-types render via their own dedicated forms instead, so this is only read
+  // when rendering the generic configure step.
   const activeType: ConnectionType =
-    selectedType && selectedType !== 'trusted-idp' ? selectedType : ConnectionTypes.OIDC;
+    selectedType && selectedType !== 'trusted-idp' && selectedType !== 'scim-inbound' ? selectedType : ConnectionTypes.OIDC;
   const createMutation = useCreateConnection(activeType);
   const meta = VENDOR_META_BY_TYPE[activeType];
   const fields = CONNECTION_FORM_FIELDS[activeType];
@@ -151,8 +153,8 @@ export default function ConnectionCreateWizardPage(): JSX.Element {
         </Box>
       );
     }
-    // The trusted-idp step renders its own Back + submit footer (see TrustedIssuerCreateForm).
-    if (isTrustedIdp) {
+    // The trusted-idp and SCIM-inbound steps render their own Back + submit footer.
+    if (isTrustedIdp || isScimInbound) {
       return null;
     }
     return (
@@ -196,7 +198,15 @@ export default function ConnectionCreateWizardPage(): JSX.Element {
         />
       )}
 
-      {step === Step.CONFIGURE && !isTrustedIdp && (
+      {step === Step.CONFIGURE && isScimInbound && (
+        <ScimConnectionCreateForm
+          name={trimmedName}
+          onNameConflict={bounceToNameStep}
+          onBack={() => setStep(Step.NAME)}
+        />
+      )}
+
+      {step === Step.CONFIGURE && !isTrustedIdp && !isScimInbound && (
         <Stack direction="column" spacing={3}>
           <Stack direction="column" spacing={1}>
             <Typography variant="h1" gutterBottom>

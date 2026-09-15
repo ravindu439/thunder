@@ -13,7 +13,7 @@ import {type ConnectionType, ConnectionTypes} from '../../models/connection';
  * OIDC connection through the dedicated trusted-issuer form rather than the generic
  * `ConnectionForm`.
  */
-export type SelectableConnectionType = ConnectionType | 'trusted-idp';
+export type SelectableConnectionType = ConnectionType | 'trusted-idp' | 'scim-inbound';
 
 interface SelectConnectionTypeProps {
   selectedType: SelectableConnectionType | null;
@@ -66,6 +66,17 @@ export default function SelectConnectionType({selectedType, onSelect}: SelectCon
       descriptionDefault: "Trust an external IdP's identity assertions and exchange them for access tokens.",
       tagKey: 'wizard.type.trustedIdp.tag',
       tagDefault: 'Token exchange · ID-JAG',
+      icon: <ShieldCheck size={28} />,
+      comingSoon: false,
+    },
+    {
+      type: 'scim-inbound',
+      labelKey: 'wizard.type.scimInbound.label',
+      labelDefault: 'SCIM Inbound Provisioning',
+      descriptionKey: 'wizard.type.scimInbound.description',
+      descriptionDefault: 'Let an external identity provider push and manage users through SCIM 2.0.',
+      tagKey: 'wizard.type.scimInbound.tag',
+      tagDefault: 'Provisioning · Enterprise',
       icon: <ShieldCheck size={28} />,
       comingSoon: false,
     },

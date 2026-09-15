@@ -105,6 +105,7 @@ export const ROUTE_SEGMENTS = {
   agents: 'agents',
   connections: 'connections',
   trustedIssuers: 'trusted-issuers',
+  scimConnections: 'scim-connections',
   resourceServers: 'resource-servers',
   translations: 'translations',
   home: 'home',
@@ -156,6 +157,9 @@ const RouteConfig: RouteConfig = {
   },
   trustedIssuers: {
     detail: (id) => `/${ROUTE_SEGMENTS.trustedIssuers}/${id}`,
+  },
+  scimConnections: {
+    detail: (id) => `/${ROUTE_SEGMENTS.scimConnections}/${id}`,
   },
   resourceServers: {
     list: () => `/${ROUTE_SEGMENTS.resourceServers}`,

@@ -11,10 +11,12 @@ import AddCustomConnectionCard from './AddCustomConnectionCard';
 import ConnectionCard from './ConnectionCard';
 import ConnectionCategoryFilters, {type CategoryFilterValue} from './ConnectionCategoryFilters';
 import useConnections from '../api/useConnections';
+import useScimConnections from '../api/useScimConnections';
 import {CONNECTION_VENDOR_META, getAvailableConnectionCategories} from '../config/connectionVendorMeta';
 import useConnectionRoutes from '../hooks/useConnectionRoutes';
 import type {ConnectionCardModel, ConnectionCategory} from '../models/connection';
 import buildConnectionCards from '../utils/buildConnectionCards';
+import buildScimConnectionCards from '../utils/buildScimConnectionCards';
 
 const SKELETON_COUNT = 6;
 
@@ -27,10 +29,14 @@ export default function ConnectionsList(): JSX.Element {
   const [category, setCategory] = useState<CategoryFilterValue>('all');
 
   const connectionsQuery = useConnections();
+  const scimConnectionsQuery = useScimConnections();
 
   const cards: ConnectionCardModel[] = useMemo(
-    () => buildConnectionCards(connectionsQuery.data?.connections ?? [], CONNECTION_VENDOR_META, routes),
-    [connectionsQuery.data?.connections, routes],
+    () => [
+      ...buildConnectionCards(connectionsQuery.data?.connections ?? [], CONNECTION_VENDOR_META, routes),
+      ...buildScimConnectionCards(scimConnectionsQuery.data ?? [], routes),
+    ],
+    [connectionsQuery.data?.connections, scimConnectionsQuery.data, routes],
   );
 
   const availableCategories: ConnectionCategory[] = useMemo(() => getAvailableConnectionCategories(cards), [cards]);
